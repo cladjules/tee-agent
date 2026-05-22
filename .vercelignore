@@ -1,0 +1,10 @@
+contracts/
+.git/
+README.md
+LICENSE
+OVERVIEW.md
+node_modules/
+.turbo/
+.next/
+dist/
+coverage/

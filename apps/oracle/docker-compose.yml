@@ -1,0 +1,21 @@
+# TEE Re-encryption Oracle — Phala Cloud Deployment
+#
+# Deploy to Phala Cloud at https://cloud.phala.com
+# The /var/run/dstack.sock volume binding is required for the dstack SDK
+# to access the Intel TDX enclave key management service.
+#
+# After deployment, query GET /address to get the oracle's Ethereum address
+# and register it once via TEEVerifier.updateOracleAddress(address).
+
+services:
+  oracle:
+    build: .
+    image: open-agents-oracle:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - /var/run/tappd.sock:/var/run/tappd.sock
+    restart: unless-stopped

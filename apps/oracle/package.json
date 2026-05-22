@@ -1,0 +1,30 @@
+{
+  "name": "@open-agents-toolkit/oracle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TEE re-encryption oracle server for ERC-7857 AgentNFT secure transfers, deployed to Phala Cloud (Intel TDX)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "docker start tappd-sim 2>/dev/null || docker run -d -p 8090:8090 --name tappd-sim phalanetwork/tappd-simulator:latest && sleep 1 && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-ts-sdk": "^1.2.8",
+    "@open-agents-toolkit/agent": "*",
+    "@phala/dstack-sdk": "^0.1.5",
+    "eciesjs": "^0.4.16",
+    "ethers": "6.13.1",
+    "express": "^4.21.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.19.4",
+    "typescript": "^6.0.3"
+  }
+}

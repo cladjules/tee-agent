@@ -1,0 +1,38 @@
+{
+  "name": "open-agents-toolkit",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.13.0",
+  "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
+  "workspaces": [
+    "apps/dashboard",
+    "apps/oracle",
+    "contracts",
+    "packages/agent"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean",
+    "format": "prettier --write \"**/*.{ts,tsx,sol,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,sol,json,md}\"",
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.0",
+    "@turbo/gen": "^2.9.7",
+    "prettier": "^3.8.3",
+    "prettier-plugin-solidity": "^2.3.1",
+    "turbo": "^2.9.7"
+  },
+  "overrides": {
+    "@noble/hashes": "^1.8.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

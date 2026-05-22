@@ -1,0 +1,37 @@
+{
+  "name": "@open-agents-toolkit/contracts",
+  "version": "0.1.0",
+  "description": "Solidity contracts for the open-agents-toolkit (ERC-8004, ERC-7857)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build && node scripts/gen-abis.mjs",
+    "test": "hardhat test",
+    "test:node": "hardhat test nodejs",
+    "clean": "hardhat clean",
+    "node": "hardhat node",
+    "deploy:local": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network localhost --reset",
+    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --parameters ignition/parameters.baseSepolia.json",
+    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --parameters ignition/parameters.base.json",
+    "setOracle:baseSepolia": "yes | hardhat ignition deploy ignition/modules/SetOracle.ts --network baseSepolia --reset --parameters ignition/parameters.baseSepolia.json",
+    "setOracle:base": "yes | hardhat ignition deploy ignition/modules/SetOracle.ts --network base --reset --parameters ignition/parameters.base.json",
+    "e2e:local": "node --import tsx scripts/e2e.ts local",
+    "e2e:baseSepolia": "node --import tsx scripts/e2e.ts baseSepolia",
+    "setup-env": "node scripts/setup-env.mjs",
+    "setup-env:baseSepolia": "node scripts/setup-env.mjs 84532",
+    "setup-env:base": "node scripts/setup-env.mjs 8453"
+  },
+  "devDependencies": {
+    "@open-agents-toolkit/agent": "file:../packages/agent",
+    "@nomicfoundation/hardhat-ignition": "^3.1.4",
+    "@nomicfoundation/hardhat-toolbox-viem": "^5.0.4",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@types/node": "^25.6.0",
+    "dotenv": "^17.4.2",
+    "ethers": "6.16.0",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.4",
+    "hardhat": "^3.4.3",
+    "typescript": "^6.0.3",
+    "viem": "^2.48.7"
+  }
+}
