@@ -20,7 +20,11 @@ import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";
 import { ethers } from "ethers";
 import { RegistryError } from "./types.js";
 import type { Hex } from "viem";
-import { encryptIntelligentData } from "./encryption.js";
+import {
+  encryptMetadata,
+  generateContentKey,
+  hashEncryptedBlob,
+} from "./encryption.js";
 import type { AgentNFTEncryptedData } from "./types.js";
 
 // ─── Default endpoints ────────────────────────────────────────────────────────
@@ -172,37 +176,43 @@ export class ZeroGStorageClient {
 // ─── High-level helper ────────────────────────────────────────────────────────
 
 /**
- * Encrypt private agent data and upload each blob to 0G Storage.
+ * Encrypt private agent data entries and upload each blob to 0G Storage.
  * Returns AgentNFTEncryptedData[] with `zerog://` URIs instead of data URIs.
+ *
+ * Each entry becomes one independently encrypted blob. All blobs share a
+ * single content key (AES-256-GCM) that is ECIES-wrapped with the TEE public key.
  */
 export async function uploadEncryptedIntelligentData(params: {
-  systemPrompt: string;
-  characterDef: string;
+  entries: Array<{ name: string; data: string }>;
   keyEncryptionPublicKey: Hex;
   zeroGPrivateKey: string;
   rpcUrl?: string;
   indexerUrl?: string;
 }): Promise<AgentNFTEncryptedData[]> {
+  const nonEmpty = params.entries.filter((e) => e.name.trim() && e.data.trim());
+  if (nonEmpty.length === 0) return [];
+
   const client = new ZeroGStorageClient({
     privateKey: params.zeroGPrivateKey,
     ...(params.rpcUrl !== undefined && { rpcUrl: params.rpcUrl }),
     ...(params.indexerUrl !== undefined && { indexerUrl: params.indexerUrl }),
   });
 
-  // Encrypt in-memory first (returns data: URIs)
-  const encrypted = await encryptIntelligentData({
-    systemPrompt: params.systemPrompt,
-    characterDef: params.characterDef,
-    keyEncryptionPublicKey: params.keyEncryptionPublicKey,
-  });
-
-  // Upload each blob to 0G Storage, replacing the data URI with zerog:// URI
+  const contentKey = generateContentKey();
   const result: AgentNFTEncryptedData[] = [];
-  for (const item of encrypted) {
-    const base64 = item.uri.split(",")[1] ?? "";
-    const bytes = Buffer.from(base64, "base64");
+
+  for (const entry of nonEmpty) {
+    const encryptedBlob = encryptMetadata(
+      entry.name.trim(),
+      entry.data,
+      contentKey,
+      params.keyEncryptionPublicKey,
+    );
+    const hash = await hashEncryptedBlob(encryptedBlob);
+    const blobJson = JSON.stringify(encryptedBlob);
+    const bytes = Buffer.from(blobJson);
     const { url } = await client.uploadBytes(bytes);
-    result.push({ name: item.name, uri: url, hash: item.hash });
+    result.push({ name: entry.name.trim(), uri: url, hash });
   }
   return result;
 }

@@ -14,13 +14,20 @@ const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "baseSepolia") as
 export const APP_CHAIN: Chain = NETWORK === "base" ? base : baseSepolia;
 
 /**
- * Official ERC-8004 singletons — deployed at the same address on every chain
- * via deterministic CREATE2.
+ * Official ERC-8004 singletons (Identity + Reputation only — we deploy our own ValidationRegistry).
+ * Mainnet (Base):         identity 0x8004A169…  reputation 0x8004BAa1…
+ * Testnets (Base Sepolia): identity 0x8004A818…  reputation 0x8004B663…
  */
-const IDENTITY_REGISTRY_ADDRESS =
-  "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" as `0x${string}`;
-const REPUTATION_REGISTRY_ADDRESS =
-  "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63" as `0x${string}`;
+const IDENTITY_REGISTRY_ADDRESS = (
+  NETWORK === "base"
+    ? "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    : "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+) as `0x${string}`;
+const REPUTATION_REGISTRY_ADDRESS = (
+  NETWORK === "base"
+    ? "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
+    : "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+) as `0x${string}`;
 
 export const cfg = {
   network: NETWORK,
@@ -32,6 +39,7 @@ export const cfg = {
   /** Official ERC-8004 Reputation Registry. Override via REPUTATION_REGISTRY_ADDRESS if needed. */
   reputationAddress: (process.env.REPUTATION_REGISTRY_ADDRESS ??
     REPUTATION_REGISTRY_ADDRESS) as `0x${string}`,
+  /** Deployed ValidationRegistry (our own deployment, set via VALIDATION_REGISTRY_ADDRESS). */
   validationAddress: process.env.VALIDATION_REGISTRY_ADDRESS as
     | `0x${string}`
     | undefined,
@@ -40,10 +48,8 @@ export const cfg = {
     | undefined,
   rpcUrl: process.env.RPC_URL,
   deployerKey: process.env.PRIVATE_KEY as `0x${string}` | undefined,
-  oracleKey:
-    (process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined) ??
-    (process.env.PRIVATE_KEY as `0x${string}` | undefined),
-  /** Optional: URL of the Phala Cloud TEE oracle. When set, secureTransfer uses the remote oracle instead of the local ORACLE_PRIVATE_KEY. */
+  oracleKey: process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined,
+  /** URL of the Phala Cloud TEE oracle (or local simulator). Required for secure agent transfers. */
   oracleUrl: process.env.ORACLE_URL,
   /** Private key used to sign 0G Storage upload transactions. Falls back to PRIVATE_KEY. */
   zeroGKey:

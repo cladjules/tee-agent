@@ -124,10 +124,12 @@ describe("TeeVerifier + Verifier", function () {
   async function deployFixture() {
     const [owner, oracle, alice, bob] = await viem.getWalletClients();
 
-    // TeeVerifier: admin=owner, oracle signing key=oracle.account
+    // TeeVerifier: admin=owner, oracle signing key=oracle.account,
+    // dcapAttestation=alice (placeholder; initValidator is not exercised in these tests)
     const teeVerifier = await viem.deployContract("TeeVerifier", [
       owner.account.address,
       oracle.account.address,
+      alice.account.address,
     ]);
 
     // Verifier: admin=owner, teeVerifier address

@@ -84,6 +84,7 @@ import {
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const KEY_PATH = "oracle/reencrypt";
+const RPC_URL = process.env.RPC_URL;
 const ZERO_G_RPC_URL =
   process.env.ZERO_G_RPC_URL ?? "https://evmrpc-testnet.0g.ai";
 const ZERO_G_INDEXER_URL =
@@ -242,14 +243,20 @@ async function reencrypt(body: ReEncryptBody) {
       recipientPublicKey,
     );
 
-    // Upload re-encrypted blob to 0G Storage
-    const zeroGKey = process.env.ZERO_G_PRIVATE_KEY ?? wallet.privateKey;
-    const blobBytes = new TextEncoder().encode(JSON.stringify(newBlob));
-    const newBlobUri = await uploadToZeroG(blobBytes, zeroGKey);
-    newBlobUris.push(newBlobUri);
-
     const newDataHash = await hashEncryptedBlob(newBlob);
     newDataHashes.push(newDataHash);
+
+    // For data: URIs return the re-encrypted blob inline; otherwise upload to 0G Storage.
+    let newBlobUri: string;
+    if (uri.startsWith("data:")) {
+      const encoded = Buffer.from(JSON.stringify(newBlob)).toString("base64");
+      newBlobUri = `data:application/json;base64,${encoded}`;
+    } else {
+      const zeroGKey = process.env.ZERO_G_PRIVATE_KEY ?? wallet.privateKey;
+      const blobBytes = new TextEncoder().encode(JSON.stringify(newBlob));
+      newBlobUri = await uploadToZeroG(blobBytes, zeroGKey);
+    }
+    newBlobUris.push(newBlobUri);
 
     // Ownership proof signing (matches Verifier.sol _verifyOwnershipProof domain)
     // nonce: bytes32 = keccak256(deterministic seed)
@@ -260,6 +267,10 @@ async function reencrypt(body: ReEncryptBody) {
 
     // targetPubkey for ownership proof = same as access proof targetPubkey
     const targetPubkeyBytes = `0x${pubKeyHex}` as `0x${string}`;
+
+    // The proof's dataHash MUST be the original on-chain hash so that
+    // ERC7857._proofCheck passes (it checks proof.dataHash == intelligentDatasOf[i].dataHash).
+    const originalDataHash = expectedHash as `0x${string}`;
 
     // innerHash = keccak256(abi.encode(chainId, verifier, registry, tokenId, from, to, deadline, dataHash, sealedKey, targetPubkey, nonce))
     const innerHash = ethers.keccak256(
@@ -285,7 +296,7 @@ async function reencrypt(body: ReEncryptBody) {
           body.from,
           body.to,
           body.deadline,
-          newDataHash,
+          originalDataHash,
           sealedKey,
           targetPubkeyBytes,
           nonce,
@@ -309,7 +320,7 @@ async function reencrypt(body: ReEncryptBody) {
 
     ownershipProofs.push({
       oracleType: 0,
-      dataHash: newDataHash,
+      dataHash: originalDataHash,
       sealedKey,
       targetPubkey: targetPubkeyBytes,
       nonce,
@@ -332,9 +343,16 @@ app.get("/health", (_req: Request, res: Response) => {
 app.get("/address", async (_req: Request, res: Response) => {
   try {
     const quote = await tappd.tdxQuote(wallet.address);
-    res.json({ address: wallet.address, quote: quote.quote });
+    res.json({
+      address: wallet.address,
+      publicKey: signingKey.compressedPublicKey,
+      quote: quote.quote,
+    });
   } catch {
-    res.json({ address: wallet.address });
+    res.json({
+      address: wallet.address,
+      publicKey: signingKey.compressedPublicKey,
+    });
   }
 });
 
@@ -343,6 +361,85 @@ app.post("/reencrypt", async (req: Request, res: Response) => {
     const body = validateBody(req.body);
     const result = await reencrypt(body);
     res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: message });
+  }
+});
+
+// ─── Validation endpoint ──────────────────────────────────────────────────────
+
+const VALIDATION_RESPONSE_ABI = [
+  "function validationResponse(bytes32 requestHash, uint8 response, string calldata responseURI, bytes32 responseHash, string calldata tag, bytes calldata proof) external",
+];
+
+const validateRequestBodySchema = z.object({
+  requestHash: z.string(),
+  agentId: z.union([z.string(), z.number()]),
+  response: z.number().int().min(0).max(100),
+  validationRegistryAddress: z.string(),
+  responseURI: z.string().optional().default(""),
+  responseHash: z.string().optional().default(ethers.ZeroHash),
+  tag: z.string().optional().default(""),
+});
+
+/**
+ * POST /validate
+ *
+ * Signs a TEE-attested validation response and optionally submits it on-chain.
+ *
+ * The oracle signs: personalSign(keccak256(abi.encodePacked(agentId, requestHash, response)))
+ * This matches TeeVerifier.verifyValidation() on-chain.
+ *
+ * If RPC_URL is configured, the oracle submits ValidationRegistry.validationResponse() directly.
+ * The signed proof is always returned so callers can submit it themselves if needed.
+ *
+ * Body: { requestHash, agentId, response, validationRegistryAddress, responseURI?, responseHash?, tag? }
+ * Returns: { proof, txHash? }
+ */
+app.post("/validate", async (req: Request, res: Response) => {
+  try {
+    const body = validateRequestBodySchema.parse(req.body);
+
+    // Build EIP-191 digest: personalSign(keccak256(abi.encodePacked(agentId, requestHash, response)))
+    const inner = ethers.keccak256(
+      ethers.solidityPacked(
+        ["uint256", "bytes32", "uint8"],
+        [BigInt(body.agentId), body.requestHash, body.response],
+      ),
+    );
+    const digest = ethers.keccak256(
+      ethers.concat([
+        ethers.toUtf8Bytes("\x19Ethereum Signed Message:\n32"),
+        ethers.getBytes(inner),
+      ]),
+    );
+
+    const sig = signingKey.sign(digest);
+    const proof = ethers.Signature.from(sig).serialized as `0x${string}`;
+
+    let txHash: string | undefined;
+    if (RPC_URL) {
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const connectedWallet = wallet.connect(provider);
+      const registry = new ethers.Contract(
+        body.validationRegistryAddress,
+        VALIDATION_RESPONSE_ABI,
+        connectedWallet,
+      );
+      const tx = (await registry.validationResponse(
+        body.requestHash,
+        body.response,
+        body.responseURI,
+        body.responseHash,
+        body.tag,
+        proof,
+      )) as { wait: () => Promise<{ hash: string }> };
+      const receipt = await tx.wait();
+      txHash = receipt.hash;
+    }
+
+    res.json({ proof, ...(txHash !== undefined ? { txHash } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(400).json({ error: message });

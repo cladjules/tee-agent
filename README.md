@@ -251,10 +251,13 @@ NEXT_PUBLIC_TEE_VERIFIER_ADDRESS=0x...
 # Deployer / signer
 PRIVATE_KEY=0x...
 
-# 0G Storage (for encrypted blob uploads — falls back to PRIVATE_KEY)
+# 0G Storage (for encrypted blob uploads only — falls back to PRIVATE_KEY)
 ZERO_G_PRIVATE_KEY=0x...
 # ZERO_G_RPC_URL=https://evmrpc-testnet.0g.ai
 # ZERO_G_INDEXER_URL=https://indexer-storage-testnet-standard.0g.ai
+
+# Pinata IPFS (for agent metadata JSON uploads)
+PINATA_JWT=eyJ...
 
 # Phala oracle (for secure NFT transfers — leave unset to skip)
 ORACLE_URL=https://<app-id>-3000.dstack.host
@@ -270,18 +273,19 @@ cd apps/dashboard && npm run dev
 
 ## Environment Variables
 
-| Variable                           | Required | Description                                                    |
-| ---------------------------------- | -------- | -------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)               |
-| `RPC_URL`                          | Yes      | EVM RPC endpoint for the app chain                             |
-| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract address                      |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier` address                                 |
-| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer key                              |
-| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage uploads (falls back to `PRIVATE_KEY`)       |
-| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)   |
-| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: 0G testnet standard indexer)          |
-| `ORACLE_PRIVATE_KEY`               | No       | Local oracle key for dev/testing (falls back to `PRIVATE_KEY`) |
-| `ORACLE_URL`                       | No       | Phala Cloud CVM URL. When set, uses remote TEE for transfers   |
+| Variable                           | Required | Description                                                             |
+| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                        |
+| `RPC_URL`                          | Yes      | EVM RPC endpoint for the app chain                                      |
+| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract address                               |
+| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier` address                                          |
+| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer key                                       |
+| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`) |
+| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)            |
+| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: 0G testnet standard indexer)                   |
+| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads                             |
+| `ORACLE_PRIVATE_KEY`               | No       | Local oracle key for dev/testing (falls back to `PRIVATE_KEY`)          |
+| `ORACLE_URL`                       | No       | Phala Cloud CVM URL. When set, uses remote TEE for transfers            |
 
 ---
 

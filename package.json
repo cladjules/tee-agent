@@ -2,6 +2,7 @@
   "name": "open-agents-toolkit",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "npm@11.13.0",
   "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
   "workspaces": [

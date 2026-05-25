@@ -7,7 +7,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 interface IAgentRegistryForValidation {
     function ownerOf(uint256 tokenId) external view returns (address);
 
-    function isApprovedForAll(address owner, address operator) external view returns (bool);
+    function isApprovedForAll(
+        address owner,
+        address operator
+    ) external view returns (bool);
 
     function getApproved(uint256 tokenId) external view returns (address);
 }
@@ -47,7 +50,8 @@ contract ValidationRegistry is ReentrancyGuard {
 
     /// @dev validatorAddress => requestHashes (deduplicated)
     mapping(address => bytes32[]) private _validatorRequests;
-    mapping(address => mapping(bytes32 => bool)) private _validatorRequestTracked;
+    mapping(address => mapping(bytes32 => bool))
+        private _validatorRequestTracked;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -103,7 +107,9 @@ contract ValidationRegistry is ReentrancyGuard {
         string calldata requestURI,
         bytes32 requestHash
     ) external {
-        IAgentRegistryForValidation reg = IAgentRegistryForValidation(_agentRegistry);
+        IAgentRegistryForValidation reg = IAgentRegistryForValidation(
+            _agentRegistry
+        );
         address agentOwner = reg.ownerOf(agentId);
         if (
             msg.sender != agentOwner &&
@@ -122,7 +128,12 @@ contract ValidationRegistry is ReentrancyGuard {
             _validatorRequests[validatorAddress].push(requestHash);
         }
 
-        emit ValidationRequest(validatorAddress, agentId, requestURI, requestHash);
+        emit ValidationRequest(
+            validatorAddress,
+            agentId,
+            requestURI,
+            requestHash
+        );
     }
 
     // ─── Validation Response ──────────────────────────────────────────────────
@@ -147,7 +158,7 @@ contract ValidationRegistry is ReentrancyGuard {
         bytes32 responseHash,
         string calldata tag,
         bytes calldata proof
-    ) external {
+    ) external nonReentrant {
         if (!_requestExists[requestHash]) revert RequestNotFound();
         if (response > 100) revert InvalidResponse();
 
@@ -205,7 +216,14 @@ contract ValidationRegistry is ReentrancyGuard {
     {
         if (!_requestExists[requestHash]) revert RequestNotFound();
         ValidationRecord storage r = _validations[requestHash];
-        return (r.validatorAddress, r.agentId, r.response, r.responseHash, r.tag, r.lastUpdate);
+        return (
+            r.validatorAddress,
+            r.agentId,
+            r.response,
+            r.responseHash,
+            r.tag,
+            r.lastUpdate
+        );
     }
 
     /**
@@ -248,14 +266,18 @@ contract ValidationRegistry is ReentrancyGuard {
     /**
      * @notice Return all requestHashes associated with an agent.
      */
-    function getAgentValidations(uint256 agentId) external view returns (bytes32[] memory) {
+    function getAgentValidations(
+        uint256 agentId
+    ) external view returns (bytes32[] memory) {
         return _agentValidations[agentId];
     }
 
     /**
      * @notice Return all requestHashes assigned to a validator.
      */
-    function getValidatorRequests(address validatorAddress) external view returns (bytes32[] memory) {
+    function getValidatorRequests(
+        address validatorAddress
+    ) external view returns (bytes32[] memory) {
         return _validatorRequests[validatorAddress];
     }
 }

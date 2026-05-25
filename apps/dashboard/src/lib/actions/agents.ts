@@ -5,7 +5,6 @@ import { AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent/abis";
 import {
   buildAgentServiceTraits,
   buildAccessPayloads,
-  buildSecureTransferPayloads,
   parseAgentServicesJson,
   readJsonFromUri,
 } from "@open-agents-toolkit/agent/encryption";
@@ -139,7 +138,13 @@ export async function prepareTransferAgent(
         }) as Promise<`0x${string}`>,
       ]);
       from = ownerAddress;
-      if (cfg.oracleUrl) {
+      if (!cfg.oracleUrl) {
+        return {
+          error:
+            "ORACLE_URL is required for secure agent transfers. Start the oracle server and set ORACLE_URL.",
+        };
+      }
+      {
         // ── Remote oracle path ────────────────────────────────────────────────
         if (!contentKeyB64) {
           return {
@@ -216,32 +221,6 @@ export async function prepareTransferAgent(
           deadline,
           currentHashes,
         });
-      } else {
-        // ── Local oracle path (dev / staging) ─────────────────────────────────
-        const oracleKey = cfg.oracleKey;
-        if (!oracleKey) {
-          return {
-            error:
-              "ORACLE_PRIVATE_KEY (or PRIVATE_KEY fallback) is required for proof generation.",
-          };
-        }
-
-        const payloads = await buildSecureTransferPayloads({
-          chainId: cfg.chainId,
-          verifierAddress,
-          registryAddress: cfg.registryAddress!,
-          tokenId: numericTokenId,
-          from,
-          to,
-          currentHashes,
-          oraclePrivateKey: oracleKey,
-          deadline,
-        });
-
-        accessPayloads = payloads.accessPayloads;
-        ownershipProofs = payloads.ownershipProofs;
-        newDataHashes = payloads.newDataHashes;
-        sealedKey = payloads.sealedKey;
       }
     }
 
@@ -338,12 +317,15 @@ export async function prepareCreateAgent(
   const imageUrl = (formData.get("imageUrl") as string | null)?.trim();
   const agentType =
     (formData.get("agentType") as string | null)?.trim() ?? "assistant";
-  const systemPrompt =
-    (formData.get("systemPrompt") as string | null)?.trim() ?? "";
-  const characterDef =
-    (formData.get("characterDef") as string | null)?.trim() ?? "";
+  const privateEntriesJson =
+    (formData.get("privateEntries") as string | null)?.trim() ?? "[]";
   const servicesJson =
     (formData.get("servicesJson") as string | null)?.trim() ?? "[]";
+  const x402Support = (formData.get("x402Support") as string | null) === "true";
+  const oasfSkillsJson =
+    (formData.get("oasfSkills") as string | null)?.trim() ?? "[]";
+  const oasfDomainsJson =
+    (formData.get("oasfDomains") as string | null)?.trim() ?? "[]";
   const ownerAddress = (
     formData.get("ownerAddress") as string | null
   )?.trim() as `0x${string}` | undefined;
@@ -354,8 +336,7 @@ export async function prepareCreateAgent(
     hasDescription: Boolean(description),
     hasImageUrl: Boolean(imageUrl),
     agentType,
-    hasSystemPrompt: Boolean(systemPrompt),
-    hasCharacterDef: Boolean(characterDef),
+    hasPrivateEntries: privateEntriesJson !== "[]",
     hasServicesJson: Boolean(servicesJson),
     hasOwnerAddress: Boolean(ownerAddress),
   });
@@ -382,20 +363,27 @@ export async function prepareCreateAgent(
     return { error: "Connect your wallet before creating an agent." };
   }
 
-  let services: Array<{ name: string; endpoint: string; version?: string }> =
-    [];
+  let services: Array<{
+    name: string;
+    endpoint: string;
+    version?: string;
+    skills?: string[];
+    domains?: string[];
+  }> = [];
   if (servicesJson) {
     console.log(`${logPrefix} parsing services JSON`);
-    const parsedServices = parseAgentServicesJson(servicesJson, {
-      allowedServiceNames: ["web", "A2A", "MCP", "OASF", "DID", "email"],
-    });
+    const parsedServices = parseAgentServicesJson(servicesJson);
     if (parsedServices.error) {
       console.warn(`${logPrefix} services parse failed`, {
         error: parsedServices.error,
       });
       return { error: parsedServices.error };
     }
-    services = parsedServices.services ?? [];
+    services = (parsedServices.services ?? []).map((s) => ({
+      ...s,
+      skills: s.skills ? [...s.skills] : undefined,
+      domains: s.domains ? [...s.domains] : undefined,
+    }));
     console.log(`${logPrefix} services parsed`, {
       serviceCount: services.length,
       serviceNames: services.map((service) => service.name),
@@ -449,9 +437,15 @@ export async function prepareCreateAgent(
           "ZERO_G_PRIVATE_KEY (or PRIVATE_KEY fallback) is required for 0G Storage uploads.",
       };
     }
+    let privateEntries: Array<{ name: string; data: string }> = [];
+    try {
+      privateEntries = JSON.parse(privateEntriesJson);
+    } catch {
+      /* ignore malformed JSON */
+    }
+
     const intelligentData = await uploadEncryptedIntelligentData({
-      systemPrompt,
-      characterDef,
+      entries: privateEntries,
       keyEncryptionPublicKey,
       zeroGPrivateKey: cfg.zeroGKey,
       rpcUrl: cfg.zeroGRpcUrl,
@@ -461,6 +455,50 @@ export async function prepareCreateAgent(
       itemCount: intelligentData.length,
       hashes: intelligentData.map((item) => item.hash),
     });
+
+    // Auto-generate OASF profile if skills or domains are selected
+    let oasfSkills: string[] = [];
+    let oasfDomains: string[] = [];
+    try {
+      oasfSkills = JSON.parse(oasfSkillsJson);
+      oasfDomains = JSON.parse(oasfDomainsJson);
+    } catch {
+      /* ignore malformed JSON */
+    }
+
+    if ((oasfSkills.length > 0 || oasfDomains.length > 0) && cfg.pinataJwt) {
+      console.log(`${logPrefix} uploading OASF profile to IPFS`, {
+        skillCount: oasfSkills.length,
+        domainCount: oasfDomains.length,
+      });
+      const oasfIpfsClient = new IpfsClient({ jwt: cfg.pinataJwt });
+      const oasfProfile = {
+        schema_version: "0.8",
+        skills: oasfSkills,
+        domains: oasfDomains,
+      };
+      const oasfUpload = await oasfIpfsClient.uploadJSON(
+        oasfProfile,
+        `${name}-oasf-profile`,
+      );
+      const oasfProfileUri = oasfUpload.url;
+      console.log(`${logPrefix} OASF profile uploaded`, { oasfProfileUri });
+
+      // Update existing OASF service entry or insert a new one
+      const oasfIdx = services.findIndex((s) => s.name === "OASF");
+      const oasfEntry = {
+        name: "OASF" as const,
+        endpoint: oasfProfileUri,
+        version: "0.8",
+        ...(oasfSkills.length ? { skills: oasfSkills } : {}),
+        ...(oasfDomains.length ? { domains: oasfDomains } : {}),
+      };
+      if (oasfIdx >= 0) {
+        services[oasfIdx] = { ...services[oasfIdx], ...oasfEntry };
+      } else {
+        services.push(oasfEntry);
+      }
+    }
 
     const publicMetadata = {
       name,
@@ -484,6 +522,7 @@ export async function prepareCreateAgent(
       description,
       image: imageUrl || undefined,
       services,
+      x402Support,
       active: true,
       registrations: [
         {

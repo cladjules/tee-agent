@@ -116,7 +116,8 @@ interface IERC7857 is IERC721, IERC7857Metadata {
 
 /// @title IERC8004IdentityRegistry
 /// @notice Minimal interface for the official ERC-8004 Identity Registry singleton.
-///         Official deployment: 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+///         Mainnet: 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+///         Testnet: 0x8004A818BFB912233c491871b3d84c89A494BD9e
 interface IERC8004IdentityRegistry {
     /// @notice Register a new agent with a URI and optional metadata.
     /// @return agentId The ERC-721 tokenId assigned in the official registry.

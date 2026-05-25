@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "./ERC7857.sol";
 import "./interfaces/IERC7857.sol";
@@ -16,7 +17,7 @@ import "./interfaces/IERC7857.sol";
  * Extends the ERC7857 base with:
  *   - Standard ERC-721 metadata (tokenURI, setTokenURI, baseURI).
  *   - ERC-8004 co-registration via the official singleton registry
- *     at 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432 (immutable, set at deploy time).
+ *     mainnet 0x8004A169… / testnet 0x8004A818… (immutable, set at deploy time).
  *   - Mint fee (waived for DEFAULT_ADMIN_ROLE holders).
  *   - Role-based admin/pause.
  *
@@ -28,6 +29,7 @@ import "./interfaces/IERC7857.sol";
 contract AgentRegistry is
     IAgentRegistry,
     ERC7857,
+    ERC721Holder,
     AccessControl,
     ReentrancyGuard,
     Pausable
@@ -142,17 +144,21 @@ contract AgentRegistry is
         }
 
         // Co-register in the official ERC-8004 Identity Registry (optional).
+        // The identity NFT is minted to this contract (msg.sender) and held here
+        // on behalf of the agent — identity NFTs may be non-transferable.
+        // try/catch: if the registry is not deployed or the call fails for any
+        // reason, minting still succeeds.
         if (address(_erc8004Registry) != address(0)) {
-            uint256 erc8004Id = _erc8004Registry.register(
-                bytes(metadataUri).length > 0 ? metadataUri : publicMetadataUri
-            );
-            _erc8004AgentId[tokenId] = erc8004Id;
-            IERC721(address(_erc8004Registry)).safeTransferFrom(
-                address(this),
-                to,
-                erc8004Id
-            );
-            emit ERC8004Registered(tokenId, erc8004Id);
+            try
+                _erc8004Registry.register(
+                    bytes(metadataUri).length > 0
+                        ? metadataUri
+                        : publicMetadataUri
+                )
+            returns (uint256 erc8004Id) {
+                _erc8004AgentId[tokenId] = erc8004Id;
+                emit ERC8004Registered(tokenId, erc8004Id);
+            } catch {}
         }
 
         emit Registered(tokenId, publicMetadataUri, to);

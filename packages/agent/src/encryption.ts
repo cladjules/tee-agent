@@ -211,10 +211,24 @@ export function parseAgentServicesJson(
       const version = service.version
         ? String(service.version).trim()
         : undefined;
+      const skills =
+        Array.isArray(service.skills) &&
+        service.skills.every((s: unknown) => typeof s === "string")
+          ? (service.skills as string[])
+          : undefined;
+      const domains =
+        Array.isArray(service.domains) &&
+        service.domains.every((d: unknown) => typeof d === "string")
+          ? (service.domains as string[])
+          : undefined;
 
-      return version
-        ? ({ name, endpoint, version } as AgentService)
-        : ({ name, endpoint } as AgentService);
+      return {
+        name,
+        endpoint,
+        ...(version ? { version } : {}),
+        ...(skills?.length ? { skills } : {}),
+        ...(domains?.length ? { domains } : {}),
+      } as AgentService;
     });
 
     if (options?.allowedServiceNames) {

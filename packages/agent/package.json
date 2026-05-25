@@ -1,47 +1,34 @@
 {
   "name": "@open-agents-toolkit/agent",
   "version": "0.1.0",
+  "type": "module",
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
     "./types": {
-      "require": "./dist/types.js",
-      "import": "./dist/types.js",
       "default": "./dist/types.js",
       "types": "./dist/types.d.ts"
     },
     "./abis": {
-      "require": "./dist/abis.js",
-      "import": "./dist/abis.js",
       "default": "./dist/abis.js",
       "types": "./dist/abis.d.ts"
     },
     "./browser": {
-      "require": "./dist/browser.js",
-      "import": "./dist/browser.js",
       "default": "./dist/browser.js",
       "types": "./dist/browser.d.ts"
     },
     "./encryption": {
-      "require": "./dist/encryption.js",
-      "import": "./dist/encryption.js",
       "default": "./dist/encryption.js",
       "types": "./dist/encryption.d.ts"
     },
     "./registry": {
-      "require": "./dist/registry.js",
-      "import": "./dist/registry.js",
       "default": "./dist/registry.js",
       "types": "./dist/registry.d.ts"
     },
     "./zero-g": {
-      "require": "./dist/zero-g.js",
-      "import": "./dist/zero-g.js",
       "default": "./dist/zero-g.js",
       "types": "./dist/zero-g.d.ts"
     },
     "./ipfs": {
-      "require": "./dist/ipfs.js",
-      "import": "./dist/ipfs.js",
       "default": "./dist/ipfs.js",
       "types": "./dist/ipfs.d.ts"
     }

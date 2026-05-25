@@ -1,5 +1,6 @@
 {
   "OpenAgentsToolkit": {
-    "identityRegistryAddress": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    "identityRegistryAddress": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "dcapAttestationAddress": "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F"
   }
 }
