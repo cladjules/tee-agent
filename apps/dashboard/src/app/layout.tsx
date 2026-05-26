@@ -115,7 +115,7 @@ function Header() {
               Deploy
             </a>
             <a
-              href="https://github.com/cladjules/open-agents-toolkit"
+              href="https://github.com/cladjules/arcane-agents"
               target="_blank"
               rel="noopener noreferrer"
               className="nav-link inline-flex items-center gap-1"
@@ -141,7 +141,7 @@ function Footer() {
         </span>
         <div className="flex items-center gap-4">
           <a
-            href="https://github.com/cladjules/open-agents-toolkit"
+            href="https://github.com/cladjules/arcane-agents"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-400 transition-colors"

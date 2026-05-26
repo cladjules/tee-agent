@@ -52,7 +52,7 @@ export default function HomePage() {
               Deploy Agent →
             </a>
             <a
-              href="https://github.com/cladjules/open-agents-toolkit"
+              href="https://github.com/cladjules/arcane-agents"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-slate-700 hover:border-violet-700 hover:bg-violet-950/30 text-slate-300 hover:text-white font-semibold transition-all text-sm"
