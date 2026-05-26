@@ -1,4 +1,4 @@
-# Open Agents Toolkit
+# Arcane Agents
 
 Create, own, and manage AI agents on-chain with verifiable identity, private encrypted data, and transparent reputation.
 
@@ -9,7 +9,7 @@ Create, own, and manage AI agents on-chain with verifiable identity, private enc
 
 ## What is it?
 
-Open Agents Toolkit (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a TEE oracle.
+Arcane Agents (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a TEE oracle.
 
 **Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation.
 
@@ -135,9 +135,8 @@ const agent = await registry.resolve(agentId);
 ```typescript
 import {
   encryptIntelligentData, // AES-256-GCM encrypt system prompt + character def (in-memory)
-  readJsonFromUri, // fetch JSON from data: or HTTPS URIs
+  readJsonFromUri, // fetch JSON from data: or HTTPS/IPFS URIs
   buildAccessPayloads, // build owner-signed access proofs for transfer
-  buildDecryptMessage, // build EIP-191 message for key request
 } from "@open-agents-toolkit/agent/encryption";
 ```
 
@@ -254,13 +253,14 @@ PRIVATE_KEY=0x...
 # 0G Storage (for encrypted blob uploads only — falls back to PRIVATE_KEY)
 ZERO_G_PRIVATE_KEY=0x...
 # ZERO_G_RPC_URL=https://evmrpc-testnet.0g.ai
-# ZERO_G_INDEXER_URL=https://indexer-storage-testnet-standard.0g.ai
+# ZERO_G_INDEXER_URL=https://indexer-storage-testnet-turbo.0g.ai
 
-# Pinata IPFS (for agent metadata JSON uploads)
+# Pinata IPFS (for agent metadata JSON uploads — V3 key with org:files:write scope)
 PINATA_JWT=eyJ...
 
-# Phala oracle (for secure NFT transfers — leave unset to skip)
-ORACLE_URL=https://<app-id>-3000.dstack.host
+# Phala oracle — dashboard fetches pubkey from GET /address at mint time
+# Leave unset to skip TEE features
+NEXT_PUBLIC_ORACLE_URL=https://<app-id>-3000.dstack.host
 ```
 
 ### 5. Start the dashboard
@@ -273,19 +273,18 @@ cd apps/dashboard && npm run dev
 
 ## Environment Variables
 
-| Variable                           | Required | Description                                                             |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                        |
-| `RPC_URL`                          | Yes      | EVM RPC endpoint for the app chain                                      |
-| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract address                               |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier` address                                          |
-| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer key                                       |
-| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`) |
-| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)            |
-| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: 0G testnet standard indexer)                   |
-| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads                             |
-| `ORACLE_PRIVATE_KEY`               | No       | Local oracle key for dev/testing (falls back to `PRIVATE_KEY`)          |
-| `ORACLE_URL`                       | No       | Phala Cloud CVM URL. When set, uses remote TEE for transfers            |
+| Variable                           | Required | Description                                                                                                                           |
+| ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                                                                                      |
+| `RPC_URL`                          | Yes      | EVM RPC endpoint for the app chain                                                                                                    |
+| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract address                                                                                             |
+| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier` address                                                                                                        |
+| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer key                                                                                                     |
+| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`)                                                               |
+| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                          |
+| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                   |
+| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads                                                                                           |
+| `NEXT_PUBLIC_ORACLE_URL`           | No       | Phala Cloud CVM URL. Used server-side (mint/transfer) and client-side (Run Oracle / Validate). Local default: `http://localhost:3001` |
 
 ---
 

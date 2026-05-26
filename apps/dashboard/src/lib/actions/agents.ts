@@ -77,9 +77,7 @@ async function makePublicClient() {
  *
  * Two modes:
  *  - ORACLE_URL set: calls remote Phala TEE oracle → gets ownershipProofs +
- *    newDataHashes, then generates access payloads locally for the client to sign.
- *  - ORACLE_URL not set: signs ownership proofs locally using ORACLE_PRIVATE_KEY
- *    (dev / staging mode, no actual blob re-encryption).
+ *    newDataHashes, then generates access payloads locally for the client to sign..
  */
 export async function prepareTransferAgent(
   formData: FormData,
@@ -141,7 +139,7 @@ export async function prepareTransferAgent(
       if (!cfg.oracleUrl) {
         return {
           error:
-            "ORACLE_URL is required for secure agent transfers. Start the oracle server and set ORACLE_URL.",
+            "NEXT_PUBLIC_ORACLE_URL is required for secure agent transfers. Start the oracle server and set NEXT_PUBLIC_ORACLE_URL.",
         };
       }
       {
@@ -329,7 +327,18 @@ export async function prepareCreateAgent(
   const ownerAddress = (
     formData.get("ownerAddress") as string | null
   )?.trim() as `0x${string}` | undefined;
-  const keyEncryptionPublicKey = cfg.keyEncryptionPublicKey;
+  let keyEncryptionPublicKey: string | undefined;
+  if (cfg.oracleUrl) {
+    try {
+      const addrRes = await fetch(`${cfg.oracleUrl}/address`);
+      if (!addrRes.ok)
+        throw new Error(`oracle /address returned ${addrRes.status}`);
+      const addrJson = (await addrRes.json()) as { publicKey?: string };
+      keyEncryptionPublicKey = addrJson.publicKey;
+    } catch (err) {
+      console.warn(`${logPrefix} could not fetch oracle public key`, err);
+    }
+  }
 
   console.log(`${logPrefix} form values extracted`, {
     hasName: Boolean(name),
@@ -351,10 +360,12 @@ export async function prepareCreateAgent(
   }
 
   if (!keyEncryptionPublicKey) {
-    console.warn(`${logPrefix} config missing: keyEncryptionPublicKey`);
+    console.warn(
+      `${logPrefix} config missing: keyEncryptionPublicKey — is NEXT_PUBLIC_ORACLE_URL set and the oracle running?`,
+    );
     return {
       error:
-        "TEE key encryption public key not configured (TEE_ENCRYPTION_PUBLIC_KEY).",
+        "Could not retrieve TEE encryption public key from oracle. Is ORACLE_URL set and the oracle running?",
     };
   }
 
@@ -430,24 +441,30 @@ export async function prepareCreateAgent(
     const agentRegistry = `eip155:${cfg.chainId}:${cfg.registryAddress}`;
     console.log(`${logPrefix} agent registry ref built`, { agentRegistry });
 
-    console.log(`${logPrefix} uploading encrypted intelligent data`);
-    if (!cfg.zeroGKey) {
-      return {
-        error:
-          "ZERO_G_PRIVATE_KEY (or PRIVATE_KEY fallback) is required for 0G Storage uploads.",
-      };
-    }
     let privateEntries: Array<{ name: string; data: string }> = [];
     try {
       privateEntries = JSON.parse(privateEntriesJson);
     } catch {
       /* ignore malformed JSON */
     }
+    const validEntries = privateEntries.filter(
+      (e) => e.name.trim() && e.data.trim(),
+    );
+
+    console.log(`${logPrefix} uploading encrypted intelligent data`, {
+      entryCount: validEntries.length,
+    });
+    if (validEntries.length > 0 && !cfg.zeroGKey) {
+      return {
+        error:
+          "ZERO_G_PRIVATE_KEY (or PRIVATE_KEY fallback) is required for private data uploads.",
+      };
+    }
 
     const intelligentData = await uploadEncryptedIntelligentData({
-      entries: privateEntries,
-      keyEncryptionPublicKey,
-      zeroGPrivateKey: cfg.zeroGKey,
+      entries: validEntries,
+      keyEncryptionPublicKey: keyEncryptionPublicKey as `0x${string}`,
+      zeroGPrivateKey: cfg.zeroGKey ?? "",
       rpcUrl: cfg.zeroGRpcUrl,
       indexerUrl: cfg.zeroGIndexerUrl,
     });

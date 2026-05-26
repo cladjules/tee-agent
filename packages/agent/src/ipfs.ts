@@ -1,20 +1,29 @@
 /**
- * IPFS upload helper via Pinata.
+ * IPFS upload helper via Pinata V3 API.
  *
- * Uses the Pinata pinning HTTP API — no extra package required.
- * A JWT is required (PINATA_JWT env var or constructor option).
+ * Uses the Pinata V3 uploads API — no extra package required.
+ * A JWT with the `org:files:write` scope is required (PINATA_JWT env var or
+ * constructor option).
  *
- * Uploaded content is pinned at `ipfs://<CID>`.
+ * Uploaded content is pinned publicly at `ipfs://<CID>`.
  */
 
 import { RegistryError } from "./types.js";
 
-// ─── Pinata response shape ─────────────────────────────────────────────────
+// ─── Pinata V3 response shape ─────────────────────────────────────────────────
 
-interface PinataPinResponse {
-  IpfsHash: string;
-  PinSize: number;
-  Timestamp: string;
+interface PinataV3Response {
+  data: {
+    id: string;
+    name: string;
+    cid: string;
+    created_at: string;
+    size: number;
+    mime_type: string;
+    user_id: string;
+    group_id: string | null;
+    is_duplicate: boolean | null;
+  };
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -22,12 +31,12 @@ interface PinataPinResponse {
 export interface IpfsClientOptions {
   /** Pinata JWT (Bearer token). Defaults to PINATA_JWT env var. */
   jwt?: string;
-  /** Pinata pinning API base URL. Defaults to https://api.pinata.cloud. */
+  /** Pinata V3 uploads base URL. Defaults to https://uploads.pinata.cloud. */
   baseUrl?: string;
 }
 
 export interface IpfsUploadResult {
-  /** IPFS CID (v0 or v1 depending on Pinata config) */
+  /** IPFS CID */
   readonly cid: string;
   /** Canonical `ipfs://` URI */
   readonly url: string;
@@ -50,28 +59,28 @@ export class IpfsClient {
       );
     }
     this._jwt = jwt;
-    this._baseUrl = opts.baseUrl ?? "https://api.pinata.cloud";
+    this._baseUrl = opts.baseUrl ?? "https://uploads.pinata.cloud";
   }
 
   /**
-   * Pin a JSON-serialisable object to IPFS via Pinata.
+   * Pin a JSON-serialisable object to IPFS via Pinata V3.
+   * Files are uploaded to the public IPFS network so they are gateway-accessible.
    * Returns the CID, an `ipfs://` URI, and the byte size.
    */
   async uploadJSON(data: unknown, name?: string): Promise<IpfsUploadResult> {
-    const body = {
-      pinataContent: data,
-      ...(name !== undefined && { pinataMetadata: { name } }),
-    };
+    const json = JSON.stringify(data);
+    const blob = new Blob([json], { type: "application/json" });
+    const form = new FormData();
+    form.append("file", blob, name ? `${name}.json` : "upload.json");
+    form.append("network", "public");
+    if (name) form.append("name", name);
 
     let response: Response;
     try {
-      response = await fetch(`${this._baseUrl}/pinning/pinJSONToIPFS`, {
+      response = await fetch(`${this._baseUrl}/v3/files`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this._jwt}`,
-        },
-        body: JSON.stringify(body),
+        headers: { Authorization: `Bearer ${this._jwt}` },
+        body: form,
       });
     } catch (err) {
       throw new RegistryError(
@@ -89,12 +98,12 @@ export class IpfsClient {
       );
     }
 
-    const result = (await response.json()) as PinataPinResponse;
-    const cid = result.IpfsHash;
+    const result = (await response.json()) as PinataV3Response;
+    const cid = result.data.cid;
     return {
       cid,
       url: `ipfs://${cid}`,
-      size: result.PinSize,
+      size: result.data.size,
     };
   }
 

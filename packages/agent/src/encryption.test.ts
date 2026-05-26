@@ -35,7 +35,12 @@ describe("encryptMetadata / decryptMetadata", () => {
     const contentKey = generateContentKey();
     const payload = { hello: "world", num: 42 };
 
-    const blob = encryptMetadata("test-blob", payload, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test-blob",
+      payload,
+      contentKey,
+      recipientPubKeyBytes,
+    );
 
     expect(blob.algorithm).toBe("aes-256-gcm");
     expect(blob.name).toBe("test-blob");
@@ -51,13 +56,23 @@ describe("encryptMetadata / decryptMetadata", () => {
   it("round-trips a nested object", () => {
     const contentKey = generateContentKey();
     const payload = { a: { b: { c: [1, 2, 3] } }, flag: true };
-    const blob = encryptMetadata("nested", payload, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "nested",
+      payload,
+      contentKey,
+      recipientPubKeyBytes,
+    );
     expect(decryptMetadata(blob, contentKey)).toEqual(payload);
   });
 
   it("throws on wrong content key", () => {
     const contentKey = generateContentKey();
-    const blob = encryptMetadata("test", { x: 1 }, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test",
+      { x: 1 },
+      contentKey,
+      recipientPubKeyBytes,
+    );
     const wrongKey = generateContentKey();
     expect(() => decryptMetadata(blob, wrongKey)).toThrow();
   });
@@ -66,7 +81,12 @@ describe("encryptMetadata / decryptMetadata", () => {
 describe("decryptContentKey", () => {
   it("recovers the original content key via ECIES", () => {
     const contentKey = generateContentKey();
-    const blob = encryptMetadata("test", { v: 1 }, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test",
+      { v: 1 },
+      contentKey,
+      recipientPubKeyBytes,
+    );
 
     const recovered = decryptContentKey(blob, recipientPrivKeyBytes);
     expect(Buffer.from(recovered).toString("hex")).toBe(
@@ -76,7 +96,12 @@ describe("decryptContentKey", () => {
 
   it("throws on wrong private key", () => {
     const contentKey = generateContentKey();
-    const blob = encryptMetadata("test", { v: 1 }, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test",
+      { v: 1 },
+      contentKey,
+      recipientPubKeyBytes,
+    );
     const wrongPrivKey = new PrivateKey();
     expect(() => decryptContentKey(blob, wrongPrivKey.secret)).toThrow();
     void recipientPrivKeyBytes; // suppress unused warning
@@ -86,14 +111,24 @@ describe("decryptContentKey", () => {
 describe("hashEncryptedBlob", () => {
   it("returns a 0x-prefixed hex string", async () => {
     const contentKey = generateContentKey();
-    const blob = encryptMetadata("test", { x: 1 }, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test",
+      { x: 1 },
+      contentKey,
+      recipientPubKeyBytes,
+    );
     const hash = await hashEncryptedBlob(blob);
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it("is deterministic for the same blob", async () => {
     const contentKey = generateContentKey();
-    const blob = encryptMetadata("test", { x: 1 }, contentKey, recipientPubKeyBytes);
+    const blob = encryptMetadata(
+      "test",
+      { x: 1 },
+      contentKey,
+      recipientPubKeyBytes,
+    );
     const h1 = await hashEncryptedBlob(blob);
     const h2 = await hashEncryptedBlob(blob);
     expect(h1).toBe(h2);
@@ -120,7 +155,11 @@ describe("parseAgentServicesJson", () => {
 
   it("parses optional fields", () => {
     const raw = JSON.stringify([
-      { name: "MCP", endpoint: "https://mcp.example.com", version: "2025-06-18" },
+      {
+        name: "MCP",
+        endpoint: "https://mcp.example.com",
+        version: "2025-06-18",
+      },
     ]);
     const { services } = parseAgentServicesJson(raw);
     expect(services![0]!.version).toBe("2025-06-18");
@@ -149,7 +188,9 @@ describe("parseAgentServicesJson", () => {
   });
 
   it("returns error for disallowed service names", () => {
-    const raw = JSON.stringify([{ name: "unknown", endpoint: "https://x.com" }]);
+    const raw = JSON.stringify([
+      { name: "unknown", endpoint: "https://x.com" },
+    ]);
     const { error } = parseAgentServicesJson(raw, {
       allowedServiceNames: ["web", "MCP"],
     });

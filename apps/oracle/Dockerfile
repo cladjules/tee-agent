@@ -18,4 +18,4 @@ COPY --from=builder /app/dist ./dist
 RUN npm install --omit=dev
 
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/${ORACLE_ENTRY:?ORACLE_ENTRY must be set to examples/prediction-market.js or examples/web-data-oracle.js}"]

@@ -1,5 +1,5 @@
 /**
- * Shared types for the Open Agents Toolkit.
+ * Shared types for the Arcane Agents.
  * All blockchain types use viem's primitives for consistency and type safety.
  */
 

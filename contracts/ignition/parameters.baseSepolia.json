@@ -1,12 +1,9 @@
 {
-  "OpenAgentsToolkit": {
+  "ArcaneAgents": {
     "identityRegistryAddress": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
     "dcapAttestationAddress": "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F"
   },
   "SetOracle": {
-    "oracleAddress": "0xcb998fC308E2a58960283D4EaF7F0A5C1C18A43E"
-  },
-  "SetKeeper": {
-    "keeperAddress": "0x7a459d6B50823f4A6F870A90504d12d082B9B28b"
+    "oracleAddress": "0xf3D21A3A689AD889541d993A51e3109aC3E36c12"
   }
 }

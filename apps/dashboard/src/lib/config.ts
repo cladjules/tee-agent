@@ -1,6 +1,5 @@
 /** Centralised env-var access for server actions. Never import on the client. */
 
-import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia, type Chain } from "viem/chains";
 
 export const NETWORKS = {
@@ -48,28 +47,18 @@ export const cfg = {
     | undefined,
   rpcUrl: process.env.RPC_URL,
   deployerKey: process.env.PRIVATE_KEY as `0x${string}` | undefined,
-  oracleKey: process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined,
   /** URL of the Phala Cloud TEE oracle (or local simulator). Required for secure agent transfers. */
-  oracleUrl: process.env.ORACLE_URL,
+  oracleUrl: process.env.NEXT_PUBLIC_ORACLE_URL,
   /** Private key used to sign 0G Storage upload transactions. Falls back to PRIVATE_KEY. */
-  zeroGKey:
-    (process.env.ZERO_G_PRIVATE_KEY as `0x${string}` | undefined) ??
-    (process.env.PRIVATE_KEY as `0x${string}` | undefined),
+  zeroGKey: process.env.PRIVATE_KEY as `0x${string}` | undefined,
   /** 0G Storage EVM RPC endpoint (default: https://evmrpc-testnet.0g.ai). */
   zeroGRpcUrl: process.env.ZERO_G_RPC_URL,
-  /** 0G Storage indexer URL (default: standard testnet indexer). */
+  /** 0G Storage indexer URL (default: turbo testnet indexer). */
   zeroGIndexerUrl: process.env.ZERO_G_INDEXER_URL,
   /** Pinata JWT for IPFS uploads (agent metadata JSON). Set PINATA_JWT env var. */
   pinataJwt: process.env.PINATA_JWT,
-  get keyEncryptionPublicKey() {
-    const configured = process.env.TEE_ENCRYPTION_PUBLIC_KEY as
-      | `0x${string}`
-      | undefined;
-    if (configured) return configured;
-    return this.oracleKey
-      ? (privateKeyToAccount(this.oracleKey).publicKey as `0x${string}`)
-      : undefined;
-  },
+  /** Starting block for Registered event log queries. Set to the deployment block to avoid paginating from genesis. */
+  registryFromBlock: BigInt(process.env.AGENT_REGISTRY_FROM_BLOCK ?? "0"),
   get chain(): Chain {
     return NETWORKS[this.network] ?? baseSepolia;
   },

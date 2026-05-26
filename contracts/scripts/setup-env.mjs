@@ -32,12 +32,33 @@ if (!existsSync(deployedPath)) {
 
 const raw = JSON.parse(readFileSync(deployedPath, "utf8"));
 
+// Extract earliest deployment block from journal
+const journalPath = join(
+  ROOT,
+  "contracts/ignition/deployments",
+  `chain-${chainId}`,
+  "journal.jsonl",
+);
+let deploymentBlock = null;
+if (existsSync(journalPath)) {
+  const lines = readFileSync(journalPath, "utf8").trim().split("\n");
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      const bn = entry?.receipt?.blockNumber;
+      if (typeof bn === "number") {
+        deploymentBlock = bn;
+        break;
+      }
+    } catch {}
+  }
+}
+
 // Map Ignition module keys → env var names
 const KEY_MAP = {
-  "OpenAgentsToolkit#AgentRegistry": "AGENT_REGISTRY_ADDRESS",
-  "OpenAgentsToolkit#ENSAgentRegistry": "ENS_AGENT_REGISTRY_ADDRESS",
-  "OpenAgentsToolkit#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
-  "OpenAgentsToolkit#TEEVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
+  "ArcaneAgents#AgentRegistry": "AGENT_REGISTRY_ADDRESS",
+  "ArcaneAgents#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
+  "ArcaneAgents#TEEVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
 };
 
 const resolved = {};
@@ -85,6 +106,18 @@ if (networkRegex.test(existing)) {
   existing += `\nNEXT_PUBLIC_NETWORK=${network}`;
 }
 
+if (deploymentBlock !== null) {
+  const fromBlockRegex = /^AGENT_REGISTRY_FROM_BLOCK=.*$/m;
+  if (fromBlockRegex.test(existing)) {
+    existing = existing.replace(
+      fromBlockRegex,
+      `AGENT_REGISTRY_FROM_BLOCK=${deploymentBlock}`,
+    );
+  } else {
+    existing += `\nAGENT_REGISTRY_FROM_BLOCK=${deploymentBlock}`;
+  }
+}
+
 const targetFile =
   targetPath === envPath ? "apps/dashboard/.env" : "apps/dashboard/.env.local";
 writeFileSync(targetPath, existing.trimStart() + "\n");
@@ -94,3 +127,37 @@ for (const [k, v] of Object.entries(resolved)) {
   console.log(`  ${k}=${v}`);
 }
 console.log();
+
+// Also write AGENT_REGISTRY_ADDRESS to apps/oracle/.env or .env.local
+if (resolved.AGENT_REGISTRY_ADDRESS) {
+  const oracleEnvPath = join(ROOT, "apps/oracle/.env");
+  const oracleEnvLocalPath = join(ROOT, "apps/oracle/.env.local");
+  const oracleTargetPath = existsSync(oracleEnvPath)
+    ? oracleEnvPath
+    : oracleEnvLocalPath;
+
+  let oracleExisting = existsSync(oracleTargetPath)
+    ? readFileSync(oracleTargetPath, "utf8")
+    : "";
+
+  const oracleKey = "AGENT_REGISTRY_ADDRESS";
+  const oracleRegex = new RegExp(`^${oracleKey}=.*$`, "m");
+  if (oracleRegex.test(oracleExisting)) {
+    oracleExisting = oracleExisting.replace(
+      oracleRegex,
+      `${oracleKey}=${resolved.AGENT_REGISTRY_ADDRESS}`,
+    );
+  } else {
+    oracleExisting += `\n${oracleKey}=${resolved.AGENT_REGISTRY_ADDRESS}`;
+  }
+
+  const oracleTargetFile =
+    oracleTargetPath === oracleEnvPath
+      ? "apps/oracle/.env"
+      : "apps/oracle/.env.local";
+  writeFileSync(oracleTargetPath, oracleExisting.trimStart() + "\n");
+
+  console.log(`✓ Written to ${oracleTargetFile} (chain ${chainId})\n`);
+  console.log(`  AGENT_REGISTRY_ADDRESS=${resolved.AGENT_REGISTRY_ADDRESS}`);
+  console.log();
+}

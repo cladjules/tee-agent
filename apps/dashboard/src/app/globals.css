@@ -1,12 +1,134 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  --background: #04040a;
+  --foreground: #f1f5f9;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: "Inter", system-ui, sans-serif;
+}
+
+/* ── Subtle dot/grid background ─────────────────────────────────────────── */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(124, 58, 237, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* ── Glass card ─────────────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(10, 10, 20, 0.55);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.glass-card:hover {
+  border-color: rgba(139, 92, 246, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(139, 92, 246, 0.08),
+    0 0 30px rgba(124, 58, 237, 0.12),
+    0 0 60px rgba(124, 58, 237, 0.04);
+}
+
+/* ── Animated gradient text ─────────────────────────────────────────────── */
+@keyframes gradient-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.gradient-text-animated {
+  background: linear-gradient(
+    135deg,
+    #c4b5fd 0%,
+    #818cf8 25%,
+    #67e8f9 50%,
+    #a78bfa 75%,
+    #c4b5fd 100%
+  );
+  background-size: 300% 300%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 7s ease infinite;
+}
+
+/* ── Glow button ────────────────────────────────────────────────────────── */
+.btn-primary {
+  background: #7c3aed;
+  color: #fff;
+  font-weight: 600;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: #8b5cf6;
+  box-shadow:
+    0 0 24px rgba(124, 58, 237, 0.5),
+    0 0 48px rgba(124, 58, 237, 0.15);
+}
+
+/* ── Nav underline slide ────────────────────────────────────────────────── */
+.nav-link {
+  position: relative;
+  color: #94a3b8;
+  transition: color 0.15s;
+}
+.nav-link::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: #a78bfa;
+  transition: width 0.2s ease;
+}
+.nav-link:hover {
+  color: #f1f5f9;
+}
+.nav-link:hover::after {
+  width: 100%;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #040408;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.55);
+}
+
+::selection {
+  background: rgba(124, 58, 237, 0.3);
+  color: #f1f5f9;
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled),
+label[for],
+select {
+  cursor: pointer;
 }

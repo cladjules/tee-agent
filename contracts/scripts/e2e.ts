@@ -8,7 +8,6 @@
  *
  * Environment variables:
  *   PRIVATE_KEY          — sender key (defaults to Hardhat account #0 locally)
- *   ORACLE_PRIVATE_KEY   — oracle signer key (defaults to Hardhat account #1 locally)
  *   LOCAL_RPC_URL        — local RPC override (default: http://127.0.0.1:8545)
  *   BASE_SEPOLIA_RPC_URL — testnet RPC override (default: https://sepolia.base.org)
  */
@@ -107,16 +106,16 @@ const REPUTATION_REGISTRY_ABI = JSON.parse(
 );
 
 const AGENT_REGISTRY_ADDRESS = deployedAddresses[
-  "OpenAgentsToolkit#AgentRegistry"
+  "ArcaneAgents#AgentRegistry"
 ] as `0x${string}`;
 const TEE_VERIFIER_ADDRESS = deployedAddresses[
-  "OpenAgentsToolkit#TeeVerifier"
+  "ArcaneAgents#TeeVerifier"
 ] as `0x${string}`;
 const VERIFIER_ADDRESS = deployedAddresses[
-  "OpenAgentsToolkit#Verifier"
+  "ArcaneAgents#Verifier"
 ] as `0x${string}`;
 const VALIDATION_REGISTRY_ADDRESS = deployedAddresses[
-  "OpenAgentsToolkit#ValidationRegistry"
+  "ArcaneAgents#ValidationRegistry"
 ] as `0x${string}`;
 
 /**
@@ -419,23 +418,38 @@ async function testIntelligentTransfer() {
   await waitForReceipt(regHash, "updateOracleAddress");
   console.log(`  ✔ oracle registered`);
 
-  // Create a properly encrypted blob (AES-256-GCM) using the oracle's public key
+  // Create two encrypted blobs (AES-256-GCM) using the oracle's public key:
+  //   iData[0]: SKILL.md markdown string
+  //   iData[1]: agent config (model, temperature, etc. — no API keys)
   const contentKey = generateContentKey();
-  const blob = encryptMetadata(
-    "system-prompt",
-    { prompt: "You are a helpful assistant." },
+
+  const skillBlob = encryptMetadata(
+    "skill.md",
+    "# Helpful Assistant\nYou are a helpful assistant.",
     contentKey,
     oracle.publicKey,
   );
-  const dataHash = await hashEncryptedBlob(blob);
-  const blobUri = `data:application/json;base64,${Buffer.from(JSON.stringify(blob)).toString("base64")}`;
+  const skillHash = await hashEncryptedBlob(skillBlob);
+  const skillBlobUri = `data:application/json;base64,${Buffer.from(JSON.stringify(skillBlob)).toString("base64")}`;
+
+  const configBlob = encryptMetadata(
+    "config",
+    { model: "phala/gemma-4-26b-a4b-uncensored", temperature: 0 },
+    contentKey,
+    oracle.publicKey,
+  );
+  const configHash = await hashEncryptedBlob(configBlob);
+  const configBlobUri = `data:application/json;base64,${Buffer.from(JSON.stringify(configBlob)).toString("base64")}`;
 
   const tokenId = await mintAgentToken(
     [
       account.address,
       "https://example.com/e2e-secure-agent.json",
-      blobUri,
-      [{ dataDescription: blobUri, dataHash }],
+      skillBlobUri,
+      [
+        { dataDescription: skillBlobUri, dataHash: skillHash },
+        { dataDescription: configBlobUri, dataHash: configHash },
+      ],
     ],
     "mint secure agent",
   );
@@ -456,7 +470,7 @@ async function testIntelligentTransfer() {
     from: account.address,
     to: recipient,
     currentHashes,
-    blobUris: [blobUri],
+    blobUris: [skillBlobUri, configBlobUri],
     contentKey,
     deadline,
     recipientPrivKey: recipientPrivKey as `0x${string}`,
@@ -484,19 +498,22 @@ async function testIntelligentTransfer() {
   console.log(`  ✔ PASSED`);
 }
 
-// ── Test 3: Encrypt/decrypt skill payload ─────────────────────────────────────
+// ── Test 3: Encrypt/decrypt two-blob pattern ─────────────────────────────────
 
 async function testEncryptDecryptSkill() {
   console.log(
-    "\n── Test 3: Encrypt/decrypt skill payload ────────────────────────",
+    "\n── Test 3: Encrypt/decrypt two-blob pattern ─────────────────────",
   );
 
-  const skill = {
-    name: "web-search",
-    description: "Search the web for information",
-    version: "1.0.0",
-    systemPrompt: "You are a helpful web search assistant.",
-    tools: [{ name: "search", endpoint: "https://api.example.com/search" }],
+  // Two blobs share one content key:
+  //   blob[0]: SKILL.md — plain markdown string
+  //   blob[1]: config   — JSON object (model, temperature, etc.)
+  const skillContent =
+    "# Web Search Agent\nYou are a helpful web search assistant.";
+  const config = {
+    model: "phala/gemma-4-26b-a4b-uncensored",
+    temperature: 0,
+    allowedDomains: ["example.com"],
   };
 
   // ECIES key pair: use the sender's secp256k1 key
@@ -505,31 +522,41 @@ async function testEncryptDecryptSkill() {
   const privKeyBytes = Buffer.from(PRIVATE_KEY.slice(2), "hex");
 
   const contentKey = generateContentKey();
-  const blob = encryptMetadata(
-    "web-search-skill",
-    skill,
+  const skillBlob = encryptMetadata(
+    "skill.md",
+    skillContent,
     contentKey,
     pubKeyHex,
   );
+  const configBlob = encryptMetadata("config", config, contentKey, pubKeyHex);
   console.log(
-    `  ✔ encrypted — ${blob.ciphertext.length / 2} bytes ciphertext, algorithm: ${blob.algorithm}`,
+    `  ✔ encrypted — skill: ${skillBlob.ciphertext.length / 2}B, config: ${configBlob.ciphertext.length / 2}B`,
   );
 
-  // Decrypt: unwrap the content key, then decrypt the payload
-  const recoveredKey = decryptContentKey(blob, privKeyBytes);
-  const decrypted = decryptMetadata<typeof skill>(blob, recoveredKey);
+  // Decrypt both with the same content key
+  const recoveredKey = decryptContentKey(skillBlob, privKeyBytes);
+  const decryptedSkill = decryptMetadata<string>(skillBlob, recoveredKey);
+  const decryptedConfig = decryptMetadata<typeof config>(
+    configBlob,
+    recoveredKey,
+  );
 
+  if (decryptedSkill !== skillContent) {
+    throw new Error(
+      `Test 3 FAILED: skill content mismatch — got ${JSON.stringify(decryptedSkill)}`,
+    );
+  }
   if (
-    decrypted.name !== skill.name ||
-    decrypted.systemPrompt !== skill.systemPrompt ||
-    decrypted.tools.length !== skill.tools.length
+    decryptedConfig.model !== config.model ||
+    decryptedConfig.temperature !== config.temperature ||
+    decryptedConfig.allowedDomains.length !== config.allowedDomains.length
   ) {
     throw new Error(
-      `Test 3 FAILED: decrypted data does not match original — got ${JSON.stringify(decrypted)}`,
+      `Test 3 FAILED: config mismatch — got ${JSON.stringify(decryptedConfig)}`,
     );
   }
   console.log(
-    `  ✔ decrypted — skill: "${decrypted.name}", tools: ${decrypted.tools.length}`,
+    `  ✔ decrypted — skill: ${decryptedSkill.length} chars, model: ${decryptedConfig.model}`,
   );
   console.log(`  ✔ PASSED`);
 }

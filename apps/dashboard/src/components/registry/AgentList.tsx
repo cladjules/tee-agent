@@ -6,8 +6,18 @@ export default async function AgentList() {
 
   if (agents.length === 0) {
     return (
-      <div className="text-center py-12 border border-dashed border-gray-700 rounded-xl text-gray-500">
-        No agents registered yet. Be the first!
+      <div className="glass-card text-center py-16 rounded-xl space-y-3">
+        <div className="text-4xl text-violet-800">◈</div>
+        <p className="text-slate-400 font-medium">No agents registered yet.</p>
+        <p className="text-sm text-slate-600">
+          Deploy your first agent to get started.
+        </p>
+        <a
+          href="/agents/new"
+          className="btn-primary inline-block mt-2 px-5 py-2.5 rounded-lg text-sm"
+        >
+          Deploy Agent →
+        </a>
       </div>
     );
   }

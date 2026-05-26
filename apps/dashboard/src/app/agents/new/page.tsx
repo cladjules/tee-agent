@@ -24,6 +24,69 @@ const AGENT_TYPES = [
   "other",
 ];
 
+// ── Skill templates (Private Data step presets) ───────────────────────────────
+
+const SKILL_TEMPLATES = [
+  {
+    id: "prediction-verifier",
+    label: "Prediction Market Oracle",
+    icon: "⚖️",
+    description:
+      "LLM verifier — YES / NO / INVALID verdict with confidence score",
+    entries: [
+      {
+        name: "SKILL.md",
+        data:
+          "# Prediction Market Resolver\n" +
+          "You are an objective prediction market resolver.\n" +
+          "Given a claim and optional evidence, determine whether the claim is true (YES), false (NO), or cannot be determined (INVALID).\n" +
+          'Respond with valid JSON only: { \"verdict\": \"YES\" | \"NO\" | \"INVALID\", \"confidence\": 0-100, \"reasoning\": \"...\" }',
+      },
+      {
+        name: "parameters.json",
+        data: JSON.stringify(
+          {
+            model: "phala/gemma-4-26b-a4b-uncensored",
+            temperature: 0.2,
+            top_p: 0.9,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  },
+  {
+    id: "web-fetcher",
+    label: "Web Data Oracle",
+    icon: "🌐",
+    description: "Fetch a URL and optionally analyse the content with an LLM",
+    entries: [
+      {
+        name: "SKILL.md",
+        data:
+          "# Web Data Analyst\n" +
+          "You are a web data analyst. Extract and summarise the key information from the provided web page content.",
+      },
+      {
+        name: "parameters.json",
+        data: JSON.stringify(
+          {
+            allowedDomains: ["*"],
+            llm: {
+              model: "phala/gemma-4-26b-a4b-uncensored",
+              temperature: 0.3,
+              top_p: 0.9,
+            },
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  },
+];
+
 const STEPS = ["Identity", "Services", "Private Data", "Review"];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -95,13 +158,10 @@ export default function NewAgentPage() {
         endpoint: a2aUrl.trim(),
         ...(a2aVersion.trim() ? { version: a2aVersion.trim() } : {}),
       });
-    if (
-      oasfEnabled &&
-      (oasfUrl.trim() || oasfSkills.length > 0 || oasfDomains.length > 0)
-    )
+    if (oasfEnabled && oasfUrl.trim())
       svcs.push({
         name: "OASF",
-        endpoint: oasfUrl.trim(), // may be empty; server auto-fills ipfs:// URI
+        endpoint: oasfUrl.trim(),
         ...(oasfVersion.trim() ? { version: oasfVersion.trim() } : {}),
         ...(oasfSkills.length ? { skills: oasfSkills } : {}),
         ...(oasfDomains.length ? { domains: oasfDomains } : {}),
@@ -125,9 +185,26 @@ export default function NewAgentPage() {
 
   // ── Wizard navigation ───────────────────────────────────────────────────────
 
+  function getServicesError(): string | null {
+    if (mcpEnabled && !mcpUrl.trim())
+      return "MCP is enabled but has no endpoint URL.";
+    if (a2aEnabled && !a2aUrl.trim())
+      return "A2A is enabled but has no endpoint URL.";
+    if (oasfEnabled && !oasfUrl.trim())
+      return "OASF is enabled but has no endpoint URL.";
+    for (const svc of customServices) {
+      if (svc.name.trim() && !svc.endpoint.trim())
+        return `Custom service "${svc.name}" is missing an endpoint.`;
+      if (!svc.name.trim() && svc.endpoint.trim())
+        return "A custom service has an endpoint but no name.";
+    }
+    return null;
+  }
+
   function canAdvance(): boolean {
     if (step === 0)
       return name.trim().length > 0 && description.trim().length > 0;
+    if (step === 1) return getServicesError() === null;
     return true;
   }
 
@@ -186,9 +263,14 @@ export default function NewAgentPage() {
           hash: mintHash,
         });
 
+        const contractLogs = receipt.logs.filter(
+          (l) =>
+            l.address.toLowerCase() === prepared.contractAddress!.toLowerCase(),
+        );
+
         const [log] = parseEventLogs({
           abi: AGENT_REGISTRY_ABI,
-          logs: receipt.logs,
+          logs: contractLogs,
           eventName: "Registered",
           strict: false,
         }) as Array<{ args?: { agentId?: bigint } }>;
@@ -601,6 +683,12 @@ export default function NewAgentPage() {
                 + Add custom service
               </button>
 
+              {getServicesError() && (
+                <p className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">
+                  {getServicesError()}
+                </p>
+              )}
+
               {/* x402 */}
               <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/40 px-4 py-3">
                 <div>
@@ -638,6 +726,40 @@ export default function NewAgentPage() {
                 Each entry is AES-256-GCM encrypted and stored on 0G Storage.
                 Leave all rows empty to skip.
               </p>
+            </div>
+
+            {/* Skill templates */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-400">
+                Quick templates
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {SKILL_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() =>
+                      setPrivateEntries(
+                        template.entries.map((e) => ({
+                          name: e.name,
+                          data: e.data,
+                        })),
+                      )
+                    }
+                    className="text-left rounded-lg border border-gray-700 bg-gray-800/40 hover:border-violet-600 hover:bg-violet-950/20 px-4 py-3 transition-colors group"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-base">{template.icon}</span>
+                      <span className="text-xs font-semibold text-gray-200 group-hover:text-violet-300 transition-colors">
+                        {template.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-snug">
+                      {template.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="space-y-3">
               {privateEntries.map((entry, i) => (
@@ -699,8 +821,25 @@ export default function NewAgentPage() {
           </>
         )}
 
+        {/* Step 3 — Minting progress */}
+        {step === 3 && isPending && (
+          <div className="flex flex-col items-center justify-center py-12 space-y-5">
+            <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            <div className="text-center space-y-2">
+              <p className="text-base font-semibold text-white">
+                Minting in progress…
+              </p>
+              <p className="text-xs text-gray-400 max-w-xs leading-relaxed">
+                Encrypting private data, uploading to 0G Storage, pinning
+                metadata to IPFS, and submitting the on-chain transaction. This
+                may take up to a minute.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Step 3 — Review */}
-        {step === 3 && (
+        {step === 3 && !isPending && (
           <>
             <h2 className="text-base font-semibold text-gray-100">Review</h2>
             <div className="space-y-3 text-sm">
@@ -773,7 +912,8 @@ export default function NewAgentPage() {
           onClick={() =>
             step === 0 ? (window.location.href = "/") : setStep((s) => s - 1)
           }
-          className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          disabled={isPending}
+          className="text-sm text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-30 disabled:pointer-events-none"
         >
           {step === 0 ? "Cancel" : "← Back"}
         </button>

@@ -7,8 +7,11 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc --build",
-    "dev": "docker start tappd-sim 2>/dev/null || docker run -d -p 8090:8090 --name tappd-sim phalanetwork/tappd-simulator:latest && sleep 1 && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/index.ts",
-    "start": "node dist/index.js",
+    "deploy:prediction-market": "phala deploy -e .env -e ORACLE_ENTRY=examples/prediction-market.js --wait",
+    "deploy:web-fetcher": "phala deploy -e .env -e ORACLE_ENTRY=examples/web-data-oracle.js --wait",
+    "dev:prediction-market": "docker start tappd-sim 2>/dev/null || docker run -d -p 8090:8090 --name tappd-sim phalanetwork/tappd-simulator:latest && sleep 1 && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/examples/prediction-market.ts",
+    "dev:web-fetcher": "docker start tappd-sim 2>/dev/null || docker run -d -p 8090:8090 --name tappd-sim phalanetwork/tappd-simulator:latest && sleep 1 && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/examples/web-data-oracle.ts",
+    "dev": "npm run dev:prediction-market",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo"
   },
@@ -16,6 +19,8 @@
     "@0gfoundation/0g-ts-sdk": "^1.2.8",
     "@open-agents-toolkit/agent": "*",
     "@phala/dstack-sdk": "^0.1.5",
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.6",
     "eciesjs": "^0.4.16",
     "ethers": "6.13.1",
     "express": "^4.21.2",
@@ -24,6 +29,7 @@
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^25.6.0",
+    "phala": "^1.1.19",
     "tsx": "^4.19.4",
     "typescript": "^6.0.3"
   }

@@ -197,12 +197,14 @@ export function parseAgentServicesJson(
       return { error: "Services must be a JSON array." };
     }
 
-    if (
-      parsed.some(
-        (service) => !service?.name?.trim() || !service?.endpoint?.trim(),
-      )
-    ) {
-      return { error: "Each service must have a name and endpoint." };
+    const missingFields = parsed.filter(
+      (service) => !service?.name?.trim() || !service?.endpoint?.trim(),
+    );
+
+    if (missingFields.length > 0) {
+      return {
+        error: `Each service must have a name and endpoint ${JSON.stringify(missingFields.map((s) => ({ name: s?.name, endpoint: s?.endpoint })))}`,
+      };
     }
 
     const services = parsed.map((service) => {
@@ -276,7 +278,11 @@ export async function readJsonFromUri<T>(
     const base64 = uri.split(",")[1] ?? "";
     return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
   }
-  const response = await fetchImpl(uri);
+  // Translate ipfs:// to a public HTTP gateway
+  const httpUri = uri.startsWith("ipfs://")
+    ? `https://ipfs.io/ipfs/${uri.slice(7)}`
+    : uri;
+  const response = await fetchImpl(httpUri);
   if (!response.ok) {
     throw new Error(`Failed to fetch JSON from ${uri}: ${response.status}`);
   }
@@ -656,7 +662,7 @@ export function buildDecryptMessage(
   ownerAddress: string,
   signedAt: number,
 ) {
-  return `Open Agents Toolkit decrypt request\nagentId:${agentId}\nowner:${ownerAddress.toLowerCase()}\nsignedAt:${signedAt}`;
+  return `Arcane Agents decrypt request\nagentId:${agentId}\nowner:${ownerAddress.toLowerCase()}\nsignedAt:${signedAt}`;
 }
 
 export function decryptEncryptedBlob(

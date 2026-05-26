@@ -19,16 +19,18 @@ function AddrRow({
 }) {
   if (!address) return null;
   return (
-    <tr className={`border-t border-gray-800 ${isFirst ? "border-t-0" : ""}`}>
-      <td className="py-2 pr-6 text-sm text-gray-400 whitespace-nowrap align-top">
+    <tr
+      className={`border-t border-violet-950/40 ${isFirst ? "border-t-0" : ""}`}
+    >
+      <td className="py-2.5 pr-6 text-sm text-slate-400 whitespace-nowrap align-top">
         {label}
         {tag && (
-          <span className="ml-2 text-xs font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">
+          <span className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-950/40 text-violet-500 border border-violet-900/40">
             {tag}
           </span>
         )}
       </td>
-      <td className="py-2 text-sm font-mono text-gray-200 break-all">
+      <td className="py-2.5 text-sm font-mono text-slate-300 break-all">
         <a
           href={`${explorer}/${address}`}
           target="_blank"
@@ -55,19 +57,19 @@ export default function ContractAddresses() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <h2 className="text-xl font-semibold text-gray-100">
+        <h2 className="text-xl font-semibold text-slate-100">
           Deployed Contracts
         </h2>
         <a
           href={explorerRoot}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs font-mono px-2 py-0.5 rounded-full border bg-gray-900 border-gray-700 text-gray-400 hover:text-violet-400 hover:border-violet-700 transition-colors"
+          className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-violet-950/30 border-violet-900/50 text-violet-400 hover:text-violet-300 hover:border-violet-700 transition-colors"
         >
           {networkLabel} · {cfg.chain.id} ↗
         </a>
       </div>
-      <div className="rounded-xl border border-gray-800 bg-gray-900/50 px-5 py-1">
+      <div className="glass-card rounded-xl px-5 py-1">
         <table className="w-full">
           <tbody>
             <AddrRow

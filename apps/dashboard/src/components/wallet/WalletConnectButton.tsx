@@ -13,7 +13,9 @@ export default function WalletConnectButton() {
     try {
       await connect();
     } catch {
-      alert("Wallet connection failed. Install MetaMask or another EIP-6963 wallet.");
+      alert(
+        "Wallet connection failed. Install MetaMask or another EIP-6963 wallet.",
+      );
     }
   }
 
@@ -23,15 +25,17 @@ export default function WalletConnectButton() {
 
   if (status === "connected" && address) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-green-700 bg-green-900/30 px-3 py-2 text-sm text-green-300">
-        <span className="h-2 w-2 rounded-full bg-green-400" />
-        <span className="font-mono">{formatAddress(address)}</span>
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-3 py-1.5 text-sm">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+        <span className="font-mono text-xs text-emerald-400">
+          {formatAddress(address)}
+        </span>
         <button
           type="button"
           onClick={handleDisconnect}
-          className="rounded border border-green-700 px-2 py-1 text-xs font-semibold text-green-200 transition-colors hover:bg-green-800/50 cursor-pointer"
+          className="rounded-md border border-emerald-800/50 px-2 py-0.5 text-xs font-medium text-emerald-500 transition-colors hover:bg-emerald-900/40 hover:text-emerald-300 cursor-pointer"
         >
-          Disconnect
+          ✕
         </button>
       </div>
     );
@@ -41,7 +45,7 @@ export default function WalletConnectButton() {
     <button
       onClick={handleConnect}
       disabled={status === "connecting"}
-      className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+      className="btn-primary rounded-lg px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
     >
       {status === "connecting" ? "Connecting…" : "Connect Wallet"}
     </button>

@@ -1,6 +1,6 @@
 {
-  "OpenAgentsToolkit#TeeVerifier": "0x0c6c7638D5dD58Ea5F1Fdc24db7261222dC9468b",
-  "OpenAgentsToolkit#Verifier": "0x27A47101191E1a872Bb2f53504E1b42A19054401",
-  "OpenAgentsToolkit#AgentRegistry": "0x3D2DcE1fDFA948d44B667BB7672F9ef9d2F8694e",
-  "OpenAgentsToolkit#ValidationRegistry": "0xc436693B27c08Ab05625685C36D9bb3107A80057"
+  "ArcaneAgents#TeeVerifier": "0xb7Ac7ad60dA54CbE080575d56Ab7b56D3CfF8Ce6",
+  "ArcaneAgents#Verifier": "0x3705729C4D9b9BC248996109134848aF9604B937",
+  "ArcaneAgents#AgentRegistry": "0x7C1519fBDD0C6206f134e22D2cbcfB43A50E6d5E",
+  "ArcaneAgents#ValidationRegistry": "0xE598F9630C62694b14Be6BB72aF3222Eac253956"
 }

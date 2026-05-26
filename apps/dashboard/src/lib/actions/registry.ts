@@ -5,21 +5,10 @@ import type {
   AgentRegistrationFile,
 } from "@open-agents-toolkit/agent/types";
 import { AgentRegistry } from "@open-agents-toolkit/agent/registry";
-import {
-  buildDecryptMessage,
-  decryptEncryptedBlob,
-  readJsonFromUri,
-} from "@open-agents-toolkit/agent/encryption";
+import { readJsonFromUri } from "@open-agents-toolkit/agent/encryption";
 import { AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent/abis";
 import type { Address } from "viem";
-import {
-  createPublicClient,
-  http,
-  keccak256,
-  parseAbiItem,
-  toHex,
-  verifyMessage,
-} from "viem";
+import { createPublicClient, http, keccak256, parseAbiItem, toHex } from "viem";
 import { cfg } from "@/lib/config";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,21 +41,6 @@ export type AgentFeedbackOverview = {
   totalScore: number;
   totalCount: number;
   feedbacks: AgentFeedbackView[];
-};
-
-export type DecryptedIntelligentDataEntry = {
-  name?: string;
-  dataDescription: string;
-  dataHash: `0x${string}`;
-  plaintext?: unknown;
-  error?: string;
-};
-
-type DecryptAgentIntelligentDataInput = {
-  agentId: string;
-  ownerAddress: `0x${string}`;
-  signedAt: number;
-  signature: `0x${string}`;
 };
 
 type PublicIntelligentDataItem = {
@@ -237,18 +211,37 @@ export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
     const registry = makeAgentRegistryClient();
     if (!publicClient || !registry) return [];
 
-    const logs = await publicClient.getLogs({
-      address: cfg.registryAddress,
-      event: parseAbiItem(
-        "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
-      ),
-      fromBlock: "earliest",
-      toBlock: "latest",
-    });
+    const registeredEvent = parseAbiItem(
+      "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
+    );
+
+    // Paginate in chunks of 2000 blocks (Base Sepolia public RPC limit).
+    const PAGE = 2000n;
+    const latestBlock = await publicClient.getBlockNumber();
+    const allLogs = [];
+    for (let from = cfg.registryFromBlock; from <= latestBlock; from += PAGE) {
+      const to =
+        from + PAGE - 1n < latestBlock ? from + PAGE - 1n : latestBlock;
+      const chunk = await publicClient.getLogs({
+        address: cfg.registryAddress,
+        event: registeredEvent,
+        fromBlock: from,
+        toBlock: to,
+      });
+      allLogs.push(...chunk);
+    }
+    const logs = allLogs;
 
     const agents = await Promise.allSettled(
       logs.map((log) => registry.resolve(log.args.agentId as bigint)),
     );
+    agents.forEach((r, i) => {
+      if (r.status === "rejected")
+        console.error(
+          `[registry] resolve agentId=${logs[i]?.args.agentId} failed:`,
+          r.reason,
+        );
+    });
     return agents
       .filter(
         (r): r is PromiseFulfilledResult<RegisteredAgent> =>
@@ -256,7 +249,8 @@ export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
       )
       .map((r) => r.value)
       .reverse();
-  } catch {
+  } catch (err) {
+    console.error("[registry] getRegisteredAgents failed:", err);
     return [];
   }
 }
@@ -333,119 +327,6 @@ export async function getAgentFeedbackOverview(
   _agentId: bigint,
 ): Promise<AgentFeedbackOverview> {
   return { totalScore: 0, totalCount: 0, feedbacks: [] };
-}
-
-export async function decryptAgentIntelligentData(
-  input: DecryptAgentIntelligentDataInput,
-): Promise<{ data: DecryptedIntelligentDataEntry[]; error?: string }> {
-  if (!cfg.registryAddress) {
-    return { data: [], error: "Contracts are not configured." };
-  }
-  if (!cfg.oracleKey) {
-    return { data: [], error: "Server decryption key is not configured." };
-  }
-
-  const { agentId, ownerAddress, signedAt, signature } = input;
-  const ageMs = Date.now() - Number(signedAt);
-  if (!Number.isFinite(ageMs) || ageMs < -60_000 || ageMs > 5 * 60_000) {
-    return {
-      data: [],
-      error: "Decryption signature is expired. Please try again.",
-    };
-  }
-
-  try {
-    const message = buildDecryptMessage(agentId, ownerAddress, signedAt);
-    const isValidSignature = await verifyMessage({
-      address: ownerAddress,
-      message,
-      signature,
-    });
-    if (!isValidSignature) {
-      return { data: [], error: "Invalid wallet signature." };
-    }
-
-    const publicClient = makePublicClient();
-    if (!publicClient) {
-      return { data: [], error: "RPC is not configured." };
-    }
-
-    const tokenId = BigInt(agentId);
-
-    const [chainOwner, onChainData] = await Promise.all([
-      publicClient.readContract({
-        address: cfg.registryAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "ownerOf",
-        args: [tokenId],
-      }),
-      publicClient.readContract({
-        address: cfg.registryAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "intelligentDatasOf",
-        args: [tokenId],
-      }),
-    ]);
-
-    if ((chainOwner as string).toLowerCase() !== ownerAddress.toLowerCase()) {
-      return {
-        data: [],
-        error: "Only the current owner can decrypt intelligent data.",
-      };
-    }
-
-    const entries = onChainData as ReadonlyArray<AgentIntelligentDataRecord>;
-    const uriByHash = await readPublicMetadataIntelligentDataMap(tokenId);
-    const decrypted = await Promise.all(
-      entries.map(async (entry): Promise<DecryptedIntelligentDataEntry> => {
-        const mapped = uriByHash.get(entry.dataHash.toLowerCase());
-        try {
-          const uri = isReadableUri(entry.dataDescription)
-            ? entry.dataDescription
-            : (mapped?.uri ?? "");
-
-          if (!uri || !isReadableUri(uri)) {
-            throw new Error(
-              "No readable encrypted data URI found for this entry. It may be from an older format.",
-            );
-          }
-
-          const blob = await readJsonFromUri<Record<string, unknown>>(uri);
-          const plaintext = decryptEncryptedBlob(
-            blob,
-            cfg.oracleKey as `0x${string}`,
-          );
-
-          return {
-            name: mapped?.name,
-            dataDescription: entry.dataDescription,
-            dataHash: entry.dataHash,
-            plaintext,
-          };
-        } catch (error) {
-          return {
-            name: mapped?.name,
-            dataDescription: entry.dataDescription,
-            dataHash: entry.dataHash,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Failed to decrypt intelligent data.",
-          };
-        }
-      }),
-    );
-
-    return { data: decrypted };
-  } catch (error) {
-    return {
-      data: [],
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to decrypt intelligent data.",
-    };
-  }
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────

@@ -30,7 +30,8 @@ import type { AgentNFTEncryptedData } from "./types.js";
 // ─── Default endpoints ────────────────────────────────────────────────────────
 
 const DEFAULT_RPC_URL = "https://evmrpc-testnet.0g.ai";
-const DEFAULT_INDEXER_URL = "https://indexer-storage-testnet-standard.0g.ai";
+// Turbo indexer is recommended; standard is currently unavailable on testnet.
+const DEFAULT_INDEXER_URL = "https://indexer-storage-testnet-turbo.0g.ai";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,11 @@ export interface ZeroGFlowUploadResult {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isTransientError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /50[234]|429|network|timeout|ECONNREFUSED|ETIMEDOUT/i.test(msg);
+}
 
 function resolveIndexerUrl(opts?: ZeroGReadOptions): string {
   return (
@@ -151,18 +157,19 @@ export class ZeroGStorageClient {
         this._rpcUrl,
         signer as any,
       );
-      if (err || !tx) {
-        throw new Error(String(err ?? "no transaction returned"));
-      }
+      if (err || !tx) throw new Error(String(err ?? "no transaction returned"));
       const rootHash =
         "rootHash" in tx
           ? (tx as { rootHash: string }).rootHash
           : (tx as { rootHashes: string[] }).rootHashes[0];
       return { cid: rootHash, url: `zerog://${rootHash}`, size: bytes.length };
     } catch (err) {
+      const hint = isTransientError(err)
+        ? " (0G Storage may be temporarily unavailable — the upload transaction may already have been submitted; check your agent on-chain before retrying)"
+        : "";
       throw new RegistryError(
         "STORAGE_ERROR",
-        `0G Storage upload failed: ${String(err)}`,
+        `0G Storage upload failed: ${String(err)}${hint}`,
         err,
       );
     }
@@ -202,9 +209,15 @@ export async function uploadEncryptedIntelligentData(params: {
   const result: AgentNFTEncryptedData[] = [];
 
   for (const entry of nonEmpty) {
+    let metadata: unknown;
+    try {
+      metadata = JSON.parse(entry.data);
+    } catch {
+      metadata = entry.data;
+    }
     const encryptedBlob = encryptMetadata(
       entry.name.trim(),
-      entry.data,
+      metadata,
       contentKey,
       params.keyEncryptionPublicKey,
     );

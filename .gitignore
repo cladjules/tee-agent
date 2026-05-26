@@ -157,6 +157,7 @@ package-lock.json
 
 # Hardhat
 /contracts/artifacts
+/contracts/deployments
 /contracts/cache
 /contracts/types
 /contracts/coverage

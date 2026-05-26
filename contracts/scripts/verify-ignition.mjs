@@ -35,11 +35,11 @@ if (!existsSync(deployedPath)) {
 
 const deployed = JSON.parse(readFileSync(deployedPath, "utf8"));
 
-const teeVerifier = deployed["OpenAgentsToolkit#TEEVerifier"];
-const agentRegistry = deployed["OpenAgentsToolkit#AgentRegistry"];
-const ensAgentRegistry = deployed["OpenAgentsToolkit#ENSAgentRegistry"];
-const reputationRegistry = deployed["OpenAgentsToolkit#ReputationRegistry"];
-const validationRegistry = deployed["OpenAgentsToolkit#ValidationRegistry"];
+const teeVerifier = deployed["ArcaneAgents#TEEVerifier"];
+const agentRegistry = deployed["ArcaneAgents#AgentRegistry"];
+const ensAgentRegistry = deployed["ArcaneAgents#ENSAgentRegistry"];
+const reputationRegistry = deployed["ArcaneAgents#ReputationRegistry"];
+const validationRegistry = deployed["ArcaneAgents#ValidationRegistry"];
 
 const privateKey = process.env.PRIVATE_KEY;
 const deployer =
@@ -60,7 +60,7 @@ const tasks = [
     contract: "src/AgentRegistry.sol:AgentRegistry",
     args:
       deployer && teeVerifier
-        ? ['"Open Agents Toolkit"', '"OAT"', deployer, teeVerifier]
+        ? ['"Arcane Agents"', '"OAT"', deployer, teeVerifier]
         : null,
   },
   {

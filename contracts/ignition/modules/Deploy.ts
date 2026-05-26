@@ -24,7 +24,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *   npm run deploy:baseSepolia
  *   npm run deploy:base
  */
-export default buildModule("OpenAgentsToolkit", (m) => {
+export default buildModule("ArcaneAgents", (m) => {
   const deployer = m.getAccount(0);
 
   // Zero address = co-registration disabled (default for local Hardhat node).
@@ -54,7 +54,7 @@ export default buildModule("OpenAgentsToolkit", (m) => {
 
   // ── ERC-7857 agent NFT registry ───────────────────────────────────────────
   const agentRegistry = m.contract("AgentRegistry", [
-    "Open Agents Toolkit",
+    "Arcane Agents",
     "OAT",
     deployer,
     verifier,

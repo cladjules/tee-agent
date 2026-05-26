@@ -1,4 +1,4 @@
-# Open Agents Toolkit
+# Arcane Agents
 
 ## Overview
 
@@ -33,7 +33,6 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
 | Base / Base Sepolia only                              | Single well-supported L2; old 0G chain (chainId 16602) removed                                                                                                                                                                                                                                                                                                                       | May 2026 |
 | 0G Storage for encrypted blobs only                   | 0G is used exclusively for ERC-7857 encrypted intelligent data blobs (`zerog://` URIs). Agent metadata (ERC-8004 registration JSON) is pinned to IPFS via Pinata (`ipfs://` URIs) — content-addressed and publicly readable without a storage-layer key.                                                                                                                             | May 2026 |
-| No ENS dependency                                     | ENS removed entirely; agent identity is ERC-721 token ID                                                                                                                                                                                                                                                                                                                             | May 2026 |
 | Use official ERC-8004 singletons                      | Mainnet: Identity `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` / Reputation `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`. Testnet: Identity `0x8004A818BFB912233c491871b3d84c89A494BD9e` / Reputation `0x8004B663056A597Dffe9eCcC1965A193B7388713`. The Identity Registry address is passed to the `AgentRegistry` constructor (immutable); `erc8004AgentId` is used for reputation. | May 2026 |
 | Deploy our own ValidationRegistry                     | No confirmed global singleton exists for ValidationRegistry. `ValidationRegistry` is deployed alongside `AgentRegistry` in the Ignition module and takes `agentRegistry` as constructor arg. Address set via `VALIDATION_REGISTRY_ADDRESS` env var after deployment.                                                                                                                 | May 2026 |
 | ABI exports as JSON                                   | `packages/agent/src/abis/*.json` are the source of truth; `abis.ts` is a thin re-exporter. `gen-abis.mjs` writes the JSON files; `ReputationRegistry.json` is maintained manually from upstream.                                                                                                                                                                                     | May 2026 |
@@ -45,21 +44,21 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 ## Environment Variables
 
-| Variable                           | Required | Description                                                                                     |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: baseSepolia)                                                  |
-| `RPC_URL`                          | Yes      | EVM RPC for the app chain                                                                       |
-| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract                                                               |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier`                                                                          |
-| `REPUTATION_REGISTRY_ADDRESS`      | No       | Overrides ERC-8004 Reputation Registry (default: `0x8004BAa1…` mainnet / `0x8004B663…` testnet) |
-| `VALIDATION_REGISTRY_ADDRESS`      | No       | Deployed `ValidationRegistry` contract (our own deployment — no default)                        |
-| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer                                                                   |
-| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage uploads of encrypted blobs (falls back to `PRIVATE_KEY`)                     |
-| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                    |
-| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                |
-| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: 0G testnet standard indexer)                                           |
-| `ORACLE_PRIVATE_KEY`               | No       | Local oracle key for dev/testing (falls back to `PRIVATE_KEY`)                                  |
-| `ORACLE_URL`                       | No       | Phala Cloud CVM URL — when set, uses remote TEE for transfers                                   |
+| Variable                           | Required | Description                                                                                                                                  |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: baseSepolia)                                                                                               |
+| `RPC_URL`                          | Yes      | EVM RPC for the app chain                                                                                                                    |
+| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract                                                                                                            |
+| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier`                                                                                                                       |
+| `REPUTATION_REGISTRY_ADDRESS`      | No       | Overrides ERC-8004 Reputation Registry (default: `0x8004BAa1…` mainnet / `0x8004B663…` testnet)                                              |
+| `VALIDATION_REGISTRY_ADDRESS`      | No       | Deployed `ValidationRegistry` contract (our own deployment — no default)                                                                     |
+| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer                                                                                                                |
+| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage uploads of encrypted blobs (falls back to `PRIVATE_KEY`)                                                                  |
+| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                                 |
+| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                                                             |
+| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                          |
+| `TEE_ENCRYPTION_PUBLIC_KEY`        | No       | Removed — the dashboard now fetches the oracle's public key live from `GET /address` at mint time.                                           |
+| `NEXT_PUBLIC_ORACLE_URL`           | No       | Phala Cloud CVM URL — used server-side (mint/transfer) and client-side (Run Oracle / Validate forms). Local default: `http://localhost:3001` |
 
 ## Requirements
 

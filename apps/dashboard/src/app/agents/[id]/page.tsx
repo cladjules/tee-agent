@@ -5,8 +5,6 @@ import {
   getAgentIntelligentData,
 } from "@/lib/actions/registry";
 import AgentDetailActions from "./AgentDetailActions";
-import OwnerIntelligentDataDecrypt from "./OwnerIntelligentDataDecrypt";
-import { useMemo } from "react";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -15,7 +13,7 @@ interface Props {
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   return {
-    title: `Agent #${id} — Open Agents Toolkit`,
+    title: `Agent #${id} — Arcane Agents`,
     description: `View and manage on-chain AI agent #${id}`,
   };
 }
@@ -31,10 +29,6 @@ export default async function AgentDetailPage({ params }: Props) {
 
   if (!agent) notFound();
 
-  const ensDomain = agent?.metadata.services?.find(
-    (service) => service.name === "ENS",
-  )?.endpoint;
-
   return (
     <div className="space-y-10 max-w-4xl mx-auto">
       {/* Header */}
@@ -49,11 +43,7 @@ export default async function AgentDetailPage({ params }: Props) {
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl font-bold">
-              {ensDomain
-                ? `${ensDomain} (${agent.metadata.name})`
-                : agent.metadata.name}
-            </h1>
+            <h1 className="text-3xl font-bold">{agent.metadata.name}</h1>
             <span className="text-sm font-mono text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
               #{agent.agentId.toString()}
             </span>
@@ -163,20 +153,26 @@ export default async function AgentDetailPage({ params }: Props) {
           </h2>
           {intelligentDataInfo.intelligentData.length > 0 ? (
             <div className="space-y-3">
-              <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-gray-300">
-                  Owner Decryption
-                </h3>
-                <p className="text-xs text-gray-500">
-                  Decryption is available only to the connected owner wallet and
-                  requires a wallet signature.
-                </p>
-                <OwnerIntelligentDataDecrypt
-                  agentId={id}
-                  owner={agent.owner}
-                  entries={intelligentDataInfo.intelligentData}
-                />
-              </div>
+              {intelligentDataInfo.intelligentData.map((entry, idx) => (
+                <div
+                  key={`${entry.dataHash}:${idx}`}
+                  className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2"
+                >
+                  {entry.name && (
+                    <p className="text-xs font-semibold text-gray-400">
+                      {entry.name}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500">Proof Hash</p>
+                  <p className="text-xs text-gray-300 break-all font-mono">
+                    {entry.dataHash}
+                  </p>
+                  <p className="text-xs text-gray-500">Address / URI</p>
+                  <p className="text-xs text-gray-300 break-all font-mono">
+                    {entry.dataDescription}
+                  </p>
+                </div>
+              ))}
             </div>
           ) : (
             <p className="text-gray-500 text-sm">
@@ -266,6 +262,9 @@ export default async function AgentDetailPage({ params }: Props) {
           }
           reputationAddress={
             process.env.REPUTATION_REGISTRY_ADDRESS as `0x${string}` | undefined
+          }
+          validationAddress={
+            process.env.VALIDATION_REGISTRY_ADDRESS as `0x${string}` | undefined
           }
           owner={agent.owner}
           initialServices={agent.metadata.services ?? []}

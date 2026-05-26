@@ -1,11 +1,14 @@
-# TEE Re-encryption Oracle — Phala Cloud Deployment
+# TEE Oracle — Phala Cloud Deployment
 #
-# Deploy to Phala Cloud at https://cloud.phala.com
-# The /var/run/dstack.sock volume binding is required for the dstack SDK
-# to access the Intel TDX enclave key management service.
+# Deploy (prediction-market): npm run deploy:prediction-market
+# Deploy (web-fetcher):        npm run deploy:web-fetcher
 #
-# After deployment, query GET /address to get the oracle's Ethereum address
-# and register it once via TEEVerifier.updateOracleAddress(address).
+# First deploy: run `phala link` afterwards to record app_id in phala.toml.
+# After deploy: GET /address → register the oracle address in TEEVerifier.
+#
+# ORACLE_ENTRY selects the entry point compiled into dist/ (required):
+#   examples/prediction-market.js   — prediction-verifier skill
+#   examples/web-data-oracle.js     — web-fetcher skill
 
 services:
   oracle:
@@ -16,6 +19,14 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - ORACLE_ENTRY
+      # Required
+      - RPC_URL
+      - AGENT_REGISTRY_ADDRESS
+      # 0G Storage
+      - ZERO_G_PRIVATE_KEY
+      - ZERO_G_RPC_URL
+      - ZERO_G_INDEXER_URL
     volumes:
       - /var/run/tappd.sock:/var/run/tappd.sock
     restart: unless-stopped
