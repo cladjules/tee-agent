@@ -1,6 +1,6 @@
 {
-  "ArcaneAgents#TeeVerifier": "0xb7Ac7ad60dA54CbE080575d56Ab7b56D3CfF8Ce6",
-  "ArcaneAgents#Verifier": "0x3705729C4D9b9BC248996109134848aF9604B937",
-  "ArcaneAgents#AgentRegistry": "0x7C1519fBDD0C6206f134e22D2cbcfB43A50E6d5E",
-  "ArcaneAgents#ValidationRegistry": "0xE598F9630C62694b14Be6BB72aF3222Eac253956"
+  "TeeAgent#TeeVerifier": "0x37D6E38D80045F153298063Fc1D19138a861BC6a",
+  "TeeAgent#Verifier": "0x042648Db23456b1C0A962C47809c167d79047220",
+  "TeeAgent#AgentRegistry": "0x0B68afbf540ba1886d0C606f6ADA239bf54636bd",
+  "TeeAgent#ValidationRegistry": "0x8EEb08441011B2adDc5024864275bFC40b384099"
 }

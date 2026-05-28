@@ -56,9 +56,9 @@ if (existsSync(journalPath)) {
 
 // Map Ignition module keys → env var names
 const KEY_MAP = {
-  "ArcaneAgents#AgentRegistry": "AGENT_REGISTRY_ADDRESS",
-  "ArcaneAgents#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
-  "ArcaneAgents#TEEVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
+  "TeeAgent#AgentRegistry": "AGENT_REGISTRY_ADDRESS",
+  "TeeAgent#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
+  "TeeAgent#TeeVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
 };
 
 const resolved = {};

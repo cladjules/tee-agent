@@ -4,7 +4,49 @@ import {
   getAgentFeedbackOverview,
   getAgentIntelligentData,
 } from "@/lib/actions/registry";
+import {
+  fetchPendingValidationsForAgent,
+  getOracleRunHistory,
+} from "@/lib/actions/agents";
 import AgentDetailActions from "./AgentDetailActions";
+
+// ─── Chain helpers ────────────────────────────────────────────────────────────
+
+const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "baseSepolia") as
+  | "base"
+  | "baseSepolia";
+
+const EXPLORER_BASE =
+  NETWORK === "base" ? "https://basescan.org" : "https://sepolia.basescan.org";
+
+const ERC8004_IDENTITY_ADDRESS =
+  NETWORK === "base"
+    ? "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    : "0x8004A818BFB912233c491871b3d84c89A494BD9e";
+
+const ERC8004_SCAN_BASE =
+  NETWORK === "base" ? "https://8004scan.io" : "https://testnet.8004scan.io";
+
+const CHAIN_ID = NETWORK === "base" ? 8453 : 84532;
+
+function explorerAddress(addr: string) {
+  return `${EXPLORER_BASE}/address/${addr}`;
+}
+
+function explorerNft(contractAddr: string, tokenId: string | bigint) {
+  return `${EXPLORER_BASE}/nft/${contractAddr}/${tokenId}`;
+}
+
+function ipfsGatewayUrl(uri: string) {
+  if (uri.startsWith("ipfs://")) {
+    return `https://gateway.pinata.cloud/ipfs/${uri.slice(7)}`;
+  }
+  return null;
+}
+
+function erc8004ScanUrl(agentId: string) {
+  return `${ERC8004_SCAN_BASE}/agents/${CHAIN_ID}/${agentId}`;
+}
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -13,7 +55,7 @@ interface Props {
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   return {
-    title: `Agent #${id} — Arcane Agents`,
+    title: `Agent #${id} — Tee Agent`,
     description: `View and manage on-chain AI agent #${id}`,
   };
 }
@@ -21,13 +63,23 @@ export async function generateMetadata({ params }: Props) {
 export default async function AgentDetailPage({ params }: Props) {
   const { id } = await params;
   const agentId = BigInt(id);
-  const [agent, intelligentDataInfo, feedbackOverview] = await Promise.all([
+  const [
+    agent,
+    intelligentDataInfo,
+    feedbackOverview,
+    oracleRunsResult,
+    pendingValidations,
+  ] = await Promise.all([
     getAgent(agentId),
     getAgentIntelligentData(agentId),
     getAgentFeedbackOverview(agentId),
+    getOracleRunHistory(id),
+    fetchPendingValidationsForAgent(id),
   ]);
 
   if (!agent) notFound();
+
+  const oracleRuns = oracleRunsResult.runs;
 
   return (
     <div className="space-y-10 max-w-4xl mx-auto">
@@ -60,17 +112,18 @@ export default async function AgentDetailPage({ params }: Props) {
 
       {/* Details grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Identity */}
+        {/* Addresses & Owners */}
         <section className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-3">
           <h2 className="font-semibold text-sm text-gray-300 uppercase tracking-wider">
-            Identity
+            Addresses
           </h2>
           <DetailRow
-            label="Agent ID"
-            value={`#${agent.agentId.toString()}`}
+            label="Owner"
+            value={agent.owner}
             mono
+            truncate
+            href={explorerAddress(agent.owner)}
           />
-          <DetailRow label="Owner" value={agent.owner} mono truncate />
           {agent.agentWallet &&
             agent.agentWallet !==
               "0x0000000000000000000000000000000000000000" && (
@@ -79,40 +132,99 @@ export default async function AgentDetailPage({ params }: Props) {
                 value={agent.agentWallet}
                 mono
                 truncate
+                href={explorerAddress(agent.agentWallet)}
               />
             )}
-          <DetailRow
-            label="Metadata URI"
-            value={agent.metadataUri}
-            mono
-            truncate
-          />
           {intelligentDataInfo.verifierAddress &&
             intelligentDataInfo.verifierAddress !==
               "0x0000000000000000000000000000000000000000" && (
               <DetailRow
-                label="Verifier Address"
+                label="Verifier"
                 value={intelligentDataInfo.verifierAddress}
                 mono
                 truncate
+                href={explorerAddress(intelligentDataInfo.verifierAddress)}
               />
             )}
         </section>
 
+        {/* ERC-721 / ERC-7857 */}
         <section className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-3">
           <h2 className="font-semibold text-sm text-gray-300 uppercase tracking-wider">
-            Reputation
+            ERC-721 / ERC-7857
           </h2>
+          {process.env.AGENT_REGISTRY_ADDRESS && (
+            <DetailRow
+              label="Token"
+              value={`#${agent.agentId.toString()}`}
+              mono
+              href={explorerNft(
+                process.env.AGENT_REGISTRY_ADDRESS,
+                agent.agentId,
+              )}
+            />
+          )}
           <DetailRow
-            label="Total Score"
-            value={feedbackOverview.totalScore.toFixed(4)}
+            label="Metadata URI"
+            value={agent.publicMetadataUri ?? "—"}
             mono
+            truncate
+            href={ipfsGatewayUrl(agent.publicMetadataUri ?? "") ?? undefined}
           />
-          <DetailRow
-            label="Active Feedback Count"
-            value={String(feedbackOverview.totalCount)}
-            mono
-          />
+          {agent.publicMetadataUri &&
+            ipfsGatewayUrl(agent.publicMetadataUri) && (
+              <DetailRow
+                label="Metadata JSON"
+                value="View on IPFS ↗"
+                href={ipfsGatewayUrl(agent.publicMetadataUri)!}
+              />
+            )}
+        </section>
+
+        {/* ERC-8004 */}
+        <section className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-3">
+          <h2 className="font-semibold text-sm text-gray-300 uppercase tracking-wider">
+            ERC-8004
+          </h2>
+          {intelligentDataInfo.erc8004AgentId &&
+            intelligentDataInfo.erc8004AgentId !== "0" && (
+              <>
+                <DetailRow
+                  label="Token"
+                  value={`#${intelligentDataInfo.erc8004AgentId}`}
+                  mono
+                  href={explorerNft(
+                    ERC8004_IDENTITY_ADDRESS,
+                    intelligentDataInfo.erc8004AgentId,
+                  )}
+                />
+                <DetailRow
+                  label="View on 8004scan"
+                  value="View agent ↗"
+                  href={erc8004ScanUrl(intelligentDataInfo.erc8004AgentId)}
+                />
+              </>
+            )}
+          {agent.metadataUri ? (
+            <>
+              <DetailRow
+                label="Metadata URI"
+                value={agent.metadataUri}
+                mono
+                truncate
+                href={ipfsGatewayUrl(agent.metadataUri) ?? undefined}
+              />
+              {ipfsGatewayUrl(agent.metadataUri) && (
+                <DetailRow
+                  label="Metadata JSON"
+                  value="View on IPFS ↗"
+                  href={ipfsGatewayUrl(agent.metadataUri)!}
+                />
+              )}
+            </>
+          ) : (
+            <DetailRow label="Metadata URI" value="—" />
+          )}
         </section>
 
         <section className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-3 md:col-span-2">
@@ -183,8 +295,18 @@ export default async function AgentDetailPage({ params }: Props) {
 
         <section className="p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-3 md:col-span-2">
           <h2 className="font-semibold text-sm text-gray-300 uppercase tracking-wider">
-            All Feedback
+            Reputation &amp; Feedback
           </h2>
+          <DetailRow
+            label="Total Score"
+            value={feedbackOverview.totalScore.toFixed(4)}
+            mono
+          />
+          <DetailRow
+            label="Active Feedback Count"
+            value={String(feedbackOverview.totalCount)}
+            mono
+          />
           {feedbackOverview.feedbacks.length > 0 ? (
             <div className="space-y-3">
               {feedbackOverview.feedbacks.map((feedback) => (
@@ -257,17 +379,10 @@ export default async function AgentDetailPage({ params }: Props) {
         </div>
         <AgentDetailActions
           agentId={id}
-          registryAddress={
-            process.env.AGENT_REGISTRY_ADDRESS as `0x${string}` | undefined
-          }
-          reputationAddress={
-            process.env.REPUTATION_REGISTRY_ADDRESS as `0x${string}` | undefined
-          }
-          validationAddress={
-            process.env.VALIDATION_REGISTRY_ADDRESS as `0x${string}` | undefined
-          }
           owner={agent.owner}
           initialServices={agent.metadata.services ?? []}
+          initialRuns={oracleRuns}
+          initialPendingValidations={pendingValidations}
         />
       </section>
     </div>
@@ -279,21 +394,33 @@ function DetailRow({
   value,
   mono,
   truncate,
+  href,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   truncate?: boolean;
+  href?: string;
 }) {
+  const cls = `text-right break-all ${mono ? "font-mono" : ""} ${truncate ? "truncate max-w-[200px]" : ""}`;
   return (
     <div className="flex items-start justify-between gap-4 text-sm">
       <span className="text-gray-500 flex-shrink-0">{label}</span>
-      <span
-        className={`text-gray-200 text-right break-all ${mono ? "font-mono" : ""} ${truncate ? "truncate max-w-[200px]" : ""}`}
-        title={value}
-      >
-        {value}
-      </span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${cls} text-violet-400 hover:text-violet-300 underline underline-offset-2`}
+          title={value}
+        >
+          {value}
+        </a>
+      ) : (
+        <span className={`${cls} text-gray-200`} title={value}>
+          {value}
+        </span>
+      )}
     </div>
   );
 }

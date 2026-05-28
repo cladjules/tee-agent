@@ -1,7 +1,7 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
- * Deploys open-agents-toolkit contracts:
+ * Deploys tee-agent contracts:
  *   - TeeVerifier         (holds the TEE oracle signing address)
  *   - Verifier            (IERC7857DataVerifier — validates TransferValidityProof[])
  *   - AgentRegistry       (ERC-7857 agent NFT with ERC-8004 co-registration)
@@ -24,7 +24,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *   npm run deploy:baseSepolia
  *   npm run deploy:base
  */
-export default buildModule("ArcaneAgents", (m) => {
+export default buildModule("TeeAgent", (m) => {
   const deployer = m.getAccount(0);
 
   // Zero address = co-registration disabled (default for local Hardhat node).
@@ -54,7 +54,7 @@ export default buildModule("ArcaneAgents", (m) => {
 
   // ── ERC-7857 agent NFT registry ───────────────────────────────────────────
   const agentRegistry = m.contract("AgentRegistry", [
-    "Arcane Agents",
+    "Tee Agent",
     "OAT",
     deployer,
     verifier,

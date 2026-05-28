@@ -7,7 +7,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Arcane Agents — Dashboard",
+  title: "Tee Agent — Dashboard",
   description:
     "Deploy, browse, and manage on-chain AI agents (ERC-7857 · ERC-8004).",
   icons: {
@@ -99,7 +99,7 @@ function Header() {
           <a href="/" className="flex items-center gap-2.5">
             <HexLogo />
             <span className="text-lg font-bold bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
-              Arcane Agents
+              Tee Agent
             </span>
           </a>
           <span className="hidden sm:inline text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950/60 text-violet-400 border border-violet-800/50">
@@ -115,7 +115,7 @@ function Header() {
               Deploy
             </a>
             <a
-              href="https://github.com/cladjules/arcane-agents"
+              href="https://github.com/cladjules/tee-agent"
               target="_blank"
               rel="noopener noreferrer"
               className="nav-link inline-flex items-center gap-1"
@@ -135,13 +135,13 @@ function Footer() {
     <footer className="border-t border-violet-950/40 py-6 mt-8">
       <div className="container mx-auto max-w-6xl px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
         <span className="font-mono">
-          Arcane Agents <span className="text-violet-800 mx-1">·</span> ERC-7857{" "}
+          Tee Agent <span className="text-violet-800 mx-1">·</span> ERC-7857{" "}
           <span className="text-violet-800 mx-1">·</span> ERC-8004{" "}
           <span className="text-violet-800 mx-1">·</span> Base
         </span>
         <div className="flex items-center gap-4">
           <a
-            href="https://github.com/cladjules/arcane-agents"
+            href="https://github.com/cladjules/tee-agent"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-400 transition-colors"

@@ -1,4 +1,4 @@
-# Arcane Agents
+# Tee Agent
 
 Create, own, and manage AI agents on-chain with verifiable identity, private encrypted data, and transparent reputation.
 
@@ -9,7 +9,7 @@ Create, own, and manage AI agents on-chain with verifiable identity, private enc
 
 ## What is it?
 
-Arcane Agents (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a TEE oracle.
+Tee Agent (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a TEE oracle.
 
 **Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation.
 
@@ -58,7 +58,7 @@ Agents earn a verifiable, tamper-proof reputation through the [ERC-8004](https:/
 ## Repository Structure
 
 ```
-open-agents-toolkit/
+tee-agent/
 ├── packages/
 │   └── agent/         # Types, encryption/decryption, ABIs, registry client
 ├── contracts/         # Solidity 0.8.35 (Hardhat + viaIR)
@@ -95,7 +95,7 @@ Set `NEXT_PUBLIC_NETWORK=base` or `NEXT_PUBLIC_NETWORK=baseSepolia` (default: `b
 | `TeeVerifier`   | ERC-7857           | ECDSA attestation verifier for TEE oracle signing keys                |
 | `Verifier`      | ERC-7857           | ERC-7857 data verifier that wraps `TeeVerifier`                       |
 
-Contract ABIs are exported from `@open-agents-toolkit/agent`:
+Contract ABIs are exported from `@tee-agent/agent`:
 
 ```typescript
 // Server-side
@@ -104,22 +104,22 @@ import {
   AGENT_NFT_ABI,
   TEE_VERIFIER_ABI,
   VERIFIER_ABI,
-} from "@open-agents-toolkit/agent/abis";
+} from "@tee-agent/agent/abis";
 
 // Browser / frontend (no Node.js deps)
-import { AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent/browser";
+import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/browser";
 ```
 
 ---
 
-## SDK — `@open-agents-toolkit/agent`
+## SDK — `@tee-agent/agent`
 
 TypeScript client for ERC-8004 registry queries, AES-256-GCM encryption, 0G Storage uploads, and server-side data preparation.
 
 ### `AgentRegistry` — registry reads
 
 ```typescript
-import { AgentRegistry } from "@open-agents-toolkit/agent/registry";
+import { AgentRegistry } from "@tee-agent/agent/registry";
 
 const registry = new AgentRegistry({
   agentRegistryAddress: "0x...",
@@ -137,7 +137,7 @@ import {
   encryptIntelligentData, // AES-256-GCM encrypt system prompt + character def (in-memory)
   readJsonFromUri, // fetch JSON from data: or HTTPS/IPFS URIs
   buildAccessPayloads, // build owner-signed access proofs for transfer
-} from "@open-agents-toolkit/agent/encryption";
+} from "@tee-agent/agent/encryption";
 ```
 
 ### 0G Storage — `ZeroGStorageClient`
@@ -148,7 +148,7 @@ Encrypted private blobs and public metadata are stored on **0G Storage** — a d
 import {
   ZeroGStorageClient,
   uploadEncryptedIntelligentData,
-} from "@open-agents-toolkit/agent/zero-g";
+} from "@tee-agent/agent/zero-g";
 
 // Upload a JSON object and get a zerog:// URI
 const client = new ZeroGStorageClient({ privateKey: "0x..." });

@@ -156,6 +156,7 @@ package-lock.json
 !.env.example
 
 # Hardhat
+/contracts/ignition/deployments
 /contracts/artifacts
 /contracts/deployments
 /contracts/cache

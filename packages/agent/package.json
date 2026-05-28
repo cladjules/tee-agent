@@ -1,41 +1,62 @@
 {
-  "name": "@open-agents-toolkit/agent",
+  "name": "@tee-agent/agent",
   "version": "0.1.0",
   "type": "module",
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./types": {
-      "default": "./dist/types.js",
-      "types": "./dist/types.d.ts"
+      "types": "./dist/core/types.d.ts",
+      "import": "./dist/core/types.js"
     },
-    "./abis": {
-      "default": "./dist/abis.js",
-      "types": "./dist/abis.d.ts"
-    },
-    "./browser": {
-      "default": "./dist/browser.js",
-      "types": "./dist/browser.d.ts"
+    "./config": {
+      "types": "./dist/core/config.d.ts",
+      "import": "./dist/core/config.js"
     },
     "./encryption": {
-      "default": "./dist/encryption.js",
-      "types": "./dist/encryption.d.ts"
+      "types": "./dist/crypto/index.d.ts",
+      "import": "./dist/crypto/index.js"
     },
-    "./registry": {
-      "default": "./dist/registry.js",
-      "types": "./dist/registry.d.ts"
-    },
-    "./zero-g": {
-      "default": "./dist/zero-g.js",
-      "types": "./dist/zero-g.d.ts"
+    "./abis": {
+      "types": "./dist/abis.d.ts",
+      "import": "./dist/abis.js"
     },
     "./ipfs": {
-      "default": "./dist/ipfs.js",
-      "types": "./dist/ipfs.d.ts"
+      "types": "./dist/storage/ipfs.d.ts",
+      "import": "./dist/storage/ipfs.js"
+    },
+    "./registry": {
+      "types": "./dist/core/registry.d.ts",
+      "import": "./dist/core/registry.js"
+    },
+    "./zero-g": {
+      "types": "./dist/storage/zero-g.d.ts",
+      "import": "./dist/storage/zero-g.js"
+    },
+    "./mint": {
+      "types": "./dist/ops/mint.d.ts",
+      "import": "./dist/ops/mint.js"
+    },
+    "./transfer": {
+      "types": "./dist/ops/transfer.d.ts",
+      "import": "./dist/ops/transfer.js"
+    },
+    "./agent-services": {
+      "types": "./dist/ops/agent-services.d.ts",
+      "import": "./dist/ops/agent-services.js"
+    },
+    "./oracle": {
+      "types": "./dist/ops/oracle.d.ts",
+      "import": "./dist/ops/oracle.js"
+    },
+    "./resolve": {
+      "types": "./dist/ops/resolve.d.ts",
+      "import": "./dist/ops/resolve.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsc --build",
     "dev": "tsc --build --watch",
@@ -53,6 +74,6 @@
     "@0gfoundation/0g-ts-sdk": "^1.2.8",
     "eciesjs": "^0.5.0",
     "ethers": "6.16.0",
-    "viem": "^2.48.7"
+    "viem": "^2.49.3"
   }
 }

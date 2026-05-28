@@ -6,12 +6,12 @@
       "dependsOn": ["^build"],
       "outputs": [".next/**", "dist/**"]
     },
-    "@open-agents-toolkit/contracts#build": {
+    "@tee-agent/contracts#build": {
       "dependsOn": [],
       "outputs": ["artifacts/**", "../../packages/agent/src/abis.ts"]
     },
-    "@open-agents-toolkit/agent#build": {
-      "dependsOn": ["@open-agents-toolkit/contracts#build", "^build"],
+    "@tee-agent/agent#build": {
+      "dependsOn": ["@tee-agent/contracts#build", "^build"],
       "outputs": ["dist/**"]
     },
     "dev": {

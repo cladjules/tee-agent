@@ -36,8 +36,8 @@ export default function HomePage() {
             </span>
           </div>
           <h1 className="text-6xl md:text-7xl font-bold tracking-tight leading-[1.05]">
-            <span className="gradient-text-animated">Arcane</span>{" "}
-            <span className="text-slate-200">Agents</span>
+            <span className="gradient-text-animated">Tee</span>{" "}
+            <span className="text-slate-200">Agent</span>
           </h1>
           <p className="text-lg text-slate-400 leading-relaxed max-w-xl">
             Deploy AI agents as sovereign on-chain entities — ERC-7857 +
@@ -52,7 +52,7 @@ export default function HomePage() {
               Deploy Agent →
             </a>
             <a
-              href="https://github.com/cladjules/arcane-agents"
+              href="https://github.com/cladjules/tee-agent"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-slate-700 hover:border-violet-700 hover:bg-violet-950/30 text-slate-300 hover:text-white font-semibold transition-all text-sm"

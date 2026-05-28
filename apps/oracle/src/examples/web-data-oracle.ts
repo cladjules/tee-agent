@@ -86,7 +86,7 @@ const webFetcher: AgentHandler = {
     }
 
     const response = await fetch(url, {
-      headers: { "User-Agent": "ArcaneAgentsOracle/1.0" },
+      headers: { "User-Agent": "TeeAgentOracle/1.0" },
     });
     const body = await response.text();
     const contentHash = ethers.keccak256(ethers.toUtf8Bytes(body));

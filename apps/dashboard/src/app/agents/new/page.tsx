@@ -1,19 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { parseEventLogs } from "viem";
-import { OASF_SKILLS, OASF_DOMAINS } from "@/lib/oasf-data";
-import { AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent/abis";
+import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/abis";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { prepareCreateAgent } from "@/lib/actions/agents";
+import { prepareCreateAgent, fetchAgentServices } from "@/lib/actions/agents";
+import { ErrorBox } from "@/components/ErrorBox";
+import {
+  ServiceEditorPanel,
+  type ServiceEditorEntry,
+} from "@/components/ServiceEditorPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface CustomService {
-  name: string;
-  endpoint: string;
-  version: string;
-}
 
 const AGENT_TYPES = [
   "assistant",
@@ -108,103 +106,36 @@ export default function NewAgentPage() {
   const [agentType, setAgentType] = useState("assistant");
   const [x402Support, setX402Support] = useState(false);
 
-  // Step 1 — services
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpUrl, setMcpUrl] = useState("");
-  const [mcpVersion, setMcpVersion] = useState("1.0");
-  const [a2aEnabled, setA2aEnabled] = useState(false);
-  const [a2aUrl, setA2aUrl] = useState("");
-  const [a2aVersion, setA2aVersion] = useState("1.0");
-  const [oasfEnabled, setOasfEnabled] = useState(false);
-  const [oasfUrl, setOasfUrl] = useState("");
-  const [oasfVersion, setOasfVersion] = useState("0.8");
-  const [oasfSkills, setOasfSkills] = useState<string[]>([]);
-  const [oasfDomains, setOasfDomains] = useState<string[]>([]);
-  const [webUrl, setWebUrl] = useState("");
-  const [didEndpoint, setDidEndpoint] = useState("");
-  const [emailEndpoint, setEmailEndpoint] = useState("");
-  const [customServices, setCustomServices] = useState<CustomService[]>([]);
+  // Step 1 — services (managed by ServiceEditorPanel)
+  const [builtServices, setBuiltServices] = useState<ServiceEditorEntry[]>([]);
+  // "new" = register a fresh ERC-8004 identity at mint; "import" = attach an existing one.
+  const [serviceMode, setServiceMode] = useState<"new" | "import">("new");
+  const [importTokenId, setImportTokenId] = useState("");
+  const [importPending, setImportPending] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  // Bumping this key forces ServiceEditorPanel to remount with new initialServices.
+  const [servicesPanelKey, setServicesPanelKey] = useState(0);
+  const [importedServices, setImportedServices] = useState<
+    readonly {
+      name: string;
+      endpoint: string;
+      version?: string;
+      skills?: readonly string[];
+      domains?: readonly string[];
+    }[]
+  >([]);
 
   // Step 2 — private data (ERC-7857 intelligent data, AES-256-GCM encrypted)
   const [privateEntries, setPrivateEntries] = useState<
     { name: string; data: string }[]
   >([{ name: "", data: "" }]);
 
-  // ── Services builder ────────────────────────────────────────────────────────
-
-  function buildServices(): Array<{
-    name: string;
-    endpoint: string;
-    version?: string;
-    skills?: string[];
-    domains?: string[];
-  }> {
-    const svcs: Array<{
-      name: string;
-      endpoint: string;
-      version?: string;
-      skills?: string[];
-      domains?: string[];
-    }> = [];
-    if (mcpEnabled && mcpUrl.trim())
-      svcs.push({
-        name: "MCP",
-        endpoint: mcpUrl.trim(),
-        ...(mcpVersion.trim() ? { version: mcpVersion.trim() } : {}),
-      });
-    if (a2aEnabled && a2aUrl.trim())
-      svcs.push({
-        name: "A2A",
-        endpoint: a2aUrl.trim(),
-        ...(a2aVersion.trim() ? { version: a2aVersion.trim() } : {}),
-      });
-    if (oasfEnabled && oasfUrl.trim())
-      svcs.push({
-        name: "OASF",
-        endpoint: oasfUrl.trim(),
-        ...(oasfVersion.trim() ? { version: oasfVersion.trim() } : {}),
-        ...(oasfSkills.length ? { skills: oasfSkills } : {}),
-        ...(oasfDomains.length ? { domains: oasfDomains } : {}),
-      });
-    if (webUrl.trim()) svcs.push({ name: "web", endpoint: webUrl.trim() });
-    if (didEndpoint.trim())
-      svcs.push({ name: "DID", endpoint: didEndpoint.trim() });
-    if (emailEndpoint.trim())
-      svcs.push({ name: "email", endpoint: emailEndpoint.trim() });
-    customServices
-      .filter((s) => s.name.trim() && s.endpoint.trim())
-      .forEach((s) =>
-        svcs.push({
-          name: s.name.trim(),
-          endpoint: s.endpoint.trim(),
-          ...(s.version.trim() ? { version: s.version.trim() } : {}),
-        }),
-      );
-    return svcs;
-  }
-
   // ── Wizard navigation ───────────────────────────────────────────────────────
-
-  function getServicesError(): string | null {
-    if (mcpEnabled && !mcpUrl.trim())
-      return "MCP is enabled but has no endpoint URL.";
-    if (a2aEnabled && !a2aUrl.trim())
-      return "A2A is enabled but has no endpoint URL.";
-    if (oasfEnabled && !oasfUrl.trim())
-      return "OASF is enabled but has no endpoint URL.";
-    for (const svc of customServices) {
-      if (svc.name.trim() && !svc.endpoint.trim())
-        return `Custom service "${svc.name}" is missing an endpoint.`;
-      if (!svc.name.trim() && svc.endpoint.trim())
-        return "A custom service has an endpoint but no name.";
-    }
-    return null;
-  }
 
   function canAdvance(): boolean {
     if (step === 0)
       return name.trim().length > 0 && description.trim().length > 0;
-    if (step === 1) return getServicesError() === null;
     return true;
   }
 
@@ -213,6 +144,7 @@ export default function NewAgentPage() {
   function handleMint() {
     setResult(null);
 
+    const oasfService = builtServices.find((s) => s.name === "OASF");
     const formData = new FormData();
     formData.set("name", name);
     formData.set("description", description);
@@ -225,9 +157,9 @@ export default function NewAgentPage() {
         privateEntries.filter((e) => e.name.trim() && e.data.trim()),
       ),
     );
-    formData.set("servicesJson", JSON.stringify(buildServices()));
-    formData.set("oasfSkills", JSON.stringify(oasfSkills));
-    formData.set("oasfDomains", JSON.stringify(oasfDomains));
+    formData.set("servicesJson", JSON.stringify(builtServices));
+    formData.set("oasfSkills", JSON.stringify(oasfService?.skills ?? []));
+    formData.set("oasfDomains", JSON.stringify(oasfService?.domains ?? []));
     if (address) formData.set("ownerAddress", address);
 
     startTransition(async () => {
@@ -244,20 +176,38 @@ export default function NewAgentPage() {
 
         await switchChain();
         const { publicClient, walletClient } = await getViemClients();
-        const mintHash = await walletClient.writeContract({
-          address: prepared.contractAddress!,
-          abi: AGENT_REGISTRY_ABI,
-          functionName: "mint",
-          args: [
-            address as `0x${string}`,
-            prepared.publicMetadataUri!,
-            prepared.agentMetadataUri!,
-            prepared.intelligentData ?? [],
-          ],
-          value: BigInt(prepared.mintFee ?? "0"),
-          chain: walletClient.chain,
-          account: walletClient.account!,
-        });
+
+        const isImport =
+          serviceMode === "import" && importTokenId.trim() !== "";
+        const mintHash = await walletClient.writeContract(
+          isImport
+            ? {
+                address: prepared.contractAddress!,
+                abi: AGENT_REGISTRY_ABI,
+                functionName: "mintWithExisting8004",
+                args: [
+                  address as `0x${string}`,
+                  prepared.publicMetadataUri!,
+                  BigInt(importTokenId.trim()),
+                  prepared.intelligentData ?? [],
+                ],
+                chain: walletClient.chain,
+                account: walletClient.account!,
+              }
+            : {
+                address: prepared.contractAddress!,
+                abi: AGENT_REGISTRY_ABI,
+                functionName: "mint",
+                args: [
+                  address as `0x${string}`,
+                  prepared.publicMetadataUri!,
+                  prepared.agentMetadataUri!,
+                  prepared.intelligentData ?? [],
+                ],
+                chain: walletClient.chain,
+                account: walletClient.account!,
+              },
+        );
 
         const receipt = await publicClient.waitForTransactionReceipt({
           hash: mintHash,
@@ -453,265 +403,112 @@ export default function NewAgentPage() {
                 Services
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                ERC-8004 service endpoints. All fields optional.
+                How do you want to set up ERC-8004 services for this agent?
               </p>
             </div>
-            <div className="space-y-3">
-              {/* MCP */}
-              <ServiceCard
-                label="MCP"
-                badge="Model Context Protocol"
-                enabled={mcpEnabled}
-                onToggle={() => setMcpEnabled((v) => !v)}
-              >
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
-                    <input
-                      type="url"
-                      value={mcpUrl}
-                      onChange={(e) => setMcpUrl(e.target.value)}
-                      placeholder="https://mcp.example.com"
-                      className={INPUT}
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    value={mcpVersion}
-                    onChange={(e) => setMcpVersion(e.target.value)}
-                    placeholder="Version"
-                    className={INPUT}
-                  />
-                </div>
-              </ServiceCard>
 
-              {/* A2A */}
-              <ServiceCard
-                label="A2A"
-                badge="Agent-to-Agent"
-                enabled={a2aEnabled}
-                onToggle={() => setA2aEnabled((v) => !v)}
-              >
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
-                    <input
-                      type="url"
-                      value={a2aUrl}
-                      onChange={(e) => setA2aUrl(e.target.value)}
-                      placeholder="https://a2a.example.com"
-                      className={INPUT}
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    value={a2aVersion}
-                    onChange={(e) => setA2aVersion(e.target.value)}
-                    placeholder="Version"
-                    className={INPUT}
-                  />
-                </div>
-              </ServiceCard>
-
-              {/* OASF */}
-              <ServiceCard
-                label="OASF"
-                badge="Open Agent Skills Framework"
-                enabled={oasfEnabled}
-                onToggle={() => setOasfEnabled((v) => !v)}
-              >
-                <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <input
-                        type="url"
-                        value={oasfUrl}
-                        onChange={(e) => setOasfUrl(e.target.value)}
-                        placeholder="https://oasf.example.com"
-                        className={INPUT}
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={oasfVersion}
-                      onChange={(e) => setOasfVersion(e.target.value)}
-                      placeholder="Version"
-                      className={INPUT}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">Skills</p>
-                      <TagPicker
-                        placeholder="Select Skills"
-                        hint={`Choose from ${OASF_SKILLS.length} official OASF skills. Selected: ${oasfSkills.length}`}
-                        items={OASF_SKILLS}
-                        selected={oasfSkills}
-                        onChange={setOasfSkills}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">Domains</p>
-                      <TagPicker
-                        placeholder="Select Domains"
-                        hint={`Choose from ${OASF_DOMAINS.length} official OASF domains. Selected: ${oasfDomains.length}`}
-                        items={OASF_DOMAINS}
-                        selected={oasfDomains}
-                        onChange={setOasfDomains}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </ServiceCard>
-
-              {/* Additional: web / DID / email */}
-              <div className="rounded-lg border border-gray-800 bg-gray-900/30 p-4 space-y-2">
-                <p className="text-xs font-medium text-gray-400 mb-3">
-                  Additional
-                </p>
-                <div className="grid grid-cols-12 gap-2 items-center">
-                  <span className="col-span-2 text-xs font-mono text-gray-500">
-                    web
-                  </span>
-                  <div className="col-span-10">
-                    <input
-                      type="url"
-                      value={webUrl}
-                      onChange={(e) => setWebUrl(e.target.value)}
-                      placeholder="https://example.com"
-                      className={INPUT}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-2 items-center">
-                  <span className="col-span-2 text-xs font-mono text-gray-500">
-                    DID
-                  </span>
-                  <div className="col-span-10">
-                    <input
-                      type="text"
-                      value={didEndpoint}
-                      onChange={(e) => setDidEndpoint(e.target.value)}
-                      placeholder="did:example:123"
-                      className={INPUT}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-2 items-center">
-                  <span className="col-span-2 text-xs font-mono text-gray-500">
-                    email
-                  </span>
-                  <div className="col-span-10">
-                    <input
-                      type="email"
-                      value={emailEndpoint}
-                      onChange={(e) => setEmailEndpoint(e.target.value)}
-                      placeholder="agent@example.com"
-                      className={INPUT}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Custom rows */}
-              {customServices.map((svc, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-3">
-                    <input
-                      type="text"
-                      value={svc.name}
-                      onChange={(e) =>
-                        setCustomServices((p) =>
-                          p.map((s, j) =>
-                            j === i ? { ...s, name: e.target.value } : s,
-                          ),
-                        )
-                      }
-                      placeholder="Service name"
-                      className={INPUT}
-                    />
-                  </div>
-                  <div className="col-span-5">
-                    <input
-                      type="text"
-                      value={svc.endpoint}
-                      onChange={(e) =>
-                        setCustomServices((p) =>
-                          p.map((s, j) =>
-                            j === i ? { ...s, endpoint: e.target.value } : s,
-                          ),
-                        )
-                      }
-                      placeholder="Endpoint URL"
-                      className={INPUT}
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <input
-                      type="text"
-                      value={svc.version}
-                      onChange={(e) =>
-                        setCustomServices((p) =>
-                          p.map((s, j) =>
-                            j === i ? { ...s, version: e.target.value } : s,
-                          ),
-                        )
-                      }
-                      placeholder="Version"
-                      className={INPUT}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCustomServices((p) => p.filter((_, j) => j !== i))
-                    }
-                    className="col-span-1 flex items-center justify-center text-gray-500 hover:text-red-400 text-xl leading-none"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+            {/* Mode toggle */}
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  setCustomServices((p) => [
-                    ...p,
-                    { name: "", endpoint: "", version: "" },
-                  ])
-                }
-                className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                onClick={() => setServiceMode("new")}
+                className={`rounded-lg border p-4 text-left transition-colors ${
+                  serviceMode === "new"
+                    ? "border-violet-500 bg-violet-950/40"
+                    : "border-gray-700 bg-gray-800/20 hover:border-gray-600"
+                }`}
               >
-                + Add custom service
-              </button>
-
-              {getServicesError() && (
-                <p className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">
-                  {getServicesError()}
+                <p className="text-sm font-semibold text-gray-100">
+                  Register new
                 </p>
-              )}
-
-              {/* x402 */}
-              <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/40 px-4 py-3">
-                <div>
-                  <p className="text-xs font-medium text-gray-200">
-                    HTTP 402 Payment Required
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Enable if your agent implements the HTTP 402 standard for
-                    paid services (microtransactions, per-request billing).
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setX402Support((v) => !v)}
-                  className={`shrink-0 inline-flex h-5 w-9 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${x402Support ? "bg-violet-600" : "bg-gray-600"}`}
-                  aria-label="Toggle x402 support"
-                >
-                  <span
-                    className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow transition-transform ${x402Support ? "translate-x-4" : "translate-x-0"}`}
-                  />
-                </button>
-              </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Create a fresh ERC-8004 identity at mint
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setServiceMode("import")}
+                className={`rounded-lg border p-4 text-left transition-colors ${
+                  serviceMode === "import"
+                    ? "border-violet-500 bg-violet-950/40"
+                    : "border-gray-700 bg-gray-800/20 hover:border-gray-600"
+                }`}
+              >
+                <p className="text-sm font-semibold text-gray-100">
+                  Use existing
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Attach an ERC-8004 agent you already own
+                </p>
+              </button>
             </div>
+
+            {/* Import panel — only shown in import mode */}
+            {serviceMode === "import" && (
+              <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4 space-y-3">
+                <p className="text-xs text-gray-400">
+                  Enter the ERC-8004 token ID you own. Its services will be
+                  pre-filled below and the existing identity will be attached at
+                  mint (no new registration created).
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={importTokenId}
+                    onChange={(e) => {
+                      setImportTokenId(e.target.value);
+                      setImportError(null);
+                    }}
+                    placeholder="ERC-8004 Token ID"
+                    className={`${INPUT} flex-1`}
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      importPending || !importTokenId.trim() || !address
+                    }
+                    onClick={async () => {
+                      setImportPending(true);
+                      setImportError(null);
+                      setImportedFrom(null);
+                      const res = await fetchAgentServices(
+                        importTokenId.trim(),
+                        address!,
+                      );
+                      setImportPending(false);
+                      if ("error" in res) {
+                        setImportError(res.error);
+                      } else {
+                        setImportedServices(res.services);
+                        setImportedFrom(res.agentName);
+                        setServicesPanelKey((k) => k + 1);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm font-semibold transition-colors whitespace-nowrap"
+                  >
+                    {importPending ? "Loading…" : "Load"}
+                  </button>
+                </div>
+                {importError && (
+                  <p className="text-xs text-red-400">{importError}</p>
+                )}
+                {importedFrom && (
+                  <p className="text-xs text-green-400">
+                    ✓ Loaded &ldquo;{importedFrom}&rdquo; — edit services below
+                    if needed
+                  </p>
+                )}
+              </div>
+            )}
+
+            <ServiceEditorPanel
+              key={servicesPanelKey}
+              initialServices={importedServices}
+              onChange={setBuiltServices}
+              initialX402={x402Support}
+              onX402Change={setX402Support}
+            />
           </>
         )}
 
@@ -850,30 +647,36 @@ export default function NewAgentPage() {
               <ReviewRow
                 label="Services"
                 value={
-                  buildServices().length
-                    ? buildServices()
-                        .map((s) => s.name)
-                        .join(", ")
+                  builtServices.length
+                    ? builtServices.map((s) => s.name).join(", ")
                     : "None"
                 }
               />
-              {(oasfSkills.length > 0 || oasfDomains.length > 0) && (
-                <ReviewRow
-                  label="OASF"
-                  value={
-                    [
-                      oasfSkills.length
-                        ? `${oasfSkills.length} skill${oasfSkills.length !== 1 ? "s" : ""}`
-                        : "",
-                      oasfDomains.length
-                        ? `${oasfDomains.length} domain${oasfDomains.length !== 1 ? "s" : ""}`
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(", ") + " → IPFS profile auto-generated"
-                  }
-                />
-              )}
+              {(() => {
+                const oasfService = builtServices.find(
+                  (s) => s.name === "OASF",
+                );
+                const skillCount = oasfService?.skills?.length ?? 0;
+                const domainCount = oasfService?.domains?.length ?? 0;
+                if (!skillCount && !domainCount) return null;
+                return (
+                  <ReviewRow
+                    label="OASF"
+                    value={
+                      [
+                        skillCount
+                          ? `${skillCount} skill${skillCount !== 1 ? "s" : ""}`
+                          : "",
+                        domainCount
+                          ? `${domainCount} domain${domainCount !== 1 ? "s" : ""}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(", ") + " → IPFS profile auto-generated"
+                    }
+                  />
+                );
+              })()}
               <ReviewRow
                 label="x402 Support"
                 value={x402Support ? "Enabled" : "Disabled"}
@@ -896,11 +699,7 @@ export default function NewAgentPage() {
               <ReviewRow label="Owner" value={address} mono />
             </div>
 
-            {result?.error && (
-              <p className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">
-                {result.error}
-              </p>
-            )}
+            {result?.error && <ErrorBox message={result.error} />}
           </>
         )}
       </div>
@@ -1002,186 +801,4 @@ function validateJson(input: string): string | null {
   } catch {
     return "Invalid JSON.";
   }
-}
-
-// ── ServiceCard ───────────────────────────────────────────────────────────────
-
-function ServiceCard({
-  label,
-  badge,
-  enabled,
-  onToggle,
-  children,
-}: {
-  label: string;
-  badge: string;
-  enabled: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-lg border transition-colors ${
-        enabled
-          ? "border-violet-700 bg-violet-950/20"
-          : "border-gray-800 bg-gray-900/20"
-      }`}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className={`font-mono text-xs font-bold px-1.5 py-0.5 rounded ${
-              enabled ? "bg-violet-700 text-white" : "bg-gray-700 text-gray-300"
-            }`}
-          >
-            {label}
-          </span>
-          <span className="text-xs text-gray-400">{badge}</span>
-        </div>
-        <span
-          className={`inline-flex h-5 w-9 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-            enabled ? "bg-violet-600" : "bg-gray-600"
-          }`}
-        >
-          <span
-            className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow transition-transform ${
-              enabled ? "translate-x-4" : "translate-x-0"
-            }`}
-          />
-        </span>
-      </button>
-      {enabled && <div className="px-4 pb-4">{children}</div>}
-    </div>
-  );
-}
-
-// ── TagPicker ─────────────────────────────────────────────────────────────────
-
-function TagPicker({
-  placeholder,
-  hint,
-  items,
-  selected,
-  onChange,
-}: {
-  placeholder: string;
-  hint: string;
-  items: { key: string; label: string }[];
-  selected: string[];
-  onChange: (keys: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onOut(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    }
-    if (open) document.addEventListener("mousedown", onOut);
-    return () => document.removeEventListener("mousedown", onOut);
-  }, [open]);
-
-  const filtered = search
-    ? items.filter(
-        (it) =>
-          it.label.toLowerCase().includes(search.toLowerCase()) ||
-          it.key.toLowerCase().includes(search.toLowerCase()),
-      )
-    : items;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:border-gray-600 transition-colors"
-      >
-        <span className={selected.length ? "text-gray-100" : "text-gray-500"}>
-          {selected.length === 0 ? placeholder : `${selected.length} selected`}
-        </span>
-        <svg
-          className="w-4 h-4 text-gray-500"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
-      </button>
-
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {selected.map((key) => {
-            const item = items.find((it) => it.key === key);
-            return (
-              <span
-                key={key}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-900/60 border border-violet-700 text-violet-200 text-xs"
-              >
-                {item?.label ?? key}
-                <button
-                  type="button"
-                  onClick={() => onChange(selected.filter((k) => k !== key))}
-                  className="text-violet-400 hover:text-white leading-none"
-                >
-                  ×
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {open && (
-        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-hidden rounded-lg border border-gray-700 bg-gray-900 shadow-xl flex flex-col">
-          <div className="sticky top-0 bg-gray-900 p-2 border-b border-gray-800 shrink-0">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
-              autoFocus
-              className="w-full px-2 py-1.5 rounded bg-gray-800 border border-gray-700 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600"
-            />
-            <p className="text-xs text-gray-500 mt-1 px-1">{hint}</p>
-          </div>
-          <div className="overflow-y-auto">
-            {filtered.length === 0 && (
-              <p className="text-xs text-gray-500 px-3 py-4 text-center">
-                No results
-              </p>
-            )}
-            {filtered.map((item) => (
-              <label
-                key={item.key}
-                className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-800 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.includes(item.key)}
-                  onChange={(e) => {
-                    if (e.target.checked) onChange([...selected, item.key]);
-                    else onChange(selected.filter((k) => k !== item.key));
-                  }}
-                  className="accent-violet-500"
-                />
-                <span className="text-sm text-gray-200">{item.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }

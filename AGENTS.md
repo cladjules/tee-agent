@@ -1,4 +1,4 @@
-# Arcane Agents
+# Tee Agent
 
 ## Overview
 
@@ -58,6 +58,8 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                                                             |
 | `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                          |
 | `TEE_ENCRYPTION_PUBLIC_KEY`        | No       | Removed — the dashboard now fetches the oracle's public key live from `GET /address` at mint time.                                           |
+| `UPSTASH_REDIS_REST_URL`           | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com)                                          |
+| `UPSTASH_REDIS_REST_TOKEN`         | No       | Upstash Redis REST token                                                                                                                     |
 | `NEXT_PUBLIC_ORACLE_URL`           | No       | Phala Cloud CVM URL — used server-side (mint/transfer) and client-side (Run Oracle / Validate forms). Local default: `http://localhost:3001` |
 
 ## Requirements
@@ -80,6 +82,7 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 - [ ] Deploy oracle to Phala Cloud; register oracle address in `TEEVerifier`
 - [ ] Basescan source verification after Base Sepolia deployment
+- [ ] Trustless Agents Plus (TAP) support
 
 ## Known Issues & Follow-ups
 
@@ -93,5 +96,5 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 - All mutations and client-triggered data fetches use **Server Actions** in `apps/dashboard/src/lib/actions/` — no API routes for internal use
 - Internal imports use `.js` extensions (NodeNext resolution)
-- Sub-path exports only: `@open-agents-toolkit/agent/types`, `@open-agents-toolkit/agent/encryption`, `@open-agents-toolkit/agent/zero-g`, `@open-agents-toolkit/agent/registry`, `@open-agents-toolkit/agent/abis`, `@open-agents-toolkit/agent/browser`
+- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/encryption`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/registry`, `@tee-agent/agent/abis`, `@tee-agent/agent/browser`
 - `zerog://` is the canonical URI scheme for private encrypted blobs; `data:application/json;base64,…` is used for public on-chain metadata

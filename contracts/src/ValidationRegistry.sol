@@ -141,15 +141,16 @@ contract ValidationRegistry is ReentrancyGuard {
     /**
      * @notice Submit a validation response for a pending request.
      * @dev For EOA validators: msg.sender must equal the validatorAddress from the request.
-     *      For contract validators (e.g. TEEVerifier): proof must be a valid oracle attestation
-     *      verified via IAgentDataVerifier.verifyValidation().
+     *      For contract validators (e.g. TEEVerifier): proof must be a raw TDX DCAP quote
+     *      verified via IAgentDataVerifier.verifyValidation(). Any ETH forwarded is passed
+     *      through to the verifier contract to cover on-chain attestation fees.
      *      May be called multiple times (progressive finality).
      * @param requestHash  Identifies the request.
      * @param response     Score 0-100 (0 = fail, 100 = pass, or intermediate).
      * @param responseURI  Optional off-chain evidence URI (emitted only).
      * @param responseHash Optional keccak256 of responseURI content.
      * @param tag          Optional custom tag (stored on-chain).
-     * @param proof        Empty for EOA validators; 65-byte ECDSA oracle signature for contract validators.
+     * @param proof        Empty for EOA validators; raw TDX DCAP quote for contract validators.
      */
     function validationResponse(
         bytes32 requestHash,
@@ -158,7 +159,7 @@ contract ValidationRegistry is ReentrancyGuard {
         bytes32 responseHash,
         string calldata tag,
         bytes calldata proof
-    ) external nonReentrant {
+    ) external payable nonReentrant {
         if (!_requestExists[requestHash]) revert RequestNotFound();
         if (response > 100) revert InvalidResponse();
 
@@ -167,12 +168,10 @@ contract ValidationRegistry is ReentrancyGuard {
 
         if (validatorAddress.code.length > 0) {
             // Contract validator: verify via IAgentDataVerifier (e.g. TEEVerifier).
-            bool valid = IAgentDataVerifier(validatorAddress).verifyValidation(
-                record.agentId,
-                requestHash,
-                response,
-                proof
-            );
+            // Forward any ETH to cover on-chain attestation fees (e.g. DCAP).
+            bool valid = IAgentDataVerifier(validatorAddress).verifyValidation{
+                value: msg.value
+            }(record.agentId, requestHash, response, proof);
             if (!valid) revert OracleVerificationFailed(requestHash);
         } else {
             // EOA validator: caller must be the designated validator.

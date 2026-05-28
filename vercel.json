@@ -2,5 +2,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "apps/dashboard/.next",
   "installCommand": "npm i",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/sync-events",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

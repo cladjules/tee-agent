@@ -1,25 +1,30 @@
 {
-  "name": "open-agents-toolkit",
+  "name": "tee-agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.13.0",
   "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
   "workspaces": [
+    "packages/agent",
+    "packages/sdk",
     "apps/dashboard",
     "apps/oracle",
-    "contracts",
-    "packages/agent"
+    "contracts"
   ],
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "DEBUG=true turbo run dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean",
     "format": "prettier --write \"**/*.{ts,tsx,sol,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,sol,json,md}\"",
+    "e2e:local": "npm run e2e:local -w contracts",
+    "e2e:baseSepolia": "npm run e2e:baseSepolia -w contracts",
+    "e2e-sdk:local": "npm run e2e-sdk:local -w contracts",
+    "e2e-sdk:baseSepolia": "npm run e2e-sdk:baseSepolia -w contracts",
     "changeset": "changeset",
     "release": "changeset publish"
   },
@@ -31,7 +36,8 @@
     "turbo": "^2.9.7"
   },
   "overrides": {
-    "@noble/hashes": "^1.8.0"
+    "@noble/hashes": "^1.8.0",
+    "viem": "^2.49.3"
   },
   "engines": {
     "node": ">=20"

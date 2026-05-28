@@ -13,7 +13,7 @@
 services:
   oracle:
     build: .
-    image: open-agents-oracle:latest
+    image: tee-agent-oracle:latest
     ports:
       - "3000:3000"
     environment:

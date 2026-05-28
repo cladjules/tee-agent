@@ -1,5 +1,5 @@
 /**
- * Oracle server factory — Arcane Agents
+ * Oracle server factory — Tee Agent
  * ─────────────────────────────────────────────────────────────────────────────
  * Call `startOracle({ handlers })` to start an oracle server with your own
  * agent handlers. Each handler receives the decrypted skill from 0G Storage
@@ -49,8 +49,12 @@ import {
   encryptMetadata,
   generateContentKey,
   hashEncryptedBlob,
-  type EncryptedBlob,
-} from "@open-agents-toolkit/agent/encryption";
+} from "@tee-agent/agent/encryption";
+import type { EncryptedBlob } from "@tee-agent/agent/types";
+import {
+  AGENT_REGISTRY_ABI,
+  VALIDATION_REGISTRY_ABI,
+} from "@tee-agent/agent/abis";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -107,7 +111,7 @@ export interface OracleConfig {
 export async function startOracle(config: OracleConfig): Promise<void> {
   const PORT = config.port ?? parseInt(process.env.PORT ?? "3000", 10);
   const KEY_PATH = "oracle/reencrypt";
-  const RPC_URL = process.env.RPC_URL;
+  const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
   const AGENT_REGISTRY_ADDRESS = process.env.AGENT_REGISTRY_ADDRESS;
   const ZERO_G_RPC_URL =
     process.env.ZERO_G_RPC_URL ?? "https://evmrpc-testnet.0g.ai";
@@ -140,7 +144,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   if (RPC_URL) {
     const { chainId } = await new ethers.JsonRpcProvider(RPC_URL).getNetwork();
     eip712Domain = {
-      name: "ArcaneAgentsOracle",
+      name: "TeeAgentOracle",
       version: "1",
       chainId,
       verifyingContract: wallet.address,
@@ -226,24 +230,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
 
   // ─── Skill resolution ─────────────────────────────────────────────────────────
 
-  const INTELLIGENT_DATAS_OF_ABI = [
-    {
-      name: "intelligentDatasOf",
-      type: "function",
-      stateMutability: "view",
-      inputs: [{ name: "tokenId", type: "uint256" }],
-      outputs: [
-        {
-          type: "tuple[]",
-          components: [
-            { name: "dataDescription", type: "string" },
-            { name: "dataHash", type: "bytes32" },
-          ],
-        },
-      ],
-    },
-  ] as const;
-
   /**
    * Resolves an agent's encrypted blobs from the on-chain AgentRegistry and
    * returns all decrypted values.
@@ -267,7 +253,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const registry = new ethers.Contract(
       registryAddress,
-      INTELLIGENT_DATAS_OF_ABI,
+      AGENT_REGISTRY_ABI,
       provider,
     );
     const datas = (await registry.intelligentDatasOf(agentId)) as Array<{
@@ -330,7 +316,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       blobUris: z
         .array(z.string())
         .min(1, "blobUris must be a non-empty array."),
-      contentKey: z.string(),
       targetPubkey: z.string(),
       signature: z.string(),
     })
@@ -342,8 +327,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   type ReEncryptBody = z.infer<typeof reEncryptBodySchema>;
 
   async function reencrypt(body: ReEncryptBody) {
-    const oldContentKey = Buffer.from(body.contentKey, "base64");
-
     const pubKeyHex = body.targetPubkey.startsWith("0x")
       ? body.targetPubkey.slice(2)
       : body.targetPubkey;
@@ -373,6 +356,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       const expectedHash = body.intelligentDataHashes[i] as string;
 
       const blob = await fetchBlob(uri);
+      const oldContentKey = decryptContentKey(blob, wallet.privateKey);
       const actualHash = await hashEncryptedBlob(blob);
       if (actualHash !== expectedHash) {
         throw new Error(
@@ -482,8 +466,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
 
   // ─── EIP-712 auth helpers ─────────────────────────────────────────────────────
 
-  const OWNER_OF_ABI = ["function ownerOf(uint256) view returns (address)"];
-
   /**
    * Verifies an EIP-712 typed-data signature and returns the recovered signer address.
    * Throws if the domain is unavailable or the deadline has passed.
@@ -514,7 +496,11 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   ): Promise<void> {
     if (!RPC_URL) throw new Error("RPC_URL is not configured.");
     const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const nft = new ethers.Contract(registryAddress, OWNER_OF_ABI, provider);
+    const nft = new ethers.Contract(
+      registryAddress,
+      AGENT_REGISTRY_ABI,
+      provider,
+    );
     const owner = (await nft.ownerOf(agentId)) as string;
     if (signer.toLowerCase() !== owner.toLowerCase()) {
       throw new Error(
@@ -540,6 +526,26 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         address: wallet.address,
         publicKey: signingKey.compressedPublicKey,
       });
+    }
+  });
+
+  /**
+   * GET /attestation
+   * Returns the oracle's current TDX attestation quote with its Ethereum address embedded in
+   * reportData[0:20]. Use this quote as the `rawQuote` argument to TeeVerifier.initValidator()
+   * for trustless on-chain key registration, or submit it to third-party TEE verification tools.
+   */
+  app.get("/attestation", async (_req: Request, res: Response) => {
+    try {
+      const quote = await tappd.tdxQuote(wallet.address);
+      res.json({
+        address: wallet.address,
+        publicKey: signingKey.compressedPublicKey,
+        quote: quote.quote,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({ error: `Attestation unavailable: ${message}` });
     }
   });
 
@@ -587,10 +593,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   });
 
   // ─── Validation endpoint ────────────────────────────────────────────────────
-
-  const VALIDATION_RESPONSE_ABI = [
-    "function validationResponse(bytes32 requestHash, uint8 response, string calldata responseURI, bytes32 responseHash, string calldata tag, bytes calldata proof) external",
-  ];
 
   const validateRequestBodySchema = z.object({
     requestHash: z.string(),
@@ -685,15 +687,16 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           [agentIdBig, body.requestHash, score],
         ),
       );
-      const digest = ethers.keccak256(
-        ethers.concat([
-          ethers.toUtf8Bytes("\x19Ethereum Signed Message:\n32"),
-          ethers.getBytes(inner),
-        ]),
-      );
 
-      const sig = signingKey.sign(digest);
-      const proof = ethers.Signature.from(sig).serialized as `0x${string}`;
+      // Generate a per-request TDX attestation quote binding (agentId, requestHash, score).
+      // The commitment is embedded in reportData[0:32] of the raw TDX quote so the
+      // on-chain TeeVerifier can verify it without trusting a pre-registered signing key.
+      // Pack commitment into first 32 bytes of the 64-byte reportData field (raw mode).
+      const reportData = new Uint8Array(64);
+      reportData.set(ethers.getBytes(inner), 0);
+      const tdxResult = await tappd.tdxQuote(reportData, "raw");
+      const proof = tdxResult.quote as `0x${string}`;
+      const dcapFee = BigInt(process.env.DCAP_FEE ?? "0");
 
       let txHash: string | undefined;
       if (RPC_URL) {
@@ -701,7 +704,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         const connectedWallet = wallet.connect(provider);
         const registry = new ethers.Contract(
           body.validationRegistryAddress,
-          VALIDATION_RESPONSE_ABI,
+          VALIDATION_REGISTRY_ABI,
           connectedWallet,
         );
         const tx = (await registry.validationResponse(
@@ -711,6 +714,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           body.responseHash,
           body.tag,
           proof,
+          { value: dcapFee },
         )) as ethers.ContractTransactionResponse;
         const receipt = await tx.wait();
         txHash = receipt?.hash;

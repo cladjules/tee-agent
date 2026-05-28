@@ -1,7 +1,7 @@
 import type {
   AgentIdentity,
   AgentRegistrationFile,
-} from "@open-agents-toolkit/agent/types";
+} from "@tee-agent/agent/types";
 
 interface AgentCardProps {
   agent: AgentIdentity & { metadata: AgentRegistrationFile };
