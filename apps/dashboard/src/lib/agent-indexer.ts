@@ -11,20 +11,13 @@
 import {
   getCachedAgents,
   setCachedAgents,
-  setCachedProofs,
-  addPendingValidation,
-  getPendingValidationsForAgent,
-  removePendingValidation,
+  getCachedValidations,
+  setCachedValidations,
+  type CachedValidation,
 } from "@/lib/agent-cache";
-import {
-  makePublicClient,
-  makeAgentRegistryClient,
-  toAgentConfig,
-  type PublicClient,
-} from "@/lib/registry-client";
-import { resolveAgentProofData } from "@tee-agent/agent/resolve";
-import { ValidationRegistry } from "@tee-agent/agent/registry";
-import { cfg } from "@/lib/config";
+import { AgentRegistry } from "@tee-agent/agent/registry";
+import { createPublicClient, http, type PublicClient } from "viem";
+import { cfg, registryFromBlock } from "@/lib/config";
 import {
   REGISTERED_EVENT,
   VALIDATION_REQUEST_EVENT,
@@ -40,45 +33,28 @@ type IndexResult =
       scannedFrom: string;
       latestBlock: string;
       validationsProcessed: number;
-      validationsSkipped: number;
+      validationsUpdated: number;
     }
   | { ok: false; skipped: true; reason: string };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Pre-populate the proof cache for a batch of newly resolved agents (best-effort). */
-async function populateProofCache(agents: RegisteredAgent[]): Promise<void> {
-  if (agents.length === 0) return;
-  const agentConfig = toAgentConfig();
-  await Promise.allSettled(
-    agents.map(async (agent) => {
-      const data = await resolveAgentProofData(agentConfig, agent.agentId);
-      await setCachedProofs(agent.agentId, data);
-    }),
-  );
-}
-
 /**
-/**
- * Sync ValidationRequest / ValidationResponse events for a block range:
- *   - Phase 1: scan ValidationResponse events → remove resolved pending jobs.
- *   - Phase 2: scan ValidationRequest events → queue new pending validations.
+ * Incrementally sync ValidationRequest / ValidationResponse events
+ * for the given block range only.
  *
- * Returns { processed, skipped } counts.
+ * Loads each affected agent's existing pending set from Redis, applies
+ * the delta (add new requests, remove newly-responded ones), and writes back.
+ *
+ * Returns { added, updated } = number of *newly added* and *updated* pending requests this run.
  */
 async function syncValidations(
   fromBlock: bigint,
   latestBlock: bigint,
   publicClient: PublicClient,
-  validationAddress: `0x${string}`,
+  validationRegistryAddress: `0x${string}`,
   PAGE: bigint,
-): Promise<{ processed: number; skipped: number }> {
-  let processed = 0;
-  let skipped = 0;
-
-  type ResponseLog = {
-    args: { agentId: bigint; requestHash: `0x${string}` };
-  };
+): Promise<{ added: number; updated: number }> {
   type RequestLog = {
     args: {
       validatorAddress: `0x${string}`;
@@ -87,72 +63,109 @@ async function syncValidations(
       requestHash: `0x${string}`;
     };
   };
+  type ResponseLog = {
+    args: {
+      validatorAddress: `0x${string}`;
+      agentId: bigint;
+      requestHash: `0x${string}`;
+      response: number;
+      responseURI: string;
+      responseHash: `0x${string}`;
+      tag: string;
+    };
+    transactionHash?: `0x${string}`;
+  };
 
-  const responseLogs: ResponseLog[] = [];
-  const requestLogs: RequestLog[] = [];
+  const newRequestLogs: RequestLog[] = [];
+  const newResponseLogs: ResponseLog[] = [];
 
+  // Scan only new blocks since last run.
   for (let from = fromBlock; from <= latestBlock; from += PAGE) {
     const to = from + PAGE - 1n < latestBlock ? from + PAGE - 1n : latestBlock;
-    const [resChunk, reqChunk] = await Promise.all([
+    const [reqChunk, resChunk] = await Promise.all([
       publicClient.getLogs({
-        address: validationAddress,
-        event: VALIDATION_RESPONSE_EVENT,
-        fromBlock: from,
-        toBlock: to,
-      }),
-      publicClient.getLogs({
-        address: validationAddress,
+        address: validationRegistryAddress,
         event: VALIDATION_REQUEST_EVENT,
         fromBlock: from,
         toBlock: to,
       }),
+      publicClient.getLogs({
+        address: validationRegistryAddress,
+        event: VALIDATION_RESPONSE_EVENT,
+        fromBlock: from,
+        toBlock: to,
+      }),
     ]);
-    responseLogs.push(...(resChunk as unknown as ResponseLog[]));
-    requestLogs.push(...(reqChunk as unknown as RequestLog[]));
+    newRequestLogs.push(...(reqChunk as RequestLog[]));
+    newResponseLogs.push(...(resChunk as ResponseLog[]));
   }
 
-  // Phase 1: remove pending jobs that now have an on-chain response.
-  for (const log of responseLogs) {
-    const { agentId, requestHash } = log.args;
-    await removePendingValidation(agentId.toString(), requestHash);
-    skipped++;
-  }
+  if (!newRequestLogs.length && !newResponseLogs.length)
+    return { added: 0, updated: 0 };
 
-  // Phase 2: queue new ValidationRequest events not yet in Redis.
-  for (const log of requestLogs) {
-    const { agentId, requestHash, requestURI, validatorAddress } = log.args;
+  // Collect all affected agentIds.
+  const affectedIds = new Set<bigint>([
+    ...newRequestLogs.map((l) => l.args.agentId),
+    ...newResponseLogs.map((l) => l.args.agentId),
+  ]);
 
-    const agentJobs = await getPendingValidationsForAgent(agentId.toString());
-    if (agentJobs.some((j) => j.requestHash === requestHash)) continue;
+  let addedCount = 0;
+  let updatedCount = 0;
 
-    // Skip requests that already received a response before this scan window.
-    try {
-      const validationRegistry = new ValidationRegistry({
-        address: validationAddress,
-        publicClient: publicClient as any,
-      });
-      const { lastUpdate } =
-        await validationRegistry.getValidationStatus(requestHash);
-      if (lastUpdate > 0n) {
-        skipped++;
-        continue;
+  await Promise.all(
+    [...affectedIds].map(async (agentId) => {
+      // Load existing pending set for this agent.
+      const existing = await getCachedValidations(agentId);
+      const pendingMap = new Map<string, CachedValidation>(
+        existing.map((r) => [r.requestHash.toLowerCase(), r]),
+      );
+
+      // Mark responded entries with their score (keep in map; don't delete).
+      for (const res of newResponseLogs) {
+        if (res.args.agentId === agentId) {
+          const hash = res.args.requestHash.toLowerCase();
+          const original = pendingMap.get(hash);
+
+          console.log("UP", original, res.args.response, res.transactionHash);
+
+          // Only update if we have the original request in Redis.
+          if (!original) continue;
+
+          pendingMap.set(hash, {
+            ...original,
+            response: {
+              score: res.args.response,
+              txHash: res.transactionHash,
+              timestamp: Math.floor(Date.now() / 1000),
+            },
+          } satisfies CachedValidation);
+
+          updatedCount++;
+        }
       }
-    } catch {
-      // Request exists but no response yet — proceed.
-    }
 
-    await addPendingValidation({
-      requestHash,
-      requestURI,
-      agentId: agentId.toString(),
-      validatorAddress,
-      queuedAt: Math.floor(Date.now() / 1000),
-      attempts: 0,
-    });
-    processed++;
-  }
+      // Add new requests (skip if already present).
+      for (const req of newRequestLogs) {
+        if (req.args.agentId !== agentId) continue;
+        const hash = req.args.requestHash.toLowerCase();
+        if (!pendingMap.has(hash)) {
+          pendingMap.set(hash, {
+            requestHash: req.args.requestHash,
+            requestURI: req.args.requestURI,
+            agentId: agentId.toString(),
+            validatorAddress: req.args.validatorAddress,
+          } satisfies CachedValidation);
+          addedCount++;
+        }
+      }
 
-  return { processed, skipped };
+      await setCachedValidations(agentId, [
+        ...pendingMap.values(),
+      ] as CachedValidation[]);
+    }),
+  );
+
+  return { added: addedCount, updated: updatedCount };
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
@@ -163,15 +176,23 @@ export async function syncEvents(): Promise<IndexResult> {
     return { ok: false, skipped: true, reason: "no registry address" };
   }
 
-  const publicClient = makePublicClient();
-  const registry = makeAgentRegistryClient();
+  if (!cfg.rpcUrl)
+    return { ok: false, skipped: true, reason: "no rpc/registry" };
+  const publicClient = createPublicClient({
+    chain: cfg.chain,
+    transport: http(cfg.rpcUrl),
+  });
+  const registry = new AgentRegistry({
+    address: cfg.registryAddress,
+    publicClient,
+  });
   if (!publicClient || !registry) {
     return { ok: false, skipped: true, reason: "no rpc/registry" };
   }
 
   const cached = await getCachedAgents();
   const existingAgents = cached?.agents ?? [];
-  const fromBlock = cached ? cached.lastBlock + 1n : cfg.registryFromBlock;
+  const fromBlock = cached ? cached.lastBlock + 1n : registryFromBlock;
   const latestBlock = await publicClient.getBlockNumber();
 
   if (fromBlock > latestBlock) {
@@ -182,7 +203,7 @@ export async function syncEvents(): Promise<IndexResult> {
       scannedFrom: fromBlock.toString(),
       latestBlock: latestBlock.toString(),
       validationsProcessed: 0,
-      validationsSkipped: 0,
+      validationsUpdated: 0,
     };
   }
 
@@ -219,18 +240,16 @@ export async function syncEvents(): Promise<IndexResult> {
 
   const merged = [...existingAgents, ...newAgents];
 
-  await populateProofCache(newAgents);
-
-  const { processed: validationsProcessed, skipped: validationsSkipped } =
-    cfg.validationAddress
+  const { added: validationsAdded, updated: validationsUpdated } =
+    cfg.validationRegistryAddress
       ? await syncValidations(
           fromBlock,
           latestBlock,
           publicClient,
-          cfg.validationAddress,
+          cfg.validationRegistryAddress,
           PAGE,
         )
-      : { processed: 0, skipped: 0 };
+      : { added: 0, updated: 0 };
 
   // Advance lastBlock only after all processing for this range is complete.
   await setCachedAgents(merged, latestBlock);
@@ -241,7 +260,7 @@ export async function syncEvents(): Promise<IndexResult> {
     totalAgents: merged.length,
     scannedFrom: fromBlock.toString(),
     latestBlock: latestBlock.toString(),
-    validationsProcessed,
-    validationsSkipped,
+    validationsProcessed: validationsAdded,
+    validationsUpdated: validationsUpdated,
   };
 }

@@ -2,7 +2,7 @@
 // set-oracle.mjs
 // Fetches the TEE oracle address from GET /address and writes it into:
 //   - contracts/ignition/parameters.<network>.json  (for setOracle Ignition module)
-//   - apps/dashboard/.env (or .env.local)           (NEXT_PUBLIC_TEE_VERIFIER_ADDRESS is
+//   - apps/dashboard/.env (or .env.local)           (TEE_VERIFIER_ADDRESS is
 //                                                    set separately; oracle addr is for info)
 //
 // Usage:

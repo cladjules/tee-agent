@@ -1,4 +1,3 @@
-/* Based on https://github.com/tsconfig/bases/blob/501da2bcd640cf95c95805783e1012b992338f28/bases/node22.json */
 {
   "compilerOptions": {
     "lib": ["es2023"],
@@ -10,7 +9,28 @@
     "moduleResolution": "node16",
     "outDir": "dist",
     "resolveJsonModule": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@tee-agent/agent": ["../packages/agent/dist/index.d.ts"],
+      "@tee-agent/agent/types": ["../packages/agent/dist/core/types.d.ts"],
+      "@tee-agent/agent/config": ["../packages/agent/dist/core/config.d.ts"],
+      "@tee-agent/agent/encryption": [
+        "../packages/agent/dist/core/crypto.d.ts"
+      ],
+      "@tee-agent/agent/abis": ["../packages/agent/dist/abis.d.ts"],
+      "@tee-agent/agent/registry": [
+        "../packages/agent/dist/core/registry.d.ts"
+      ],
+      "@tee-agent/agent/ipfs": ["../packages/agent/dist/storage/ipfs.d.ts"],
+      "@tee-agent/agent/zero-g": ["../packages/agent/dist/storage/zero-g.d.ts"],
+      "@tee-agent/agent/mint": ["../packages/agent/dist/ops/mint.d.ts"],
+      "@tee-agent/agent/transfer": ["../packages/agent/dist/ops/transfer.d.ts"],
+      "@tee-agent/agent/services": ["../packages/agent/dist/ops/services.d.ts"],
+      "@tee-agent/agent/feedback": ["../packages/agent/dist/ops/feedback.d.ts"],
+      "@tee-agent/agent/validate": ["../packages/agent/dist/ops/validate.d.ts"],
+      "@tee-agent/agent/typed-data": ["../packages/agent/dist/typed-data.d.ts"],
+      "@tee-agent/agent/sdk": ["../packages/agent/dist/ops/agent-sdk.d.ts"]
+    }
   },
   "include": ["./**/*.ts"],
   "exclude": ["scripts/**"]

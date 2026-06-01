@@ -1,41 +1,44 @@
 /**
  * Server-only configuration. Never import from Client Components.
- * Extends ClientConfig with secrets and server-side-only fields.
+ * Extends the client config with secrets and server-side-only fields.
  */
 
-import { base, baseSepolia, type Chain } from "viem/chains";
 import { defaultIdentityRegistry } from "@tee-agent/agent/config";
-import type { ServerConfig } from "@tee-agent/agent/types";
-import { clientCfg, type ClientConfig } from "./client-config";
+import type { AgentConfig } from "@tee-agent/agent/types";
+import { clientCfg } from "./client-config";
 
-export { clientCfg, type ClientConfig };
-export type { ServerConfig };
+export { clientCfg };
+export type { AgentConfig };
 
-export const NETWORKS = { base, baseSepolia } as const;
+export const APP_CHAIN = clientCfg.chain;
 
-const chain: Chain = clientCfg.network === "base" ? base : baseSepolia;
-export const APP_CHAIN: Chain = chain;
-
-export const cfg: ServerConfig = {
+export const cfg: AgentConfig = {
   ...clientCfg,
-  identityRegistryAddress: defaultIdentityRegistry(chain),
-  teeVerifierAddress: process.env.NEXT_PUBLIC_TEE_VERIFIER_ADDRESS as
-    | `0x${string}`
-    | undefined,
+  identityRegistryAddress: defaultIdentityRegistry(clientCfg.chain),
   rpcUrl: process.env.RPC_URL,
-  deployerKey: process.env.PRIVATE_KEY as `0x${string}` | undefined,
-  zeroGKey: (process.env.ZERO_G_PRIVATE_KEY || process.env.PRIVATE_KEY) as
-    | `0x${string}`
-    | undefined,
-  zeroGRpcUrl: process.env.ZERO_G_RPC_URL,
-  zeroGIndexerUrl: process.env.ZERO_G_INDEXER_URL,
+  zeroGPrivateKey: (process.env.ZERO_G_PRIVATE_KEY ||
+    process.env.PRIVATE_KEY) as string | undefined,
+  zeroGRpcUrl: process.env.ZERO_G_RPC_URL ?? "https://evmrpc-testnet.0g.ai",
+  zeroGIndexerUrl:
+    process.env.ZERO_G_INDEXER_URL ??
+    "https://indexer-storage-testnet-turbo.0g.ai",
   pinataJwt: process.env.PINATA_JWT,
-  registryFromBlock: BigInt(process.env.AGENT_REGISTRY_FROM_BLOCK ?? "0"),
-  chain,
-  chainId: chain.id,
-  isConfigured: !!(
-    clientCfg.registryAddress &&
-    process.env.RPC_URL &&
-    process.env.PRIVATE_KEY
-  ),
 };
+
+/** Deployer / server-side signer key. Server use only — never expose to browser. */
+export const deployerKey = process.env.PRIVATE_KEY as `0x${string}` | undefined;
+
+/** Chain ID shorthand for cache keys and client-side checks. */
+export const chainId = clientCfg.chain.id;
+
+/** Starting block for AgentRegistry event log queries. */
+export const registryFromBlock = BigInt(
+  process.env.AGENT_REGISTRY_FROM_BLOCK ?? "0",
+);
+
+/** True when the minimum required env vars are present. */
+export const isConfigured = !!(
+  clientCfg.registryAddress &&
+  process.env.RPC_URL &&
+  process.env.PRIVATE_KEY
+);

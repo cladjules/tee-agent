@@ -37,11 +37,13 @@ export function ServiceEditorPanel({
   onChange,
   initialX402 = false,
   onX402Change,
+  hideServices = false,
 }: {
   initialServices: readonly AgentService[];
   onChange: (services: ServiceEditorEntry[]) => void;
   initialX402?: boolean;
   onX402Change?: (enabled: boolean) => void;
+  hideServices?: boolean;
 }) {
   const find = (name: string) => initialServices.find((s) => s.name === name);
 
@@ -183,271 +185,281 @@ export function ServiceEditorPanel({
 
   return (
     <div className="space-y-3">
-      {/* MCP */}
-      <ServiceCard
-        label="MCP"
-        badge="Model Context Protocol"
-        enabled={mcpEnabled}
-        onToggle={() => setMcpEnabled((v) => !v)}
-      >
-        <div className="grid grid-cols-3 gap-2">
-          <div className="col-span-2">
-            <input
-              type="url"
-              value={mcpUrl}
-              onChange={(e) => setMcpUrl(e.target.value)}
-              placeholder="https://mcp.example.com"
-              className={INPUT}
-            />
-          </div>
-          <input
-            type="text"
-            value={mcpVersion}
-            onChange={(e) => setMcpVersion(e.target.value)}
-            placeholder="Version"
-            className={INPUT}
-          />
+      {/* TEE Oracle — always visible, prominent */}
+      <div className="rounded-lg border-2 border-violet-600 bg-violet-950/30 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold font-mono bg-violet-600 text-white px-1.5 py-0.5 rounded">
+            teeOracle
+          </span>
+          <span className="text-xs text-violet-300">
+            Phala Cloud / TDX TEE oracle endpoint
+          </span>
         </div>
-      </ServiceCard>
+        <input
+          type="url"
+          value={teeOracleUrl}
+          onChange={(e) => setTeeOracleUrl(e.target.value)}
+          placeholder="https://your-cvm.phala.network"
+          className={INPUT}
+        />
+        <p className="text-xs text-gray-500">
+          Required for oracle runs, ERC-7857 encrypted transfers, and on-chain
+          validation.
+        </p>
+      </div>
 
-      {/* A2A */}
-      <ServiceCard
-        label="A2A"
-        badge="Agent-to-Agent"
-        enabled={a2aEnabled}
-        onToggle={() => setA2aEnabled((v) => !v)}
-      >
-        <div className="grid grid-cols-3 gap-2">
-          <div className="col-span-2">
-            <input
-              type="url"
-              value={a2aUrl}
-              onChange={(e) => setA2aUrl(e.target.value)}
-              placeholder="https://a2a.example.com"
-              className={INPUT}
-            />
-          </div>
-          <input
-            type="text"
-            value={a2aVersion}
-            onChange={(e) => setA2aVersion(e.target.value)}
-            placeholder="Version"
-            className={INPUT}
-          />
-        </div>
-      </ServiceCard>
-
-      {/* OASF */}
-      <ServiceCard
-        label="OASF"
-        badge="Open Agent Skills Framework"
-        enabled={oasfEnabled}
-        onToggle={() => setOasfEnabled((v) => !v)}
-      >
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
+      {!hideServices && (
+        <>
+          {/* MCP */}
+          <ServiceCard
+            label="MCP"
+            badge="Model Context Protocol"
+            enabled={mcpEnabled}
+            onToggle={() => setMcpEnabled((v) => !v)}
+          >
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <input
+                  type="url"
+                  value={mcpUrl}
+                  onChange={(e) => setMcpUrl(e.target.value)}
+                  placeholder="https://mcp.example.com"
+                  className={INPUT}
+                />
+              </div>
               <input
-                type="url"
-                value={oasfUrl}
-                onChange={(e) => setOasfUrl(e.target.value)}
-                placeholder="https://oasf.example.com"
+                type="text"
+                value={mcpVersion}
+                onChange={(e) => setMcpVersion(e.target.value)}
+                placeholder="Version"
                 className={INPUT}
               />
             </div>
-            <input
-              type="text"
-              value={oasfVersion}
-              onChange={(e) => setOasfVersion(e.target.value)}
-              placeholder="Version"
-              className={INPUT}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-gray-400 mb-1">Skills</p>
-              <TagPicker
-                placeholder="Select Skills"
-                hint={`Choose from ${OASF_SKILLS.length} official OASF skills. Selected: ${oasfSkills.length}`}
-                items={OASF_SKILLS}
-                selected={oasfSkills}
-                onChange={setOasfSkills}
-              />
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 mb-1">Domains</p>
-              <TagPicker
-                placeholder="Select Domains"
-                hint={`Choose from ${OASF_DOMAINS.length} official OASF domains. Selected: ${oasfDomains.length}`}
-                items={OASF_DOMAINS}
-                selected={oasfDomains}
-                onChange={setOasfDomains}
-              />
-            </div>
-          </div>
-        </div>
-      </ServiceCard>
+          </ServiceCard>
 
-      {/* Additional: web / DID / email */}
-      <div className="rounded-lg border border-gray-800 bg-gray-900/30 p-4 space-y-2">
-        <p className="text-xs font-medium text-gray-400 mb-3">Additional</p>
-        <div className="grid grid-cols-12 gap-2 items-center">
-          <span className="col-span-2 text-xs font-mono text-gray-500">
-            web
-          </span>
-          <div className="col-span-10">
-            <input
-              type="url"
-              value={webUrl}
-              onChange={(e) => setWebUrl(e.target.value)}
-              placeholder="https://example.com"
-              className={INPUT}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-12 gap-2 items-center">
-          <span className="col-span-2 text-xs font-mono text-gray-500">
-            DID
-          </span>
-          <div className="col-span-10">
-            <input
-              type="text"
-              value={didEndpoint}
-              onChange={(e) => setDidEndpoint(e.target.value)}
-              placeholder="did:example:123"
-              className={INPUT}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-12 gap-2 items-center">
-          <span className="col-span-2 text-xs font-mono text-gray-500">
-            email
-          </span>
-          <div className="col-span-10">
-            <input
-              type="email"
-              value={emailEndpoint}
-              onChange={(e) => setEmailEndpoint(e.target.value)}
-              placeholder="agent@example.com"
-              className={INPUT}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-12 gap-2 items-center">
-          <span
-            className="col-span-2 text-xs font-mono text-violet-400/70"
-            title="Phala Cloud / TDX TEE oracle URL used for oracle runs and validation"
+          {/* A2A */}
+          <ServiceCard
+            label="A2A"
+            badge="Agent-to-Agent"
+            enabled={a2aEnabled}
+            onToggle={() => setA2aEnabled((v) => !v)}
           >
-            teeOracle
-          </span>
-          <div className="col-span-10">
-            <input
-              type="url"
-              value={teeOracleUrl}
-              onChange={(e) => setTeeOracleUrl(e.target.value)}
-              placeholder="https://your-cvm.phala.network"
-              className={INPUT}
-            />
-          </div>
-        </div>
-      </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <input
+                  type="url"
+                  value={a2aUrl}
+                  onChange={(e) => setA2aUrl(e.target.value)}
+                  placeholder="https://a2a.example.com"
+                  className={INPUT}
+                />
+              </div>
+              <input
+                type="text"
+                value={a2aVersion}
+                onChange={(e) => setA2aVersion(e.target.value)}
+                placeholder="Version"
+                className={INPUT}
+              />
+            </div>
+          </ServiceCard>
 
-      {/* Custom rows */}
-      {customServices.map((svc, i) => (
-        <div key={i} className="grid grid-cols-12 gap-2 items-center">
-          <div className="col-span-3">
-            <input
-              type="text"
-              value={svc.name}
-              onChange={(e) =>
-                setCustomServices((p) =>
-                  p.map((s, j) =>
-                    j === i ? { ...s, name: e.target.value } : s,
-                  ),
-                )
-              }
-              placeholder="Service name"
-              className={INPUT}
-            />
+          {/* OASF */}
+          <ServiceCard
+            label="OASF"
+            badge="Open Agent Skills Framework"
+            enabled={oasfEnabled}
+            onToggle={() => setOasfEnabled((v) => !v)}
+          >
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <input
+                    type="url"
+                    value={oasfUrl}
+                    onChange={(e) => setOasfUrl(e.target.value)}
+                    placeholder="https://oasf.example.com"
+                    className={INPUT}
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={oasfVersion}
+                  onChange={(e) => setOasfVersion(e.target.value)}
+                  placeholder="Version"
+                  className={INPUT}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Skills</p>
+                  <TagPicker
+                    placeholder="Select Skills"
+                    hint={`Choose from ${OASF_SKILLS.length} official OASF skills. Selected: ${oasfSkills.length}`}
+                    items={OASF_SKILLS}
+                    selected={oasfSkills}
+                    onChange={setOasfSkills}
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Domains</p>
+                  <TagPicker
+                    placeholder="Select Domains"
+                    hint={`Choose from ${OASF_DOMAINS.length} official OASF domains. Selected: ${oasfDomains.length}`}
+                    items={OASF_DOMAINS}
+                    selected={oasfDomains}
+                    onChange={setOasfDomains}
+                  />
+                </div>
+              </div>
+            </div>
+          </ServiceCard>
+
+          {/* Additional: web / DID / email */}
+          <div className="rounded-lg border border-gray-800 bg-gray-900/30 p-4 space-y-2">
+            <p className="text-xs font-medium text-gray-400 mb-3">Additional</p>
+            <div className="grid grid-cols-12 gap-2 items-center">
+              <span className="col-span-2 text-xs font-mono text-gray-500">
+                web
+              </span>
+              <div className="col-span-10">
+                <input
+                  type="url"
+                  value={webUrl}
+                  onChange={(e) => setWebUrl(e.target.value)}
+                  placeholder="https://example.com"
+                  className={INPUT}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-12 gap-2 items-center">
+              <span className="col-span-2 text-xs font-mono text-gray-500">
+                DID
+              </span>
+              <div className="col-span-10">
+                <input
+                  type="text"
+                  value={didEndpoint}
+                  onChange={(e) => setDidEndpoint(e.target.value)}
+                  placeholder="did:example:123"
+                  className={INPUT}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-12 gap-2 items-center">
+              <span className="col-span-2 text-xs font-mono text-gray-500">
+                email
+              </span>
+              <div className="col-span-10">
+                <input
+                  type="email"
+                  value={emailEndpoint}
+                  onChange={(e) => setEmailEndpoint(e.target.value)}
+                  placeholder="agent@example.com"
+                  className={INPUT}
+                />
+              </div>
+            </div>
           </div>
-          <div className="col-span-5">
-            <input
-              type="text"
-              value={svc.endpoint}
-              onChange={(e) =>
-                setCustomServices((p) =>
-                  p.map((s, j) =>
-                    j === i ? { ...s, endpoint: e.target.value } : s,
-                  ),
-                )
-              }
-              placeholder="Endpoint URL"
-              className={INPUT}
-            />
-          </div>
-          <div className="col-span-3">
-            <input
-              type="text"
-              value={svc.version}
-              onChange={(e) =>
-                setCustomServices((p) =>
-                  p.map((s, j) =>
-                    j === i ? { ...s, version: e.target.value } : s,
-                  ),
-                )
-              }
-              placeholder="Version"
-              className={INPUT}
-            />
-          </div>
+
+          {/* Custom rows */}
+          {customServices.map((svc, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-3">
+                <input
+                  type="text"
+                  value={svc.name}
+                  onChange={(e) =>
+                    setCustomServices((p) =>
+                      p.map((s, j) =>
+                        j === i ? { ...s, name: e.target.value } : s,
+                      ),
+                    )
+                  }
+                  placeholder="Service name"
+                  className={INPUT}
+                />
+              </div>
+              <div className="col-span-5">
+                <input
+                  type="text"
+                  value={svc.endpoint}
+                  onChange={(e) =>
+                    setCustomServices((p) =>
+                      p.map((s, j) =>
+                        j === i ? { ...s, endpoint: e.target.value } : s,
+                      ),
+                    )
+                  }
+                  placeholder="Endpoint URL"
+                  className={INPUT}
+                />
+              </div>
+              <div className="col-span-3">
+                <input
+                  type="text"
+                  value={svc.version}
+                  onChange={(e) =>
+                    setCustomServices((p) =>
+                      p.map((s, j) =>
+                        j === i ? { ...s, version: e.target.value } : s,
+                      ),
+                    )
+                  }
+                  placeholder="Version"
+                  className={INPUT}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setCustomServices((p) => p.filter((_, j) => j !== i))
+                }
+                className="col-span-1 flex items-center justify-center text-gray-500 hover:text-red-400 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+          ))}
           <button
             type="button"
             onClick={() =>
-              setCustomServices((p) => p.filter((_, j) => j !== i))
+              setCustomServices((p) => [
+                ...p,
+                { name: "", endpoint: "", version: "" },
+              ])
             }
-            className="col-span-1 flex items-center justify-center text-gray-500 hover:text-red-400 text-xl leading-none"
+            className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
           >
-            ×
+            + Add custom service
           </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={() =>
-          setCustomServices((p) => [
-            ...p,
-            { name: "", endpoint: "", version: "" },
-          ])
-        }
-        className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
-      >
-        + Add custom service
-      </button>
 
-      {errorMsg && <ErrorBox message={errorMsg} />}
+          {errorMsg && <ErrorBox message={errorMsg} />}
 
-      {/* x402 */}
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/40 px-4 py-3">
-        <div>
-          <p className="text-xs font-medium text-gray-200">
-            HTTP 402 Payment Required
-          </p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Enable if your agent implements the HTTP 402 standard for paid
-            services (microtransactions, per-request billing).
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleX402Toggle}
-          className={`shrink-0 inline-flex h-5 w-9 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${x402Support ? "bg-violet-600" : "bg-gray-600"}`}
-          aria-label="Toggle x402 support"
-        >
-          <span
-            className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow transition-transform ${x402Support ? "translate-x-4" : "translate-x-0"}`}
-          />
-        </button>
-      </div>
+          {/* x402 */}
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/40 px-4 py-3">
+            <div>
+              <p className="text-xs font-medium text-gray-200">
+                HTTP 402 Payment Required
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Enable if your agent implements the HTTP 402 standard for paid
+                services (microtransactions, per-request billing).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleX402Toggle}
+              className={`shrink-0 inline-flex h-5 w-9 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${x402Support ? "bg-violet-600" : "bg-gray-600"}`}
+              aria-label="Toggle x402 support"
+            >
+              <span
+                className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow transition-transform ${x402Support ? "translate-x-4" : "translate-x-0"}`}
+              />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

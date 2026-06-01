@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { keccak256 } from "viem";
+import { keccak256, toBytes } from "viem";
 import type { AgentService } from "@tee-agent/agent/types";
 import {
   AGENT_REGISTRY_ABI,
@@ -10,17 +10,22 @@ import {
   REPUTATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
+import {
+  signAccessPayloads,
+  buildReencryptTypedData,
+  buildRunTypedData,
+  buildValidateTypedData,
+} from "@tee-agent/agent/typed-data";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import {
   prepareTransferAgent,
   prepareUpdateAgentServices,
   recordOracleRun,
-  markValidationComplete,
   fetchPendingValidationsForAgent,
-  markRunValidationRequested,
 } from "@/lib/actions/agents";
 import { prepareFeedback } from "@/lib/actions/registry";
-import type { PendingValidation, CachedOracleRun } from "@/lib/agent-cache";
+import type { CachedOracleRun } from "@/lib/agent-cache";
+import type { PendingValidation } from "@/lib/actions/agents";
 import {
   ServiceEditorPanel,
   type ServiceEditorEntry,
@@ -30,6 +35,8 @@ import { clientCfg } from "@/lib/client-config";
 
 interface Props {
   agentId: string;
+  /** ERC-8004 Identity Registry agent ID — used for ValidationRegistry calls. */
+  erc8004AgentId?: string;
   owner: string;
   initialServices: readonly AgentService[];
   initialRuns?: CachedOracleRun[];
@@ -38,6 +45,7 @@ interface Props {
 
 export default function AgentDetailActions({
   agentId,
+  erc8004AgentId,
   owner,
   initialServices,
   initialRuns,
@@ -52,15 +60,23 @@ export default function AgentDetailActions({
   function addRun(run: CachedOracleRun) {
     setRuns((prev) => [run, ...prev]);
   }
-  function removePending(requestHash: string) {
-    setPending((prev) => prev.filter((j) => j.requestHash !== requestHash));
-  }
-  function updateRunValidation(timestamp: number, requestHash: string) {
-    setRuns((prev) =>
-      prev.map((r) =>
-        r.timestamp === timestamp
-          ? { ...r, validationRequestHash: requestHash }
-          : r,
+  function markValidationComplete(
+    requestHash: string,
+    response: { score?: number; txHash?: string } | null,
+  ) {
+    if (!response) return;
+    setPending((prev) =>
+      prev.map((j) =>
+        j.requestHash === requestHash
+          ? {
+              ...j,
+              response: {
+                score: response.score ?? 0,
+                txHash: response.txHash,
+                timestamp: Math.floor(Date.now() / 1000),
+              },
+            }
+          : j,
       ),
     );
   }
@@ -80,8 +96,8 @@ export default function AgentDetailActions({
           <OracleRunHistory
             runs={runs}
             agentId={agentId}
+            erc8004AgentId={erc8004AgentId}
             teeOracleUrl={teeOracleUrl}
-            onValidationRequested={updateRunValidation}
           />
           {runs.length > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-800" />
@@ -94,21 +110,17 @@ export default function AgentDetailActions({
         </CollapsibleSection>
 
         <CollapsibleSection
-          title="Pending Validations"
+          title="Validations"
           description="Sign and send queued validation requests to the oracle."
           className="md:col-span-2"
+          defaultOpen
         >
           <PendingValidationsPanel
             agentId={agentId}
+            erc8004AgentId={erc8004AgentId}
             pending={pending}
-            onComplete={(requestHash, run) => {
-              removePending(requestHash);
-              if (run) addRun(run);
-            }}
-            onRefresh={async () => {
-              const fresh = await fetchPendingValidationsForAgent(agentId);
-              setPending(fresh);
-            }}
+            teeOracleUrl={teeOracleUrl}
+            onComplete={markValidationComplete}
           />
         </CollapsibleSection>
 
@@ -396,15 +408,34 @@ function FeedbackForm({ agentId }: { agentId: string }) {
       onSubmit={(e) => {
         e.preventDefault();
         run(async () => {
-          if (!clientCfg.reputationAddress)
+          if (!clientCfg.reputationRegistryAddress)
             return { error: "Reputation registry is not configured." };
 
           if (!chainId)
             return { error: "Connect your wallet before submitting feedback." };
 
-          const formData = new FormData(e.currentTarget);
-          const prepared = await prepareFeedback(formData);
-          if (prepared.error) return { error: prepared.error };
+          const form = e.currentTarget;
+          const valueStr = (
+            form.elements.namedItem("value") as HTMLInputElement
+          ).value;
+          const tag1 = (
+            (form.elements.namedItem("tag1") as HTMLInputElement)?.value ?? ""
+          ).trim();
+          const tag2 = (
+            (form.elements.namedItem("tag2") as HTMLInputElement)?.value ?? ""
+          ).trim();
+          const feedbackFile =
+            (form.elements.namedItem("feedbackFile") as HTMLInputElement)
+              ?.files?.[0] ?? null;
+          const prepared = await prepareFeedback({
+            agentId,
+            value: parseFloat(valueStr),
+            tag1,
+            tag2,
+            feedbackJson: feedbackJson || undefined,
+            feedbackFile,
+          });
+          if ("error" in prepared) return { error: prepared.error };
 
           if (
             !prepared.value ||
@@ -418,7 +449,7 @@ function FeedbackForm({ agentId }: { agentId: string }) {
 
           const { publicClient, walletClient } = await getViemClients();
           const hash = await walletClient.writeContract({
-            address: clientCfg.reputationAddress,
+            address: clientCfg.reputationRegistryAddress,
             abi: REPUTATION_REGISTRY_ABI,
             functionName: "giveFeedback",
             args: [
@@ -528,43 +559,30 @@ function TransferForm({ tokenId }: { tokenId: string }) {
           // 2. Sign the EIP-712 ReencryptRequest so the oracle can verify ownership.
           const chainId = await publicClient.getChainId();
           const deadline = Math.floor(Date.now() / 1000) + 3600;
+          const td = buildReencryptTypedData({
+            oracleAddress: oracleAddress as `0x${string}`,
+            chainId,
+            tokenId: BigInt(tokenId),
+            from: walletClient.account!.address,
+            to: (rawFormData.get("to") as string).trim() as `0x${string}`,
+            deadline,
+          });
           const oracleSignature = await walletClient.signTypedData({
             account: walletClient.account!,
-            domain: {
-              name: "TeeAgentOracle",
-              version: "1",
-              chainId,
-              verifyingContract: oracleAddress as `0x${string}`,
-            },
-            types: {
-              ReencryptRequest: [
-                { name: "tokenId", type: "uint256" },
-                { name: "from", type: "address" },
-                { name: "to", type: "address" },
-                { name: "deadline", type: "uint256" },
-              ],
-            },
-            primaryType: "ReencryptRequest",
-            message: {
-              tokenId: BigInt(tokenId),
-              from: walletClient.account!.address,
-              to: (rawFormData.get("to") as string).trim() as `0x${string}`,
-              deadline: BigInt(deadline),
-            },
+            ...td,
           });
 
           // 3. Prepare transfer via server action (oracle call happens inside).
-          const formData = new FormData();
-          formData.set("tokenId", tokenId);
-          formData.set("to", rawFormData.get("to") as string);
-          formData.set(
-            "newOwnerPublicKey",
-            rawFormData.get("newOwnerPublicKey") as string,
-          );
-          formData.set("oracleSignature", oracleSignature);
-          formData.set("oracleDeadline", String(deadline));
-          const prepared = await prepareTransferAgent(formData);
-          if (prepared.error) return { error: prepared.error };
+          const prepared = await prepareTransferAgent({
+            tokenId,
+            to: (rawFormData.get("to") as string).trim() as `0x${string}`,
+            newOwnerPublicKey: (
+              rawFormData.get("newOwnerPublicKey") as string | null
+            )?.trim() as `0x${string}` | undefined,
+            oracleSignature,
+            oracleDeadline: String(deadline),
+          });
+          if ("error" in prepared) return { error: prepared.error };
 
           const accessPayloads = prepared.accessPayloads ?? [];
           const ownershipProofs = prepared.ownershipProofs ?? [];
@@ -574,30 +592,15 @@ function TransferForm({ tokenId }: { tokenId: string }) {
           const deadlineBig = prepared.deadline!;
 
           // 4. Sign each access proof (recipient acknowledgement of blob hash).
-          const proofs = await Promise.all(
-            accessPayloads.map(async (payload, index) => ({
-              accessProof: {
-                dataHash: payload.dataHash,
-                targetPubkey: payload.targetPubkey,
-                nonce: payload.nonce,
-                proof: await walletClient.signMessage({
-                  account: walletClient.account!,
-                  message: payload.digest,
-                }),
-              },
-              ownershipProof: ownershipProofs[index] ?? {
-                oracleType: 0,
-                dataHash: payload.dataHash,
-                sealedKey: "0x" as `0x${string}`,
-                targetPubkey: payload.targetPubkey,
-                nonce: payload.nonce,
-                proof: "0x" as `0x${string}`,
-              },
-              from,
-              to,
-              tokenId: tId,
-              deadline: deadlineBig,
-            })),
+          const proofs = await signAccessPayloads(
+            (digest) =>
+              walletClient.signMessage({
+                account: walletClient.account!,
+                message: digest,
+              }),
+            accessPayloads,
+            ownershipProofs,
+            { from, to, tokenId: tId, deadline: deadlineBig },
           );
 
           const hash = await walletClient.writeContract({
@@ -645,12 +648,12 @@ function ServiceEditorForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        const formData = new FormData();
-        formData.set("tokenId", agentId);
-        formData.set("servicesJson", JSON.stringify(builtServices));
         run(async () => {
-          const prepared = await prepareUpdateAgentServices(formData);
-          if (prepared.error !== undefined) return { error: prepared.error };
+          const prepared = await prepareUpdateAgentServices({
+            tokenId: agentId,
+            servicesJson: builtServices,
+          });
+          if ("error" in prepared) return { error: prepared.error };
           const { erc8004RegistryAddress, erc8004AgentId, tokenUri } = prepared;
 
           await switchChain();
@@ -681,96 +684,14 @@ function ServiceEditorForm({
   );
 }
 
-function AuthorizeUsageForm({ tokenId }: { tokenId: string }) {
-  const { isPending, result, run } = useActionState();
-  const { getViemClients, switchChain } = useWallet();
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        run(async () => {
-          if (!clientCfg.registryAddress)
-            return { error: "Agent registry is not configured." };
-          const formData = new FormData(e.currentTarget);
-          const user = (formData.get("user") as string | null)?.trim() as
-            | `0x${string}`
-            | undefined;
-          if (!user) return { error: "User address is required." };
-
-          await switchChain();
-          const { publicClient, walletClient } = await getViemClients();
-          const hash = await walletClient.writeContract({
-            address: clientCfg.registryAddress,
-            abi: AGENT_REGISTRY_ABI,
-            functionName: "approve",
-            args: [user, BigInt(tokenId)],
-            chain: walletClient.chain,
-            account: walletClient.account!,
-          });
-          await publicClient.waitForTransactionReceipt({ hash });
-          return { txHash: hash };
-        });
-      }}
-      className="space-y-3"
-    >
-      <input type="hidden" name="tokenId" value={tokenId} />
-      <Field label="Wallet Address *" name="user" placeholder="0x…" required />
-      <p className="text-xs text-gray-600">
-        This grants ERC-721 token approval for this specific model NFT.
-      </p>
-      <SubmitButton isPending={isPending} label="Grant Allowance" />
-      <ResultBanner result={result} />
-    </form>
-  );
-}
-
-function RevokeAuthForm({ tokenId }: { tokenId: string }) {
-  const { isPending, result, run } = useActionState();
-  const { getViemClients, switchChain } = useWallet();
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        run(async () => {
-          if (!clientCfg.registryAddress)
-            return { error: "Agent registry is not configured." };
-          await switchChain();
-          const { publicClient, walletClient } = await getViemClients();
-          const hash = await walletClient.writeContract({
-            address: clientCfg.registryAddress,
-            abi: AGENT_REGISTRY_ABI,
-            functionName: "approve",
-            args: [
-              "0x0000000000000000000000000000000000000000",
-              BigInt(tokenId),
-            ],
-            chain: walletClient.chain,
-            account: walletClient.account!,
-          });
-          await publicClient.waitForTransactionReceipt({ hash });
-          return { txHash: hash };
-        });
-      }}
-      className="space-y-3"
-    >
-      <input type="hidden" name="tokenId" value={tokenId} />
-      <p className="text-xs text-gray-600">
-        This clears the current token-level approval via approve(0x0, tokenId).
-      </p>
-      <SubmitButton isPending={isPending} label="Revoke Allowance" />
-      <ResultBanner result={result} />
-    </form>
-  );
-}
-
 // ─── Run Oracle ───────────────────────────────────────────────────────────────
 
 type OracleRunResult = {
   agentId: string;
-  type: string;
   result: Record<string, unknown>;
   timestamp: number;
-  signature: string;
+  quote: string;
+  event_log: string;
 };
 
 function RunOracleForm({
@@ -832,34 +753,19 @@ function RunOracleForm({
       // 2. Deadline = now + 5 min
       const deadline = Math.floor(Date.now() / 1000) + 300;
 
-      // 3. payloadHash = keccak256(UTF-8 bytes of JSON.stringify(payload))
-      const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
-      const payloadHash = keccak256(payloadBytes);
-
-      // 4. Sign EIP-712 RunRequest
+      // 3. Sign EIP-712 RunRequest
       await switchChain();
       const { walletClient } = await getViemClients();
       const actualChainId = walletClient.chain?.id ?? chainId ?? 0;
+      const tdRun = buildRunTypedData({
+        oracleAddress: oracleAddress as `0x${string}`,
+        chainId: actualChainId,
+        agentId: BigInt(agentId),
+        payload,
+        deadline,
+      });
       const signature = await walletClient.signTypedData({
-        domain: {
-          name: "TeeAgentOracle",
-          version: "1",
-          chainId: BigInt(actualChainId),
-          verifyingContract: oracleAddress as `0x${string}`,
-        },
-        types: {
-          RunRequest: [
-            { name: "agentId", type: "uint256" },
-            { name: "payloadHash", type: "bytes32" },
-            { name: "deadline", type: "uint256" },
-          ],
-        },
-        primaryType: "RunRequest",
-        message: {
-          agentId: BigInt(agentId),
-          payloadHash,
-          deadline: BigInt(deadline),
-        },
+        ...tdRun,
         account: walletClient.account!,
       });
 
@@ -867,7 +773,13 @@ function RunOracleForm({
       const res = await fetch(`${trimmedUrl}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, payload, signature, deadline }),
+        body: JSON.stringify({
+          agentId,
+          payload,
+          signature,
+          deadline,
+          registryAddress: clientCfg.registryAddress,
+        }),
       });
       const data = (await res.json()) as OracleRunResult & { error?: string };
       if (!res.ok || data.error) {
@@ -876,18 +788,12 @@ function RunOracleForm({
             (data as { error?: string }).error ?? `Oracle error ${res.status}`,
         });
       } else {
-        const run = data as OracleRunResult;
-        setRunResult({ data: run });
+        setRunResult({ data });
         // Persist to Redis (best-effort — don't block on failure).
         const cachedRun: CachedOracleRun = {
-          agentId,
-          kind: "run",
-          type: run.type,
-          result: run.result,
-          payload,
-          proof: run.signature,
-          timestamp: run.timestamp,
           oracleAddress,
+          payload,
+          ...data,
         };
         void recordOracleRun(cachedRun);
         onNewRun?.(cachedRun);
@@ -929,7 +835,6 @@ function RunOracleForm({
       {runResult?.error && (
         <ErrorBox title="Oracle error" message={runResult.error} />
       )}
-      {runResult?.data && <OracleResultCard result={runResult.data} />}
     </form>
   );
 }
@@ -939,97 +844,119 @@ function RunOracleForm({
 function OracleRunCard({
   run,
   agentId,
+  erc8004AgentId,
   teeOracleUrl,
-  onValidationRequested,
 }: {
   run: CachedOracleRun;
   agentId: string;
+  /** ERC-8004 Identity Registry agent ID — used for the validationRequest contract call. */
+  erc8004AgentId?: string;
   teeOracleUrl: string;
-  onValidationRequested: (timestamp: number, requestHash: string) => void;
 }) {
   const { getViemClients, switchChain } = useWallet();
   const [open, setOpen] = useState(false);
-  const [showValidate, setShowValidate] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [valError, setValError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{
+    is_valid?: boolean;
+    unavailable?: boolean;
+    error?: string;
+  } | null>(null);
 
-  // Validation is possible if:
-  // - this is a run (not a validate record), not yet requested
-  // - a validation registry is configured
-  // - we have an oracle address (cached from run) or a teeOracle service URL to look one up
+  // Pre-compute the requestHash for this run so we can check if already requested.
+  const runMeta = {
+    payload: run.payload,
+    outcome: run.result.outcome,
+    quote: run.quote,
+    timestamp: run.timestamp,
+    agentId: erc8004AgentId ?? agentId,
+  };
+  const runRequestHash = runMeta
+    ? keccak256(toBytes(JSON.stringify(runMeta)))
+    : null;
+
   const hasOracleSource = !!run.oracleAddress || !!teeOracleUrl;
   const canRequestValidation =
-    run.kind === "run" &&
-    !run.validationRequestHash &&
-    !!clientCfg.validationAddress &&
-    hasOracleSource;
+    !!clientCfg.validationRegistryAddress && hasOracleSource;
 
   const summary = (() => {
-    if (run.kind === "validate" && run.score !== undefined)
-      return `Score ${run.score}/100`;
-    if (run.result.verdict) return String(run.result.verdict);
-    if (run.result.statusCode) return `HTTP ${String(run.result.statusCode)}`;
+    if (run.result.outcome?.verdict) return String(run.result.outcome.verdict);
+    if (run.result.outcome?.statusCode)
+      return `HTTP ${String(run.result.outcome.statusCode)}`;
     return null;
   })();
 
   const summaryColor =
-    run.score !== undefined
-      ? run.score >= 70
-        ? "text-green-400"
-        : run.score >= 40
-          ? "text-yellow-400"
-          : "text-red-400"
-      : run.result.verdict === "YES"
-        ? "text-green-400"
-        : run.result.verdict === "NO"
-          ? "text-red-400"
-          : "text-gray-400";
+    run.result.outcome?.verdict === "YES"
+      ? "text-green-400"
+      : run.result.outcome?.verdict === "NO"
+        ? "text-red-400"
+        : "text-gray-400";
+
+  async function handleVerify() {
+    setIsVerifying(true);
+    setVerifyResult(null);
+    try {
+      const trimmedUrl = teeOracleUrl.trim().replace(/\/$/, "");
+      const res = await fetch(`${trimmedUrl}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote: run.quote, event_log: run.event_log }),
+      });
+      const data = (await res.json()) as {
+        is_valid?: boolean;
+        unavailable?: boolean;
+        detail?: unknown;
+        error?: string;
+      };
+      if (!res.ok) {
+        setVerifyResult({
+          error: data.error ?? `Verify failed: HTTP ${res.status}`,
+        });
+      } else {
+        setVerifyResult({
+          is_valid: data.is_valid,
+          unavailable: data.unavailable,
+        });
+      }
+    } catch (err) {
+      setVerifyResult({
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setIsVerifying(false);
+    }
+  }
 
   async function handleRequestValidation(e: React.FormEvent) {
     e.preventDefault();
+    if (!runMeta || !runRequestHash) return;
     setIsValidating(true);
     setValError(null);
     try {
-      // requestURI encodes the run result + proof so the validating oracle has
-      // everything it needs without the caller knowing the original input payload.
-      const runMeta = {
-        type: run.type,
-        result: run.result,
-        proof: run.proof,
-        timestamp: run.timestamp,
-        agentId,
-      };
       const requestURI = `data:application/json;base64,${btoa(JSON.stringify(runMeta))}`;
-      // requestHash = keccak256(run.proof) — stable unique ID for this run.
-      const requestHash = keccak256(run.proof as `0x${string}`);
+      const requestHash = runRequestHash;
 
-      // Prefer the oracle address cached from the original run; fall back to teeOracle service.
-      let oracleAddress: string;
-      if (run.oracleAddress) {
-        oracleAddress = run.oracleAddress;
-      } else {
-        const trimmedUrl = teeOracleUrl.trim().replace(/\/$/, "");
-        if (!trimmedUrl)
-          throw new Error(
-            "No oracle address cached and no teeOracle service configured.",
-          );
-        const addrRes = await fetch(`${trimmedUrl}/address`);
-        if (!addrRes.ok)
-          throw new Error(`GET /address failed: ${addrRes.status}`);
-        ({ address: oracleAddress } = (await addrRes.json()) as {
-          address: string;
-        });
-      }
+      if (!clientCfg.teeVerifierAddress)
+        throw new Error(
+          "TEE_VERIFIER_ADDRESS is not configured. Cannot request validation.",
+        );
 
       await switchChain();
       const { publicClient, walletClient } = await getViemClients();
+      if (!erc8004AgentId)
+        throw new Error(
+          "Agent is not registered with ERC-8004. Register it before requesting validation.",
+        );
       const txHash = await walletClient.writeContract({
-        address: clientCfg.validationAddress!,
+        address: clientCfg.validationRegistryAddress!,
         abi: VALIDATION_REGISTRY_ABI,
         functionName: "validationRequest",
         args: [
-          oracleAddress as `0x${string}`,
-          BigInt(agentId),
+          clientCfg.teeVerifierAddress,
+          BigInt(erc8004AgentId),
           requestURI,
           requestHash,
         ],
@@ -1037,10 +964,7 @@ function OracleRunCard({
         account: walletClient.account!,
       });
       await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-      void markRunValidationRequested(agentId, run.timestamp, requestHash);
-      onValidationRequested(run.timestamp, requestHash);
-      setShowValidate(false);
+      setSubmitted(true);
     } catch (err) {
       setValError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -1053,34 +977,44 @@ function OracleRunCard({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 hover:bg-gray-800/30 transition-colors text-left"
+        className="w-full flex flex-col gap-1.5 px-3 py-2 hover:bg-gray-800/30 transition-colors text-left"
       >
-        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-          <span className="text-xs font-mono text-violet-400 bg-violet-950/40 px-1.5 py-0.5 rounded shrink-0">
-            {run.type}
-          </span>
-          {run.kind === "validate" && (
-            <span className="text-xs text-blue-400 border border-blue-900 bg-blue-950/30 px-1.5 py-0.5 rounded shrink-0">
-              validate
+        <div className="flex items-center justify-between gap-3 w-full">
+          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+            <span className="text-xs font-mono text-violet-400 bg-violet-950/40 px-0.5 py-0.5 rounded shrink-0">
+              Outcome:
             </span>
-          )}
-          {run.validationRequestHash && (
-            <span className="text-xs text-amber-400 border border-amber-900/50 bg-amber-950/30 px-1.5 py-0.5 rounded shrink-0">
-              validation pending
+            {summary && (
+              <span
+                className={`text-xs font-semibold shrink-0 ${summaryColor}`}
+              >
+                {summary}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-gray-600">
+              {new Date(run.timestamp * 1000).toLocaleString("en-US")}
             </span>
-          )}
-          {summary && (
-            <span className={`text-xs font-semibold shrink-0 ${summaryColor}`}>
-              {summary}
+            <span className="text-gray-500 text-[10px]">
+              {open ? "▲" : "▼"}
             </span>
-          )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-gray-600">
-            {new Date(run.timestamp * 1000).toLocaleString("en-US")}
-          </span>
-          <span className="text-gray-500 text-[10px]">{open ? "▲" : "▼"}</span>
-        </div>
+        {run.payload && Object.keys(run.payload).length > 0 && (
+          <div className="w-full rounded bg-gray-900/80 px-2 py-1.5 space-y-0.5">
+            {Object.entries(run.payload).map(([k, v]) => (
+              <div key={k} className="flex gap-1.5 text-xs font-mono min-w-0">
+                <span className="text-violet-400 shrink-0">{k}:</span>
+                <span className="text-gray-300 truncate">
+                  {typeof v === "object" && v !== null
+                    ? JSON.stringify(v)
+                    : String(v)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </button>
       {open && (
         <div className="px-3 pb-3 pt-2 border-t border-gray-800 space-y-2">
@@ -1090,68 +1024,71 @@ function OracleRunCard({
             </pre>
           )}
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 font-mono">
-            {run.oracleAddress && (
-              <span>oracle {run.oracleAddress.slice(0, 10)}…</span>
-            )}
-            {run.runBy && <span>by {run.runBy.slice(0, 10)}…</span>}
-            {run.txHash && <span>tx {run.txHash.slice(0, 18)}…</span>}
+            {run.oracleAddress && <span>oracle {run.oracleAddress}</span>}
+            {run.txHash && <span>tx {run.txHash.slice(0, 18)}</span>}
           </div>
-          {run.proof && (
-            <details>
-              <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-400 select-none">
-                TEE proof
-              </summary>
-              <p className="mt-1 text-xs font-mono text-gray-500 break-all bg-gray-950/60 rounded p-2">
-                {run.proof}
+          {run.quote && (
+            <div className="flex gap-2">
+              <p className="text-xs text-gray-500 break-all font-mono">
+                quote: {run.quote.slice(0, 50)}…
               </p>
-            </details>
-          )}
-          {run.validationRequestHash && (
-            <div className="pt-1 border-t border-gray-800">
-              <p className="text-xs text-amber-400/70 font-mono">
-                validation requested · {run.validationRequestHash.slice(0, 20)}…
-              </p>
-            </div>
-          )}
-          {canRequestValidation && (
-            <div className="pt-1 border-t border-gray-800">
-              {!showValidate ? (
-                <button
-                  type="button"
-                  onClick={() => setShowValidate(true)}
-                  className="text-xs text-violet-400 hover:text-violet-300 transition-colors"
-                >
-                  + Request Validation
-                </button>
-              ) : (
-                <form
-                  onSubmit={(e) => void handleRequestValidation(e)}
-                  className="space-y-2 pt-1"
-                >
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      disabled={isValidating}
-                      className="px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
+              {run.event_log && teeOracleUrl && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isVerifying}
+                    onClick={() => void handleVerify()}
+                    className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-[11px] font-medium transition-colors"
+                  >
+                    {isVerifying ? "…" : "verify"}
+                  </button>
+                  {verifyResult && (
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${
+                        verifyResult.unavailable
+                          ? "text-gray-500"
+                          : verifyResult.error
+                            ? "text-red-400"
+                            : verifyResult.is_valid
+                              ? "text-green-400"
+                              : "text-yellow-400"
+                      }`}
                     >
-                      {isValidating ? "Submitting…" : "Submit On-chain"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowValidate(false);
-                        setValError(null);
-                      }}
-                      className="px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 text-xs text-gray-400 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  {valError && <ErrorBox message={valError} />}
-                </form>
+                      {verifyResult.unavailable
+                        ? "n/a"
+                        : verifyResult.error
+                          ? verifyResult.error
+                          : verifyResult.is_valid
+                            ? "✓"
+                            : "✗"}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           )}
+          {submitted && (
+            <div className="pt-1 border-t border-gray-800">
+              <p className="text-xs text-amber-400/70 font-mono">
+                submitted — waiting for indexer…
+              </p>
+            </div>
+          )}
+          <form
+            onSubmit={(e) => void handleRequestValidation(e)}
+            className="space-y-2 pt-1"
+          >
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={isValidating && canRequestValidation}
+                className="px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
+              >
+                {isValidating ? "Submitting…" : "Validate On-chain"}
+              </button>
+            </div>
+            {valError && <ErrorBox message={valError} />}
+          </form>
         </div>
       )}
     </div>
@@ -1161,13 +1098,13 @@ function OracleRunCard({
 function OracleRunHistory({
   runs,
   agentId,
+  erc8004AgentId,
   teeOracleUrl,
-  onValidationRequested,
 }: {
   runs: CachedOracleRun[];
   agentId: string;
+  erc8004AgentId?: string;
   teeOracleUrl: string;
-  onValidationRequested: (timestamp: number, requestHash: string) => void;
 }) {
   if (!runs.length) return null;
   return (
@@ -1177,138 +1114,159 @@ function OracleRunHistory({
           key={`${run.timestamp}-${idx}`}
           run={run}
           agentId={agentId}
+          erc8004AgentId={erc8004AgentId}
           teeOracleUrl={teeOracleUrl}
-          onValidationRequested={onValidationRequested}
         />
       ))}
     </div>
   );
 }
 
-function OracleResultCard({ result }: { result: OracleRunResult }) {
-  const { type, result: data, timestamp, signature } = result;
+// ─── Pending Validations Panel ────────────────────────────────────────────────
 
-  function renderResult() {
-    if (type === "prediction-verifier") {
-      const r = data as {
-        verdict?: string;
-        confidence?: number;
-        reasoning?: string;
-      };
-      const verdictStyle =
-        r.verdict === "YES"
-          ? "text-green-400 bg-green-950/40 border-green-900"
-          : r.verdict === "NO"
-            ? "text-red-400 bg-red-950/40 border-red-900"
-            : "text-gray-400 bg-gray-800 border-gray-700";
-      return (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span
-              className={`px-3 py-1 rounded-full text-sm font-bold border ${verdictStyle}`}
-            >
-              {r.verdict}
-            </span>
-            <span className="text-sm text-gray-400">
-              Confidence:{" "}
-              <span className="text-white font-semibold">{r.confidence}%</span>
-            </span>
-          </div>
-          {r.reasoning && (
-            <p className="text-sm text-gray-300 leading-relaxed">
-              {r.reasoning}
-            </p>
-          )}
-        </div>
-      );
+function parsePayload(requestURI: string): Record<string, unknown> | null {
+  try {
+    const prefix = "data:application/json;base64,";
+    if (requestURI.startsWith(prefix)) {
+      return JSON.parse(atob(requestURI.slice(prefix.length))) as Record<
+        string,
+        unknown
+      >;
     }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 
-    if (type === "web-fetcher") {
-      const r = data as {
-        url?: string;
-        statusCode?: number;
-        value?: string;
-        contentHash?: string;
-        llmAnalysis?: string;
-      };
-      return (
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-mono font-bold ${
-                (r.statusCode ?? 0) < 400
-                  ? "bg-green-950/40 text-green-400"
-                  : "bg-red-950/40 text-red-400"
-              }`}
-            >
-              {r.statusCode}
-            </span>
-            <span className="text-gray-500 truncate font-mono text-xs">
-              {r.url}
-            </span>
-          </div>
-          {r.value && (
-            <p className="text-gray-200 font-mono text-xs bg-gray-950/60 rounded p-2 overflow-auto max-h-32">
-              {r.value}
-            </p>
-          )}
-          {r.llmAnalysis && (
-            <p className="text-gray-300 text-sm">{r.llmAnalysis}</p>
-          )}
-        </div>
-      );
+function ValidationJobRow({
+  job,
+  erc8004AgentId,
+  oracleUrl,
+  onComplete,
+}: {
+  job: PendingValidation;
+  erc8004AgentId: string;
+  oracleUrl: string;
+  onComplete: (
+    requestHash: string,
+    response: { score?: number; txHash?: string } | null,
+  ) => void;
+}) {
+  const { chainId, getViemClients } = useWallet();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const payload = parsePayload(job.requestURI);
+  const trimmedUrl = oracleUrl.trim().replace(/\/$/, "");
+
+  async function handleValidate() {
+    if (!payload) {
+      setError("Cannot decode payload from requestURI.");
+      return;
     }
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const { walletClient } = await getViemClients();
 
-    return (
-      <pre className="text-xs font-mono text-gray-300 bg-gray-950/60 rounded p-3 overflow-auto max-h-48">
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    );
+      // Fetch the oracle's TEE-derived wallet address for EIP-712 domain.
+      // We cannot use job.validatorAddress here — it may be the TEEVerifier contract.
+      if (!trimmedUrl) throw new Error("Oracle URL is not configured.");
+      const addrRes = await fetch(`${trimmedUrl}/address`);
+      if (!addrRes.ok)
+        throw new Error(`GET /address failed: ${addrRes.status}`);
+      const { address: oracleWallet } = (await addrRes.json()) as {
+        address: string;
+      };
+
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const tdValidate = buildValidateTypedData({
+        oracleAddress: oracleWallet as `0x${string}`,
+        chainId: chainId ?? 0,
+        erc8004AgentId: BigInt(erc8004AgentId),
+        requestHash: job.requestHash as `0x${string}`,
+        payload,
+        deadline,
+      });
+      const signature = await walletClient.signTypedData({
+        ...tdValidate,
+        account: walletClient.account!,
+      });
+
+      const res = await fetch(`${trimmedUrl}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          erc8004AgentId,
+          requestHash: job.requestHash,
+          payload,
+          validationRegistryAddress: clientCfg.validationRegistryAddress,
+          signature,
+          deadline,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error ?? `Oracle returned HTTP ${res.status}`);
+        return;
+      }
+
+      onComplete(job.requestHash, {
+        score: data.score as number | undefined,
+        txHash: data.txHash as string | undefined,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed.");
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-mono text-violet-400 bg-violet-950/40 px-2 py-0.5 rounded">
-          {type}
-        </span>
-        <span className="text-xs text-gray-600">
-          {new Date(timestamp * 1000).toLocaleTimeString()}
-        </span>
-      </div>
-      {renderResult()}
-      <details className="mt-1">
-        <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-400 select-none">
-          TEE proof
-        </summary>
-        <p className="mt-1.5 text-xs font-mono text-gray-500 break-all bg-gray-950/60 rounded p-2">
-          {signature}
+    <div className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-mono text-gray-500 truncate">
+          {job.requestHash.slice(0, 20)}…
         </p>
-      </details>
+        <button
+          type="button"
+          disabled={isProcessing}
+          onClick={() => void handleValidate()}
+          className="shrink-0 px-3 py-1 rounded bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
+        >
+          {isProcessing ? "Validating…" : "Validate"}
+        </button>
+      </div>
+      {payload && (
+        <pre className="text-xs text-gray-400 bg-gray-900/60 rounded p-2 overflow-x-auto max-h-24">
+          {JSON.stringify(payload, null, 2)}
+        </pre>
+      )}
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
   );
 }
 
-// ─── Pending Validations Panel ────────────────────────────────────────────────
-
 function PendingValidationsPanel({
-  agentId,
+  agentId: _agentId,
+  erc8004AgentId,
   pending,
+  teeOracleUrl,
   onComplete,
-  onRefresh,
 }: {
   agentId: string;
+  erc8004AgentId?: string;
   pending: PendingValidation[];
-  onComplete: (requestHash: string, run: CachedOracleRun | null) => void;
-  onRefresh: () => Promise<void>;
+  teeOracleUrl: string;
+  onComplete: (
+    requestHash: string,
+    response: { score?: number; txHash?: string } | null,
+  ) => void;
 }) {
-  const { chainId, getViemClients } = useWallet();
-  const [oracleUrl, setOracleUrl] = useState(() => clientCfg.oracleUrl);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [results, setResults] = useState<
-    Record<string, { score?: number; txHash?: string; error?: string }>
-  >({});
+  const oracleUrl = (teeOracleUrl || clientCfg.oracleUrl) ?? "";
+  const pendingItems = pending.filter((j) => !j.response);
+  const completedItems = pending.filter((j) => !!j.response);
 
   if (!pending.length) {
     return (
@@ -1319,210 +1277,67 @@ function PendingValidationsPanel({
     );
   }
 
-  function parsePayload(requestURI: string): Record<string, unknown> | null {
-    try {
-      const prefix = "data:application/json;base64,";
-      if (requestURI.startsWith(prefix)) {
-        return JSON.parse(atob(requestURI.slice(prefix.length))) as Record<
-          string,
-          unknown
-        >;
-      }
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
-
-  async function handleValidateAll(e: React.FormEvent) {
-    e.preventDefault();
-    if (!pending.length || isProcessing) return;
-    setIsProcessing(true);
-
-    const { walletClient } = await getViemClients();
-    const trimmedUrl = oracleUrl.trim().replace(/\/$/, "");
-
-    for (const job of pending) {
-      const payload = parsePayload(job.requestURI);
-      if (!payload) {
-        setResults((r) => ({
-          ...r,
-          [job.requestHash]: {
-            error: "Cannot decode payload from requestURI.",
-          },
-        }));
-        continue;
-      }
-
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
-      const payloadHash = keccak256(
-        new TextEncoder().encode(JSON.stringify(payload)),
-      );
-
-      try {
-        const signature = await walletClient.signTypedData({
-          domain: {
-            name: "TeeAgentOracle",
-            version: "1",
-            chainId: BigInt(chainId ?? 0),
-            verifyingContract: job.validatorAddress as `0x${string}`,
-          },
-          types: {
-            ValidateRequest: [
-              { name: "agentId", type: "uint256" },
-              { name: "requestHash", type: "bytes32" },
-              { name: "payloadHash", type: "bytes32" },
-              { name: "deadline", type: "uint256" },
-            ],
-          },
-          primaryType: "ValidateRequest",
-          message: {
-            agentId: BigInt(agentId),
-            requestHash: job.requestHash as `0x${string}`,
-            payloadHash,
-            deadline: BigInt(deadline),
-          },
-          account: walletClient.account!,
-        });
-
-        const res = await fetch(`${trimmedUrl}/validate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agentId,
-            requestHash: job.requestHash,
-            payload,
-            validationRegistryAddress: clientCfg.validationAddress,
-            registryAddress: clientCfg.registryAddress,
-            signature,
-            deadline,
-          }),
-        });
-
-        type OracleValidateResponse = {
-          score?: number;
-          result?: Record<string, unknown>;
-          proof?: string;
-          txHash?: string;
-          error?: string;
-        };
-        const data = (await res.json()) as OracleValidateResponse;
-
-        if (!res.ok || data.error) {
-          setResults((r) => ({
-            ...r,
-            [job.requestHash]: {
-              error: data.error ?? `Oracle returned HTTP ${res.status}`,
-            },
-          }));
-          continue;
-        }
-
-        const run: CachedOracleRun = {
-          agentId,
-          kind: "validate",
-          type: "validation",
-          result: data.result ?? {},
-          score: data.score,
-          proof: data.proof ?? "",
-          timestamp: Math.floor(Date.now() / 1000),
-          txHash: data.txHash,
-        };
-        await markValidationComplete(agentId, job.requestHash, run);
-        setResults((r) => ({
-          ...r,
-          [job.requestHash]: { score: data.score, txHash: data.txHash },
-        }));
-        onComplete(job.requestHash, run);
-      } catch (err) {
-        setResults((r) => ({
-          ...r,
-          [job.requestHash]: {
-            error: err instanceof Error ? err.message : "Failed.",
-          },
-        }));
-      }
-    }
-
-    setIsProcessing(false);
+  if (!erc8004AgentId) {
+    return (
+      <p className="text-xs text-amber-400/80">
+        Agent is not registered with ERC-8004 — register it before validating.
+      </p>
+    );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-gray-300">
-          Pending Validations ({pending.length})
-        </h4>
-        <button
-          type="button"
-          disabled={isRefreshing}
-          onClick={async () => {
-            setIsRefreshing(true);
-            await onRefresh();
-            setIsRefreshing(false);
-          }}
-          className="text-xs text-gray-500 hover:text-gray-300 disabled:opacity-50 transition-colors"
-        >
-          {isRefreshing ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
+      {pendingItems.length > 0 && (
+        <>
+          <h4 className="text-sm font-semibold text-gray-300">
+            Pending ({pendingItems.length})
+          </h4>
+          <div className="space-y-2">
+            {pendingItems.map((job) => (
+              <ValidationJobRow
+                key={job.requestHash}
+                job={job}
+                erc8004AgentId={erc8004AgentId}
+                oracleUrl={oracleUrl}
+                onComplete={onComplete}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      <div className="space-y-2">
-        {pending.map((job) => {
-          const payload = parsePayload(job.requestURI);
-          const jobResult = results[job.requestHash];
-          return (
-            <div
-              key={job.requestHash}
-              className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2"
-            >
-              <p className="text-xs font-mono text-gray-500 break-all">
-                {job.requestHash.slice(0, 20)}…
-              </p>
-              {payload && (
-                <pre className="text-xs text-gray-400 bg-gray-900/60 rounded p-2 overflow-x-auto max-h-24">
-                  {JSON.stringify(payload, null, 2)}
-                </pre>
-              )}
-              {jobResult && (
-                <p
-                  className={`text-xs ${
-                    jobResult.error ? "text-red-400" : "text-emerald-400"
-                  }`}
+      {completedItems.length > 0 && (
+        <>
+          <h4 className="text-sm font-semibold text-gray-300">
+            Completed ({completedItems.length})
+          </h4>
+          <div className="space-y-2">
+            {completedItems.map((job) => {
+              const scoreColor =
+                job.response!.score >= 70
+                  ? "text-green-400"
+                  : job.response!.score >= 40
+                    ? "text-yellow-400"
+                    : "text-red-400";
+              return (
+                <div
+                  key={job.requestHash}
+                  className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 flex items-center justify-between gap-3"
                 >
-                  {jobResult.error
-                    ? jobResult.error
-                    : `Score: ${jobResult.score ?? "n/a"}${jobResult.txHash ? ` · tx: ${jobResult.txHash.slice(0, 12)}…` : ""}`}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <form
-        onSubmit={(e) => void handleValidateAll(e)}
-        className="space-y-3 pt-1"
-      >
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Oracle URL</label>
-          <input
-            type="url"
-            value={oracleUrl}
-            onChange={(e) => setOracleUrl(e.target.value)}
-            placeholder="https://your-cvm.phala.network"
-            required
-            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={!pending.length || isProcessing}
-          className="w-full px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-sm font-medium transition-colors"
-        >
-          {isProcessing ? "Validating…" : `Validate All (${pending.length})`}
-        </button>
-      </form>
+                  <p className="text-xs font-mono text-gray-500 truncate">
+                    {job.requestHash.slice(0, 20)}…
+                  </p>
+                  <span
+                    className={`text-xs font-semibold shrink-0 ${scoreColor}`}
+                  >
+                    {job.response!.score}/100
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

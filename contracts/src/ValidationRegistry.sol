@@ -4,17 +4,6 @@ pragma solidity ^0.8.35;
 import "./interfaces/IAgentDataVerifier.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-interface IAgentRegistryForValidation {
-    function ownerOf(uint256 tokenId) external view returns (address);
-
-    function isApprovedForAll(
-        address owner,
-        address operator
-    ) external view returns (bool);
-
-    function getApproved(uint256 tokenId) external view returns (address);
-}
-
 /**
  * @title ValidationRegistry
  * @notice ERC-8004 Validation Registry — on-chain validation requests and responses.
@@ -29,6 +18,7 @@ contract ValidationRegistry is ReentrancyGuard {
 
     struct ValidationRecord {
         address validatorAddress;
+        /// @dev ERC-8004 Identity Registry agent ID (NOT the ERC-721 token ID from AgentRegistry).
         uint256 agentId;
         uint8 response;
         bytes32 responseHash;
@@ -38,14 +28,12 @@ contract ValidationRegistry is ReentrancyGuard {
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
-    address private _agentRegistry;
-
     /// @dev requestHash => ValidationRecord
     mapping(bytes32 => ValidationRecord) private _validations;
     /// @dev requestHash => exists
     mapping(bytes32 => bool) private _requestExists;
 
-    /// @dev agentId => requestHashes
+    /// @dev ERC-8004 Identity Registry agentId => requestHashes
     mapping(uint256 => bytes32[]) private _agentValidations;
 
     /// @dev validatorAddress => requestHashes (deduplicated)
@@ -80,24 +68,12 @@ contract ValidationRegistry is ReentrancyGuard {
     error InvalidResponse();
     error OracleVerificationFailed(bytes32 requestHash);
 
-    // ─── Constructor ──────────────────────────────────────────────────────────
-
-    constructor(address agentRegistry_) {
-        require(agentRegistry_ != address(0), "Invalid agent registry");
-        _agentRegistry = agentRegistry_;
-    }
-
-    function getAgentRegistry() external view returns (address) {
-        return _agentRegistry;
-    }
-
     // ─── Validation Request ───────────────────────────────────────────────────
 
     /**
      * @notice Request validation of agent work.
-     * @dev MUST be called by the owner or operator of agentId.
      * @param validatorAddress The validator contract/address designated to respond.
-     * @param agentId          AgentRegistry tokenId of the agent.
+     * @param agentId          ERC-8004 Identity Registry agent ID (NOT the ERC-721 token ID).
      * @param requestURI       Off-chain URI with inputs/outputs needed by the validator.
      * @param requestHash      keccak256 commitment to the request payload.
      */
@@ -107,16 +83,6 @@ contract ValidationRegistry is ReentrancyGuard {
         string calldata requestURI,
         bytes32 requestHash
     ) external {
-        IAgentRegistryForValidation reg = IAgentRegistryForValidation(
-            _agentRegistry
-        );
-        address agentOwner = reg.ownerOf(agentId);
-        if (
-            msg.sender != agentOwner &&
-            !reg.isApprovedForAll(agentOwner, msg.sender) &&
-            reg.getApproved(agentId) != msg.sender
-        ) revert NotOwnerOrOperator();
-
         _validations[requestHash].validatorAddress = validatorAddress;
         _validations[requestHash].agentId = agentId;
         _requestExists[requestHash] = true;

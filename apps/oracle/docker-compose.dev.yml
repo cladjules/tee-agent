@@ -1,0 +1,30 @@
+# Local development services — NOT for Phala Cloud deployment
+#
+# Started automatically by `npm run dev` (via dev:up).
+# Stop with: npm run dev:down
+#
+# Services:
+#   simulator  — tappd simulator (fake TEE, port 8090)
+#   verifier   — dstack-verifier for testing real CVM quotes locally (port 8080)
+#
+# Usage:
+#   npm run dev                     # start services + oracle (prediction-market)
+#   npm run dev:web-fetcher         # start services + oracle (web-fetcher)
+#   npm run dev:up                  # start services only
+#   npm run dev:down                # stop services
+#
+#   Verify a real CVM quote locally:
+#     curl -s https://your-cvm/attestation | curl -d @- http://localhost:8080/verify | jq
+
+services:
+  simulator:
+    image: phalanetwork/tappd-simulator:latest
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+
+  verifier:
+    image: dstacktee/dstack-verifier:latest
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

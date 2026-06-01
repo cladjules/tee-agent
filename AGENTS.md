@@ -44,23 +44,23 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 ## Environment Variables
 
-| Variable                           | Required | Description                                                                                                                                  |
-| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: baseSepolia)                                                                                               |
-| `RPC_URL`                          | Yes      | EVM RPC for the app chain                                                                                                                    |
-| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract                                                                                                            |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier`                                                                                                                       |
-| `REPUTATION_REGISTRY_ADDRESS`      | No       | Overrides ERC-8004 Reputation Registry (default: `0x8004BAa1…` mainnet / `0x8004B663…` testnet)                                              |
-| `VALIDATION_REGISTRY_ADDRESS`      | No       | Deployed `ValidationRegistry` contract (our own deployment — no default)                                                                     |
-| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer                                                                                                                |
-| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage uploads of encrypted blobs (falls back to `PRIVATE_KEY`)                                                                  |
-| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                                 |
-| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                                                             |
-| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                          |
-| `TEE_ENCRYPTION_PUBLIC_KEY`        | No       | Removed — the dashboard now fetches the oracle's public key live from `GET /address` at mint time.                                           |
-| `UPSTASH_REDIS_REST_URL`           | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com)                                          |
-| `UPSTASH_REDIS_REST_TOKEN`         | No       | Upstash Redis REST token                                                                                                                     |
-| `NEXT_PUBLIC_ORACLE_URL`           | No       | Phala Cloud CVM URL — used server-side (mint/transfer) and client-side (Run Oracle / Validate forms). Local default: `http://localhost:3001` |
+| Variable                      | Required | Description                                                                                                                                  |
+| ----------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_NETWORK`         | Yes      | `base` or `baseSepolia` (default: baseSepolia)                                                                                               |
+| `RPC_URL`                     | Yes      | EVM RPC for the app chain                                                                                                                    |
+| `AGENT_REGISTRY_ADDRESS`      | Yes      | Deployed `AgentRegistry` contract                                                                                                            |
+| `TEE_VERIFIER_ADDRESS`        | No       | Deployed `TEEVerifier`                                                                                                                       |
+| `REPUTATION_REGISTRY_ADDRESS` | No       | Overrides ERC-8004 Reputation Registry (default: `0x8004BAa1…` mainnet / `0x8004B663…` testnet)                                              |
+| `VALIDATION_REGISTRY_ADDRESS` | No       | Deployed `ValidationRegistry` contract (our own deployment — no default)                                                                     |
+| `PRIVATE_KEY`                 | Yes      | Deployer / server-side signer                                                                                                                |
+| `ZERO_G_PRIVATE_KEY`          | Yes      | Key for 0G Storage uploads of encrypted blobs (falls back to `PRIVATE_KEY`)                                                                  |
+| `ZERO_G_RPC_URL`              | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                                 |
+| `PINATA_JWT`                  | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                                                             |
+| `ZERO_G_INDEXER_URL`          | No       | 0G Indexer URL (default: `https://indexer-storage-testnet-turbo.0g.ai`)                                                                      |
+| `TEE_ENCRYPTION_PUBLIC_KEY`   | No       | Removed — the dashboard now fetches the oracle's public key live from `GET /address` at mint time.                                           |
+| `UPSTASH_REDIS_REST_URL`      | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com)                                          |
+| `UPSTASH_REDIS_REST_TOKEN`    | No       | Upstash Redis REST token                                                                                                                     |
+| `NEXT_PUBLIC_ORACLE_URL`      | No       | Phala Cloud CVM URL — used server-side (mint/transfer) and client-side (Run Oracle / Validate forms). Local default: `http://localhost:3001` |
 
 ## Requirements
 

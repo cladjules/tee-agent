@@ -21,6 +21,7 @@ import {
   parseEventLogs,
   zeroAddress,
 } from "viem";
+import type { PublicClient } from "viem";
 import { base, baseSepolia, hardhat } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { readFileSync } from "node:fs";
@@ -39,11 +40,18 @@ import {
   defaultIdentityRegistry,
   defaultReputationRegistry,
 } from "@tee-agent/agent/config";
-import { IDENTITY_REGISTRY_ABI } from "@tee-agent/agent/abis";
+import {
+  AGENT_REGISTRY_ABI,
+  TEE_VERIFIER_ABI,
+  VALIDATION_REGISTRY_ABI,
+  REPUTATION_REGISTRY_ABI,
+  IDENTITY_REGISTRY_ABI,
+} from "@tee-agent/agent/abis";
 import {
   AgentRegistry,
   IdentityRegistry,
   ValidationRegistry,
+  ReputationRegistry,
 } from "@tee-agent/agent/registry";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -119,40 +127,6 @@ const deployedAddresses = JSON.parse(
   ),
 );
 
-const AGENT_REGISTRY_ABI = JSON.parse(
-  readFileSync(
-    resolve(__dirname, "../artifacts/src/AgentRegistry.sol/AgentRegistry.json"),
-    "utf8",
-  ),
-).abi;
-
-const TEE_VERIFIER_ABI = JSON.parse(
-  readFileSync(
-    resolve(
-      __dirname,
-      "../artifacts/src/verifiers/TeeVerifier.sol/TeeVerifier.json",
-    ),
-    "utf8",
-  ),
-).abi;
-
-const VALIDATION_REGISTRY_ABI = JSON.parse(
-  readFileSync(
-    resolve(
-      __dirname,
-      "../artifacts/src/ValidationRegistry.sol/ValidationRegistry.json",
-    ),
-    "utf8",
-  ),
-).abi;
-
-const REPUTATION_REGISTRY_ABI = JSON.parse(
-  readFileSync(
-    resolve(__dirname, "../../packages/agent/src/abis/ReputationRegistry.json"),
-    "utf8",
-  ),
-);
-
 const AGENT_REGISTRY_ADDRESS = deployedAddresses[
   "TeeAgent#AgentRegistry"
 ] as `0x${string}`;
@@ -205,18 +179,25 @@ console.log(`Recipient:     ${recipient}`);
 
 // ── Registry clients ──────────────────────────────────────────────────────────
 
+const pc = publicClient as PublicClient;
 const agentRegistry = new AgentRegistry({
-  agentRegistryAddress: AGENT_REGISTRY_ADDRESS,
-  publicClient: publicClient as any,
+  address: AGENT_REGISTRY_ADDRESS,
+  publicClient: pc,
 });
 const identityRegistry = new IdentityRegistry({
   address: IDENTITY_REGISTRY_ADDRESS,
-  publicClient: publicClient as any,
+  publicClient: pc,
 });
 const validationRegistry = new ValidationRegistry({
   address: VALIDATION_REGISTRY_ADDRESS,
-  publicClient: publicClient as any,
+  publicClient: pc,
 });
+const reputationRegistry = REPUTATION_REGISTRY_ADDRESS
+  ? new ReputationRegistry({
+      address: REPUTATION_REGISTRY_ADDRESS,
+      publicClient: pc,
+    })
+  : undefined;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -720,12 +701,8 @@ async function testValidationRegistry() {
   );
 
   // Check getSummary
-  const [count, avgScore] = (await publicClient.readContract({
-    address: VALIDATION_REGISTRY_ADDRESS,
-    abi: VALIDATION_REGISTRY_ABI,
-    functionName: "getSummary",
-    args: [tokenId, [], ""],
-  })) as [bigint, number];
+  const { count, averageResponse: avgScore } =
+    await validationRegistry.getSummary(tokenId, [], "");
 
   if (count !== 1n || avgScore !== 92)
     throw new Error(`Test 4 FAILED: summary count=${count} avg=${avgScore}`);
@@ -793,19 +770,17 @@ async function testReputationFeedback() {
   console.log(`  ✔ feedback submitted — value: 90, tags: helpful/web-search`);
 
   // Read back the feedback entry
-  const lastIndex = (await publicClient.readContract({
-    address: REPUTATION_REGISTRY_ADDRESS,
-    abi: REPUTATION_REGISTRY_ABI,
-    functionName: "getLastIndex",
-    args: [erc8004AgentId, account.address],
-  })) as bigint;
+  const lastIndex = await reputationRegistry!.getLastIndex(
+    erc8004AgentId,
+    account.address,
+  );
 
-  const [value, , tag1, tag2, isRevoked] = (await publicClient.readContract({
-    address: REPUTATION_REGISTRY_ADDRESS,
-    abi: REPUTATION_REGISTRY_ABI,
-    functionName: "readFeedback",
-    args: [erc8004AgentId, account.address, lastIndex],
-  })) as [bigint, number, string, string, boolean];
+  const { value, tag1, tag2, isRevoked } =
+    await reputationRegistry!.readFeedback(
+      erc8004AgentId,
+      account.address,
+      lastIndex,
+    );
 
   if (value !== 90n || isRevoked)
     throw new Error(`Test 5 FAILED: value=${value} isRevoked=${isRevoked}`);
@@ -814,12 +789,12 @@ async function testReputationFeedback() {
   );
 
   // Aggregate summary
-  const [count, summaryValue] = (await publicClient.readContract({
-    address: REPUTATION_REGISTRY_ADDRESS,
-    abi: REPUTATION_REGISTRY_ABI,
-    functionName: "getSummary",
-    args: [erc8004AgentId, [account.address], "", ""],
-  })) as [bigint, bigint, number];
+  const { count, summaryValue } = await reputationRegistry!.getSummary(
+    erc8004AgentId,
+    [account.address],
+    "",
+    "",
+  );
 
   if (count < 1n)
     throw new Error(

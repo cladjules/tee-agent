@@ -11,17 +11,18 @@
  *  6. Return calldata params for the mint transaction
  */
 
-import { makePublicClient } from "../core/client.js";
-import { AgentRegistry } from "../core/registry.js";
-import { parseAgentServicesJson } from "../crypto/index.js";
+import { parseAgentServicesJson } from "../core/crypto.js";
 import { uploadEncryptedIntelligentData } from "../storage/zero-g.js";
-import { IpfsClient } from "../storage/ipfs.js";
+import { uploadMetadata } from "./metadata.js";
 import type {
   AgentConfig,
   AgentService,
   MintParams,
   MintResult,
 } from "../core/types.js";
+import { AgentRegistry } from "../core/registry/agent.js";
+import { IDENTITY_REGISTRY_ABI } from "../abis.js";
+import { createPublicClient, http } from "viem";
 
 export async function prepareMint(
   config: AgentConfig,
@@ -40,10 +41,10 @@ export async function prepareMint(
     ownerAddress,
   } = params;
 
-  if (!name) return { error: "Agent name is required." };
-  if (!description) return { error: "Description is required." };
+  if (!name) throw new Error("Agent name is required.");
+  if (!description) throw new Error("Description is required.");
   if (!ownerAddress)
-    return { error: "Connect your wallet before creating an agent." };
+    throw new Error("Connect your wallet before creating an agent.");
 
   // ── Fetch oracle public key ──────────────────────────────────────────────
   let keyEncryptionPublicKey: string | undefined;
@@ -60,17 +61,15 @@ export async function prepareMint(
   }
 
   if (!keyEncryptionPublicKey) {
-    return {
-      error:
-        "Could not retrieve TEE encryption public key from oracle. Is oracleUrl set and the oracle running?",
-    };
+    throw new Error(
+      "Could not retrieve TEE encryption public key from oracle. Is oracleUrl set and the oracle running?",
+    );
   }
 
   // ── Parse services ────────────────────────────────────────────────────────
-  const parsedServices = parseAgentServicesJson(JSON.stringify(rawServices));
-  if (parsedServices.error) return { error: parsedServices.error };
+  const parsedServices = parseAgentServicesJson(rawServices);
 
-  let services: AgentService[] = (parsedServices.services ?? []).map((s) => ({
+  let services: AgentService[] = parsedServices.map((s) => ({
     name: s.name,
     endpoint: s.endpoint,
     ...(s.version !== undefined ? { version: s.version } : {}),
@@ -80,46 +79,75 @@ export async function prepareMint(
 
   // ── Chain reads ───────────────────────────────────────────────────────────
   const registry = new AgentRegistry({
-    agentRegistryAddress: config.registryAddress,
-    publicClient: makePublicClient(config) as any,
+    address: config.registryAddress!,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    }),
   });
   const predictedAgentId = await registry.totalSupply();
   const mintFee = 0n;
+
+  // ── Predict ERC-8004 agentId via dry-run simulation ───────────────────────
+  // `register()` is permissionless — simulating it via eth_call returns the
+  // agentId that will be assigned when the real mint tx calls it.
+  // We pass ownerAddress as `from` to satisfy the ERC-721 non-zero receiver check.
+  let predictedErc8004AgentId: bigint | undefined;
+  const identityRegistryRef = config.identityRegistryAddress
+    ? `eip155:${config.chain.id}:${config.identityRegistryAddress}`
+    : undefined;
+  if (config.identityRegistryAddress) {
+    const pc = createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    });
+    try {
+      const { result } = await pc.simulateContract({
+        address: config.identityRegistryAddress as `0x${string}`,
+        abi: IDENTITY_REGISTRY_ABI,
+        functionName: "register",
+        args: ["ipfs://predict"],
+        account: ownerAddress as `0x${string}`,
+      });
+      predictedErc8004AgentId = result;
+    } catch (err) {
+      console.warn(
+        "[prepareMint] could not predict ERC-8004 agentId — skipping IdentityRegistry registration entry",
+        err,
+      );
+    }
+  }
 
   // ── Upload private intelligent data to 0G Storage ─────────────────────────
   const validEntries = privateEntries.filter(
     (e) => e.name.trim() && e.data.trim(),
   );
   if (validEntries.length > 0 && !config.zeroGPrivateKey) {
-    return {
-      error:
-        "zeroGPrivateKey (or PRIVATE_KEY fallback) is required for private data uploads.",
-    };
+    throw new Error(
+      "zeroGPrivateKey (or PRIVATE_KEY fallback) is required for private data uploads.",
+    );
   }
 
   const intelligentData = await uploadEncryptedIntelligentData({
     entries: validEntries,
     keyEncryptionPublicKey: keyEncryptionPublicKey as `0x${string}`,
     zeroGPrivateKey: config.zeroGPrivateKey ?? "",
-    ...(config.zeroGRpcUrl !== undefined ? { rpcUrl: config.zeroGRpcUrl } : {}),
-    ...(config.zeroGIndexerUrl !== undefined
-      ? { indexerUrl: config.zeroGIndexerUrl }
-      : {}),
+    rpcUrl: config.zeroGRpcUrl,
+    indexerUrl: config.zeroGIndexerUrl,
   });
 
   // ── OASF profile ──────────────────────────────────────────────────────────
   if ((oasfSkills.length > 0 || oasfDomains.length > 0) && config.pinataJwt) {
-    const oasfIpfsClient = new IpfsClient({ jwt: config.pinataJwt });
     const oasfProfile = {
       schema_version: "0.8",
       skills: oasfSkills,
       domains: oasfDomains,
     };
-    const oasfUpload = await oasfIpfsClient.uploadJSON(
+    const oasfProfileUri = await uploadMetadata(
+      config,
       oasfProfile,
       `${name}-oasf-profile`,
     );
-    const oasfProfileUri = oasfUpload.url;
 
     const oasfIdx = services.findIndex((s) => s.name === "OASF");
     const oasfEntry: AgentService = {
@@ -140,14 +168,9 @@ export async function prepareMint(
 
   // ── IPFS uploads ──────────────────────────────────────────────────────────
   if (!config.pinataJwt) {
-    return { error: "pinataJwt is required for IPFS metadata uploads." };
+    throw new Error("pinataJwt is required for IPFS metadata uploads.");
   }
-  const ipfsClient = new IpfsClient({ jwt: config.pinataJwt });
-
   const agentRegistry = `eip155:${config.chain.id}:${config.registryAddress}`;
-  const identityRegistryRef = config.identityRegistryAddress
-    ? `eip155:${config.chain.id}:${config.identityRegistryAddress}`
-    : undefined;
 
   const publicMetadata = {
     name,
@@ -163,18 +186,22 @@ export async function prepareMint(
     ],
   };
 
-  const publicMetadataUpload = await ipfsClient.uploadJSON(
+  const publicMetadataUri = await uploadMetadata(
+    config,
     publicMetadata,
     `${name}-public`,
   );
-  const publicMetadataUri = publicMetadataUpload.url;
 
+  // Include both AgentRegistry and IdentityRegistry registrations when possible.
+  // The ERC-8004 agentId is predicted by dry-running register() via eth_call;
+  // if that fails, only AgentRegistry is included and `prepareRegisterErc8004`
+  // can patch the metadata post-mint.
   const registrations = [
     { agentId: Number(predictedAgentId), agentRegistry },
-    ...(identityRegistryRef
+    ...(identityRegistryRef && predictedErc8004AgentId !== undefined
       ? [
           {
-            agentId: Number(predictedAgentId),
+            agentId: Number(predictedErc8004AgentId),
             agentRegistry: identityRegistryRef,
           },
         ]
@@ -190,17 +217,16 @@ export async function prepareMint(
     x402Support,
     active: true,
     registrations,
-    supportedTrust: ["tee-attestation"],
+    supportedTrust: ["tee-attestation", "reputation", "validation"],
     wallet: ownerAddress,
     owner: ownerAddress,
     publicMetadataUri,
   };
 
-  const agentMetadataUpload = await ipfsClient.uploadJSON(agentMetadata, name);
-  const agentMetadataUri = agentMetadataUpload.url;
+  const agentMetadataUri = await uploadMetadata(config, agentMetadata, name);
 
   return {
-    contractAddress: config.registryAddress,
+    contractAddress: config.registryAddress!,
     agentRegistry: `${agentRegistry}/${predictedAgentId}`,
     publicMetadataUri,
     agentMetadataUri,
@@ -209,5 +235,8 @@ export async function prepareMint(
       dataDescription: item.uri,
       dataHash: item.hash,
     })),
+    ...(config.identityRegistryAddress !== undefined
+      ? { erc8004RegistryAddress: config.identityRegistryAddress }
+      : {}),
   };
 }

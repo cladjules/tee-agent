@@ -67,7 +67,9 @@ function resolveDotPath(obj: unknown, path: string): string | null {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 const webFetcher: AgentHandler = {
-  async run(skillContent, rawConfig, rawPayload) {
+  async run(rawPayload, ctx) {
+    const skillContent = ctx.blobs[0] as string;
+    const rawConfig = ctx.blobs[1];
     const config = configSchema.parse(rawConfig);
     const { allowedDomains } = config;
     const { url, selector } = payloadSchema.parse(rawPayload);
@@ -94,7 +96,7 @@ const webFetcher: AgentHandler = {
     let value: string | null = null;
     if (selector) {
       try {
-        const json = JSON.parse(body) as unknown;
+        const json = JSON.parse(body);
         value = resolveDotPath(json, selector);
       } catch {
         // body wasn't JSON — value stays null
@@ -179,23 +181,20 @@ const webFetcher: AgentHandler = {
     }
 
     return {
-      url,
-      statusCode: response.status,
-      contentHash,
-      value,
-      fetchedAt: Math.floor(Date.now() / 1000),
-      llmAnalysis,
+      outcome: {
+        statusCode: response.status,
+        contentHash,
+        value,
+      },
+      extra: {
+        llmAnalysis,
+      },
     };
-  },
-
-  score(result) {
-    const { statusCode } = result as { statusCode?: number };
-    return typeof statusCode === "number" && statusCode < 400 ? 100 : 0;
   },
 };
 
 // ─── Start oracle ─────────────────────────────────────────────────────────────
 
 await startOracle({
-  handlers: { "web-fetcher": webFetcher },
+  handler: webFetcher,
 });

@@ -7,7 +7,6 @@
   "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
   "workspaces": [
     "packages/agent",
-    "packages/sdk",
     "apps/dashboard",
     "apps/oracle",
     "contracts"
@@ -23,8 +22,6 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,sol,json,md}\"",
     "e2e:local": "npm run e2e:local -w contracts",
     "e2e:baseSepolia": "npm run e2e:baseSepolia -w contracts",
-    "e2e-sdk:local": "npm run e2e-sdk:local -w contracts",
-    "e2e-sdk:baseSepolia": "npm run e2e-sdk:baseSepolia -w contracts",
     "changeset": "changeset",
     "release": "changeset publish"
   },

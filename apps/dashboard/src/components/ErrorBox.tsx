@@ -4,6 +4,10 @@ interface ErrorBoxProps {
 }
 
 export function ErrorBox({ message, title }: ErrorBoxProps) {
+  if (message.includes("User rejected the request.")) {
+    message = "Action cancelled by user.";
+  }
+
   if (title) {
     return (
       <div className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg space-y-1 text-wrap overflow-hidden break-words w-full">

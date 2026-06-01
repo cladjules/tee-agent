@@ -54,7 +54,9 @@ const payloadSchema = z.object({
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 const predictionVerifier: AgentHandler = {
-  async run(skillContent, rawConfig, rawPayload) {
+  async run(rawPayload, ctx) {
+    const skillContent = ctx.blobs[0] as string;
+    const rawConfig = ctx.blobs[1];
     console.log(
       "Received prediction verification request with config:",
       rawConfig,
@@ -153,21 +155,21 @@ const predictionVerifier: AgentHandler = {
     }
 
     return {
-      verdict,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
-      reasoning: parsed.reasoning ?? "",
-      llmSignature,
+      outcome: {
+        verdict,
+        confidence:
+          typeof parsed.confidence === "number" ? parsed.confidence : 0,
+        reasoning: parsed.reasoning ?? "",
+      },
+      extra: {
+        llmSignature,
+      },
     };
-  },
-
-  score(result) {
-    const { verdict } = result as { verdict?: string };
-    return verdict === "YES" ? 100 : verdict === "NO" ? 0 : 50; // INVALID → 50
   },
 };
 
 // ─── Start oracle ─────────────────────────────────────────────────────────────
 
 await startOracle({
-  handlers: { "prediction-verifier": predictionVerifier },
+  handler: predictionVerifier,
 });

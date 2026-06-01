@@ -1,8 +1,8 @@
 /**
  * Oracle server factory — Tee Agent
  * ─────────────────────────────────────────────────────────────────────────────
- * Call `startOracle({ handlers })` to start an oracle server with your own
- * agent handlers. Each handler receives the decrypted skill from 0G Storage
+ * Call `startOracle({ handler })` to start an oracle server with your own
+ * agent handler. The handler receives all decrypted blobs from 0G Storage
  * and the caller's payload, then returns a TEE-signed result.
  *
  * The oracle handles all infrastructure:
@@ -13,23 +13,18 @@
  *   - NFT transfer re-encryption (/reencrypt)
  *   - Validation response signing (/validate)
  *
- * You provide: a Record of handler implementations. Each oracle deployment is
- * single-purpose — only the first registered handler is used at runtime. The
- * key you give the handler is used as the `type` label in signed responses.
- *
  * Example:
  * ```typescript
  * import { startOracle } from './server.js'
  *
  * await startOracle({
- *   handlers: {
- *     'my-agent': {
- *       async run(skillContent, config, payload) {
- *         // skillContent = decrypted SKILL.md markdown string (iData[0])
- *         // config       = decrypted agent config object     (iData[1])
- *         // payload      = caller-supplied input
- *         return { answer: 42 }
- *       }
+ *   name: 'my-agent',
+ *   handler: {
+ *     async run(payload, ctx) {
+ *       // ctx.blobs[0] = decrypted SKILL.md markdown string
+ *       // ctx.blobs[1] = decrypted agent config object
+ *       // payload      = caller-supplied input
+ *       return { answer: 42 }
  *     }
  *   }
  * })
@@ -38,10 +33,9 @@
 
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { TappdClient } from "@phala/dstack-sdk";
+import { TappdClient, TdxQuoteResponse } from "@phala/dstack-sdk";
 import { encrypt } from "eciesjs";
 import { ethers } from "ethers";
-import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";
 import { z } from "zod";
 import {
   decryptContentKey,
@@ -49,12 +43,74 @@ import {
   encryptMetadata,
   generateContentKey,
   hashEncryptedBlob,
+  readJsonFromUri,
 } from "@tee-agent/agent/encryption";
+import { uploadZeroGBytes } from "@tee-agent/agent/zero-g";
 import type { EncryptedBlob } from "@tee-agent/agent/types";
 import {
+  REENCRYPT_REQUEST_TYPES,
+  RUN_REQUEST_TYPES,
+  VALIDATE_REQUEST_TYPES,
+} from "@tee-agent/agent/typed-data";
+import {
   AGENT_REGISTRY_ABI,
+  IDENTITY_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
+import { scoreWithLLM } from "./llm-scorer.js";
+
+// ─── Request schemas ────────────────────────────────────────────────────────────
+
+const reEncryptBodySchema = z
+  .object({
+    tokenId: z.string(),
+    from: z.string(),
+    to: z.string(),
+    chainId: z.number().int().positive(),
+    verifierAddress: z.string(),
+    registryAddress: z.string(),
+    deadline: z.number().int().positive(),
+    intelligentDataHashes: z.array(z.string()),
+    blobUris: z.array(z.string()).min(1, "blobUris must be a non-empty array."),
+    targetPubkey: z.string(),
+    signature: z.string(),
+  })
+  .refine(
+    (b) => b.intelligentDataHashes.length === b.blobUris.length,
+    "intelligentDataHashes and blobUris must have the same length.",
+  );
+
+type ReEncryptBody = z.infer<typeof reEncryptBodySchema>;
+
+const verifyBodySchema = z.object({
+  quote: z.string().startsWith("0x"),
+  event_log: z.string(),
+});
+
+const validateRequestBodySchema = z.object({
+  requestHash: z.string(),
+  /**
+   * ERC-8004 Identity Registry agent ID — used for ownership check, EIP-712 verification,
+   * and TDX attestation commitment. Must match record.agentId in ValidationRegistry.
+   */
+  erc8004AgentId: z.union([z.string(), z.number()]),
+  /** The claim / input to validate — oracle runs the skill handler on this. */
+  payload: z.record(z.string(), z.unknown()),
+  validationRegistryAddress: z.string(),
+  responseURI: z.string().optional().default(""),
+  responseHash: z.string().optional().default(ethers.ZeroHash),
+  tag: z.string().optional().default(""),
+  signature: z.string(),
+  deadline: z.number().int().positive(),
+});
+
+const runBodySchema = z.object({
+  agentId: z.union([z.string(), z.number()]),
+  registryAddress: z.string().optional(),
+  payload: z.record(z.string(), z.unknown()),
+  signature: z.string(),
+  deadline: z.number().int().positive(),
+});
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -72,54 +128,46 @@ export interface HandlerContext {
 }
 
 export interface AgentHandler<
-  TConfig extends Record<string, unknown> = Record<string, unknown>,
   TPayload extends Record<string, unknown> = Record<string, unknown>,
   TResult extends Record<string, unknown> = Record<string, unknown>,
 > {
   /**
    * Process an agent request.
-   * @param skillContent - Decrypted SKILL.md markdown string (iData[0]).
-   * @param config - Decrypted agent config object (iData[1], empty object if absent).
    * @param payload - Caller-supplied input for this invocation.
-   * @param ctx - TEE-derived wallet and signing key.
+   * @param ctx - TEE-derived wallet, signing key, and all decrypted blobs.
+   *              ctx.blobs[0] is typically the skill/prompt, ctx.blobs[1] the
+   *              config object — but handlers decide the exact interpretation.
    */
-  run(
-    skillContent: string,
-    config: TConfig,
-    payload: TPayload,
-    ctx: HandlerContext,
-  ): Promise<TResult>;
-  /**
-   * Optional: map a run result to a 0–100 integer for on-chain ValidationRegistry.
-   * If omitted, the oracle falls back to `result.score` (if numeric) or 50.
-   */
-  score?(result: TResult): number;
+  run(payload: TPayload, ctx: HandlerContext): Promise<TResult>;
 }
 
 export interface OracleConfig {
-  /**
-   * Agent handlers keyed by the `type` field in the skill blob.
-   * The oracle dispatches POST /run requests to the matching handler.
-   */
-  handlers: Record<string, AgentHandler>;
-  /** TCP port to listen on. Defaults to PORT env var or 3000. */
-  port?: number;
+  /** The single agent handler for this oracle deployment. */
+  handler: AgentHandler;
 }
 
 // ─── Oracle server factory ────────────────────────────────────────────────────
 
+const TESTNET_ID_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
+const MAINNET_ID_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+
 export async function startOracle(config: OracleConfig): Promise<void> {
-  const PORT = config.port ?? parseInt(process.env.PORT ?? "3000", 10);
+  const PORT = parseInt(process.env.PORT ?? "3001", 10);
   const KEY_PATH = "oracle/reencrypt";
-  const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
+  const RPC_URL = process.env.RPC_URL;
   const AGENT_REGISTRY_ADDRESS = process.env.AGENT_REGISTRY_ADDRESS;
-  const ZERO_G_RPC_URL =
-    process.env.ZERO_G_RPC_URL ?? "https://evmrpc-testnet.0g.ai";
-  const ZERO_G_INDEXER_URL =
-    process.env.ZERO_G_INDEXER_URL ??
-    "https://indexer-storage-testnet-turbo.0g.ai";
+  const ZERO_G_RPC_URL = process.env.ZERO_G_RPC_URL;
+  const ZERO_G_INDEXER_URL = process.env.ZERO_G_INDEXER_URL;
+  // dstack-verifier sidecar URL. Defaults to Docker Compose service name (works in docker-compose
+  // and on Phala Cloud). Override with DSTACK_VERIFIER_URL=http://localhost:8080 for local dev.
+  const DSTACK_VERIFIER_URL = (
+    process.env.DSTACK_VERIFIER_URL ?? "http://verifier:8080"
+  ).replace(/\/$/, "");
 
   // TEE key initialisation
+  // IS_SIMULATOR=true when running against the local tappd simulator (DSTACK_SIMULATOR_ENDPOINT set).
+  // The simulator supports deriveKey + tdxQuote but NOT info() — skip those calls in dev.
+  const IS_SIMULATOR = !!process.env.DSTACK_SIMULATOR_ENDPOINT;
   const tappd = new TappdClient();
   const keyResponse = await tappd.deriveKey(KEY_PATH);
   const wallet = new ethers.Wallet(
@@ -127,79 +175,72 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   );
   const signingKey = new ethers.SigningKey(wallet.privateKey);
   console.log(`[oracle] TEE signing address: ${wallet.address}`);
-  if (Object.keys(config.handlers).length > 0) {
-    console.log(
-      `[oracle] Handlers: ${Object.keys(config.handlers).join(", ")}`,
-    );
-  }
-  // ─── EIP-712 domain ───────────────────────────────────────────────────────────
-  // verifyingContract = TEE-derived address → unique per CVM; prevents cross-oracle replay.
-  // Callers fetch the oracle address from GET /address before constructing the typed data.
-  let eip712Domain: {
-    name: string;
-    version: string;
-    chainId: bigint;
-    verifyingContract: string;
-  } | null = null;
-  if (RPC_URL) {
-    const { chainId } = await new ethers.JsonRpcProvider(RPC_URL).getNetwork();
-    eip712Domain = {
-      name: "TeeAgentOracle",
-      version: "1",
-      chainId,
-      verifyingContract: wallet.address,
-    };
-    console.log(
-      `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
-    );
+
+  // ─── Network configuration ────────────────────────────────────────────────────
+  // Set NETWORK=base (mainnet) or NETWORK=baseSepolia (testnet, default).
+  // chainId and Identity Registry address are derived statically — no RPC call needed.
+  // Override Identity Registry with IDENTITY_REGISTRY_ADDRESS env var if needed.
+  const NETWORK_CONFIG = {
+    base: {
+      chainId: 8453n,
+      isTestnet: false,
+      identityRegistryAddress: MAINNET_ID_REGISTRY,
+    },
+    baseSepolia: {
+      chainId: 84532n,
+      isTestnet: true,
+      identityRegistryAddress: TESTNET_ID_REGISTRY,
+    },
+  } as const;
+
+  const network = process.env.NETWORK as keyof typeof NETWORK_CONFIG;
+  const networkConfig = NETWORK_CONFIG[network] ?? NETWORK_CONFIG.baseSepolia;
+  const { chainId, isTestnet } = networkConfig;
+  const identityRegistryAddress: string =
+    process.env.IDENTITY_REGISTRY_ADDRESS ??
+    networkConfig.identityRegistryAddress;
+
+  // EIP-712 domain: verifyingContract = TEE-derived address → unique per CVM; prevents
+  // cross-oracle replay. Callers fetch the oracle address from GET /address before signing.
+  const eip712Domain = {
+    name: "TeeAgentOracle",
+    version: "1",
+    chainId,
+    verifyingContract: wallet.address,
+  };
+  console.log(
+    `[oracle] network=${network} chainId=${chainId} isTestnet=${isTestnet}`,
+  );
+  console.log(
+    `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
+  );
+  console.log(`[oracle] Identity Registry: ${identityRegistryAddress}`);
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Commits a JSON payload into a bytes32 hash for EIP-712 signatures.
+   * Prevents callers from swapping out the payload after signing.
+   */
+  function hashPayload(payload: Record<string, unknown>): `0x${string}` {
+    return ethers.keccak256(
+      ethers.toUtf8Bytes(JSON.stringify(payload)),
+    ) as `0x${string}`;
   }
 
-  // ─── 0G Storage helpers ──────────────────────────────────────────────────────
-
-  async function downloadFromZeroG(uri: string): Promise<Uint8Array> {
-    const rootHash = uri.startsWith("zerog://")
-      ? uri.slice("zerog://".length)
-      : uri;
-    console.log(`[oracle] 0G download rootHash=${rootHash}`);
-    const indexer = new Indexer(ZERO_G_INDEXER_URL);
-    const [blob, err] = await indexer.downloadToBlob(rootHash);
-    if (err || !blob) {
-      const msg = `0G download failed for ${uri}: ${String(err ?? "unknown")}`;
-      console.error(`[oracle] ${msg}`);
-      throw new Error(msg);
-    }
-    console.log(`[oracle] 0G download ok rootHash=${rootHash}`);
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
-  async function uploadToZeroG(
-    bytes: Uint8Array,
-    privateKey: string,
-  ): Promise<string> {
-    const provider = new ethers.JsonRpcProvider(ZERO_G_RPC_URL);
-    const signer = new ethers.Wallet(privateKey, provider);
-    const indexer = new Indexer(ZERO_G_INDEXER_URL);
-    const memData = new MemData(bytes);
-    // Cast through unknown to bridge the ethers ESM/CJS dual-package type mismatch.
-    // The 0G SDK was compiled against ethers CJS types; our code uses ethers ESM types.
-    // Both resolve to the same runtime object — the cast is safe.
-    type ZeroGSigner = Parameters<(typeof indexer)["upload"]>[2];
-    console.log(`[oracle] 0G upload start`);
-    const [tx, err] = await indexer.upload(
-      memData,
-      ZERO_G_RPC_URL,
-      signer as unknown as ZeroGSigner,
-    );
-    if (err || !tx) {
-      const msg = `0G upload failed: ${String(err ?? "no tx")}`;
-      console.error(`[oracle] ${msg}`);
-      throw new Error(msg);
-    }
-    const rootHash =
-      "rootHash" in tx
-        ? (tx as { rootHash: string }).rootHash
-        : (tx as { rootHashes: string[] }).rootHashes[0];
-    return `zerog://${rootHash}`;
+  /**
+   * Generates a TDX attestation quote with `commitment` bound into reportData[0:32].
+   * The 64-byte reportData field is zero-padded; the first 32 bytes carry the
+   * caller-supplied commitment so on-chain verifiers can confirm the exact value
+   * without trusting any pre-registered signing key.
+   */
+  async function tdxQuoteWithCommitment(
+    commitment: string,
+  ): Promise<TdxQuoteResponse> {
+    const reportData = new Uint8Array(64);
+    reportData.set(ethers.getBytes(commitment), 0);
+    const tdxResult = await tappd.tdxQuote(reportData, "raw");
+    return tdxResult;
   }
 
   // ─── Blob fetching ────────────────────────────────────────────────────────────
@@ -208,24 +249,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     console.log(
       `[oracle] fetchBlob scheme=${uri.split(":")[0]} uri=${uri.slice(0, 80)}`,
     );
-    if (uri.startsWith("data:")) {
-      const base64 = uri.split(",")[1] ?? "";
-      return JSON.parse(
-        Buffer.from(base64, "base64").toString("utf8"),
-      ) as EncryptedBlob;
-    }
-    if (uri.startsWith("zerog://")) {
-      const bytes = await downloadFromZeroG(uri);
-      return JSON.parse(new TextDecoder().decode(bytes)) as EncryptedBlob;
-    }
-    console.log(`[oracle] fetchBlob http GET ${uri}`);
-    const response = await fetch(uri);
-    if (!response.ok) {
-      const msg = `Failed to fetch blob from ${uri}: ${response.status}`;
-      console.error(`[oracle] ${msg}`);
-      throw new Error(msg);
-    }
-    return (await response.json()) as EncryptedBlob;
+    return readJsonFromUri<EncryptedBlob>(uri);
   }
 
   // ─── Skill resolution ─────────────────────────────────────────────────────────
@@ -244,11 +268,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   async function getAgentData(
     agentId: bigint,
     registryAddress: string,
-  ): Promise<{
-    skillContent: string;
-    config: Record<string, unknown>;
-    blobs: unknown[];
-  }> {
+  ): Promise<{ blobs: unknown[] }> {
     if (!RPC_URL) throw new Error("RPC_URL is not configured on the oracle.");
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const registry = new ethers.Contract(
@@ -269,7 +289,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       throw new Error(msg);
     }
 
-    // Decrypt all blobs in order
     const blobs: unknown[] = [];
     for (let i = 0; i < datas.length; i++) {
       const data = datas[i] as { dataDescription: string; dataHash: string };
@@ -283,48 +302,12 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       console.log(`[oracle] blob ${i} decrypted ok`);
     }
 
-    const skillContent = blobs[0] as string;
-    const rawConfig = blobs[1] ?? {};
-    const config = ((): Record<string, unknown> => {
-      if (typeof rawConfig === "string") {
-        try {
-          return JSON.parse(rawConfig) as Record<string, unknown>;
-        } catch {
-          return {};
-        }
-      }
-      return rawConfig as Record<string, unknown>;
-    })();
-
-    return { skillContent, config, blobs };
+    return { blobs };
   }
 
   // ─── Re-encryption logic ──────────────────────────────────────────────────────
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-
-  const reEncryptBodySchema = z
-    .object({
-      tokenId: z.string(),
-      from: z.string(),
-      to: z.string(),
-      chainId: z.number().int().positive(),
-      verifierAddress: z.string(),
-      registryAddress: z.string(),
-      deadline: z.number().int().positive(),
-      intelligentDataHashes: z.array(z.string()),
-      blobUris: z
-        .array(z.string())
-        .min(1, "blobUris must be a non-empty array."),
-      targetPubkey: z.string(),
-      signature: z.string(),
-    })
-    .refine(
-      (b) => b.intelligentDataHashes.length === b.blobUris.length,
-      "intelligentDataHashes and blobUris must have the same length.",
-    );
-
-  type ReEncryptBody = z.infer<typeof reEncryptBodySchema>;
 
   async function reencrypt(body: ReEncryptBody) {
     const pubKeyHex = body.targetPubkey.startsWith("0x")
@@ -380,9 +363,14 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         const encoded = Buffer.from(JSON.stringify(newBlob)).toString("base64");
         newBlobUri = `data:application/json;base64,${encoded}`;
       } else {
-        const zeroGKey = process.env.ZERO_G_PRIVATE_KEY ?? wallet.privateKey;
+        const zeroGKey = process.env.PRIVATE_KEY ?? wallet.privateKey;
         const blobBytes = new TextEncoder().encode(JSON.stringify(newBlob));
-        newBlobUri = await uploadToZeroG(blobBytes, zeroGKey);
+        newBlobUri = await uploadZeroGBytes({
+          bytes: blobBytes,
+          privateKey: zeroGKey,
+          rpcUrl: ZERO_G_RPC_URL,
+          indexerUrl: ZERO_G_INDEXER_URL,
+        });
       }
       newBlobUris.push(newBlobUri);
 
@@ -476,9 +464,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     signature: string,
     deadline: number,
   ): string {
-    if (!eip712Domain) {
-      throw new Error("EIP-712 auth unavailable: RPC_URL is not configured.");
-    }
     if (deadline < Math.floor(Date.now() / 1000)) {
       throw new Error("Signature has expired.");
     }
@@ -501,10 +486,45 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       AGENT_REGISTRY_ABI,
       provider,
     );
-    const owner = (await nft.ownerOf(agentId)) as string;
+    let owner: string;
+    try {
+      owner = (await nft.ownerOf(agentId)) as string;
+    } catch (err) {
+      // ethers v6 throws BAD_DATA (0x) when the RPC silently reverts (e.g. token doesn't exist)
+      const code = (err as { code?: string }).code;
+      if (code === "BAD_DATA") {
+        throw new Error(
+          `Token #${agentId} does not exist in registry ${registryAddress} (or registry address is wrong).`,
+        );
+      }
+      throw err;
+    }
     if (signer.toLowerCase() !== owner.toLowerCase()) {
       throw new Error(
         `Signer ${signer} is not the owner of agent #${agentId}.`,
+      );
+    }
+  }
+
+  /**
+   * Asserts that `signer` is the owner of the given ERC-8004 agent ID
+   * in the official ERC-8004 Identity Registry.
+   */
+  async function assertErc8004Owner(
+    erc8004AgentId: bigint,
+    signer: string,
+  ): Promise<void> {
+    if (!RPC_URL) throw new Error("RPC_URL is not configured.");
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const registry = new ethers.Contract(
+      identityRegistryAddress,
+      IDENTITY_REGISTRY_ABI,
+      provider,
+    );
+    const owner = (await registry.ownerOf(erc8004AgentId)) as string;
+    if (signer.toLowerCase() !== owner.toLowerCase()) {
+      throw new Error(
+        `Signer ${signer} is not the owner of ERC-8004 agent #${erc8004AgentId}.`,
       );
     }
   }
@@ -513,39 +533,152 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     res.json({ status: "ok" });
   });
 
-  app.get("/address", async (_req: Request, res: Response) => {
+  /**
+   * GET /address
+   * Returns the oracle's TEE-derived Ethereum address and compressed public key.
+   * Call this before /run or /validate to get the verifying contract address for
+   * EIP-712 typed-data signatures.
+   */
+  app.get("/address", (_req: Request, res: Response) => {
+    res.json({
+      address: wallet.address,
+      publicKey: signingKey.compressedPublicKey,
+    });
+  });
+
+  /**
+   * GET /info
+   * Returns the dstack application info: instance_id, app_id, app_name, and the
+   * full TCB info (MRTD, RTMR0-3, event log). External verifiers use the event log
+   * for RTMR3 replay (compose-hash, instance-id, key-provider events).
+   *
+   * Verification guide: https://docs.phala.com/phala-cloud/attestation/verify-your-application
+   */
+  app.get("/info", async (_req: Request, res: Response) => {
+    if (IS_SIMULATOR) {
+      res.json({
+        simulator: true,
+        message:
+          "Running against local tappd simulator — real TCB info unavailable.",
+      });
+      return;
+    }
     try {
-      const quote = await tappd.tdxQuote(wallet.address);
-      res.json({
-        address: wallet.address,
-        publicKey: signingKey.compressedPublicKey,
-        quote: quote.quote,
-      });
-    } catch {
-      res.json({
-        address: wallet.address,
-        publicKey: signingKey.compressedPublicKey,
-      });
+      const appInfo = await tappd.info();
+      res.json(appInfo);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({ error: `App info unavailable: ${message}` });
     }
   });
 
   /**
    * GET /attestation
-   * Returns the oracle's current TDX attestation quote with its Ethereum address embedded in
-   * reportData[0:20]. Use this quote as the `rawQuote` argument to TeeVerifier.initValidator()
-   * for trustless on-chain key registration, or submit it to third-party TEE verification tools.
+   * Returns the full TDX attestation bundle required by dstack-verifier:
+   *   - quote       — raw TDX quote hex (Intel-signed, contains MRTD + RTMRs + reportData)
+   *   - event_log   — hex-encoded event log for RTMR replay verification
+   *   - tcb_info    — RTMR values + compose-hash event log from tappd.info()
+   *   - address     — TEE-derived signing address (embedded in reportData[0:20])
+   *   - publicKey   — compressed secp256k1 public key
+   *
+   * reportData carries the oracle's Ethereum address so verifiers can confirm the
+   * signing key was derived inside this exact TEE instance.
+   *
+   * Hardware verification (basic):
+   *   POST https://cloud-api.phala.com/api/v1/attestations/verify  { hex: quote }
+   *
+   * Full platform verification (advanced — dstack-verifier):
+   *   curl -d @<(curl -s https://your-oracle/attestation) localhost:8080/verify | jq
+   *   See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
+   *
+   * Note: vm_config (CPU count, memory size) requires @phala/dstack-sdk ≥ 0.5.x.
+   * The tcb_info field contains equivalent measurements for manual verification.
    */
   app.get("/attestation", async (_req: Request, res: Response) => {
     try {
-      const quote = await tappd.tdxQuote(wallet.address);
+      // Embed oracle address in reportData so verifiers can bind signing key to quote.
+      // wallet.address is 20 bytes (hex string); tdxQuote hashes it to fit reportData.
+      const quoteResult = await tappd.tdxQuote(wallet.address);
+      const appInfo = IS_SIMULATOR ? null : await tappd.info();
       res.json({
+        quote: quoteResult.quote,
+        event_log: quoteResult.event_log,
+        ...(appInfo ? { tcb_info: appInfo.tcb_info } : {}),
         address: wallet.address,
         publicKey: signingKey.compressedPublicKey,
-        quote: quote.quote,
+        ...(IS_SIMULATOR ? { simulator: true } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(503).json({ error: `Attestation unavailable: ${message}` });
+    }
+  });
+
+  /**
+   * POST /verify
+   * Verifies an existing TDX quote against the local dstack-verifier sidecar.
+   * No Phala Cloud dependency — fully trustless Intel TDX verification.
+   *
+   * Body: { quote: "0x...", event_log: "0x..." }
+   * (the exact shape returned by GET /attestation and GET /run's proof field)
+   *
+   * The dstack-verifier checks: Intel root CA signature, MRTD, RTMR0-3
+   * via event log replay, and TCB status. Returns { is_valid: true } when all pass.
+   *
+   * Typical usage:
+   *   curl -s https://oracle/attestation | jq '{quote,event_log}' | curl -d @- https://oracle/verify
+   *
+   * Sidecar URL configured via DSTACK_VERIFIER_URL env var:
+   *   - Docker Compose / Phala Cloud: defaults to http://verifier:8080
+   *   - Local dev: set DSTACK_VERIFIER_URL=http://localhost:8080
+   *
+   * Note: os_image_hash_verified requires vm_config (@phala/dstack-sdk >= 0.5.x).
+   * Without it, dstack-verifier still validates quote signature + event log + TCB status.
+   *
+   * See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
+   */
+  app.post("/verify", async (req: Request, res: Response) => {
+    try {
+      const body = verifyBodySchema.parse(req.body);
+      let fetchRes: globalThis.Response;
+      try {
+        fetchRes = await fetch(`${DSTACK_VERIFIER_URL}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote: body.quote,
+            event_log: body.event_log,
+          }),
+        });
+      } catch {
+        // Verifier sidecar unreachable — expected in local dev.
+        res.json({ is_valid: false, unavailable: true });
+        return;
+      }
+      console.log(fetchRes);
+
+      let result: unknown;
+      try {
+        result = await fetchRes.json();
+      } catch {
+        // Verifier returned a non-JSON body (e.g. HTML error page for 4xx/5xx).
+        // This means the verifier is reachable but rejected the quote.
+        res.json({ is_valid: false, status: fetchRes.status });
+        return;
+      }
+      res.status(fetchRes.status).json({
+        is_valid: (result as { is_valid?: boolean }).is_valid ?? false,
+        detail: result,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({
+          error: "quote (0x-prefixed hex) and event_log are required.",
+        });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(503).json({ error: `Verification unavailable: ${message}` });
     }
   });
 
@@ -556,14 +689,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         `[oracle] /reencrypt tokenId=${body.tokenId} from=${body.from} to=${body.to} blobs=${body.blobUris.length}`,
       );
       const signer = verifyEip712(
-        {
-          ReencryptRequest: [
-            { name: "tokenId", type: "uint256" },
-            { name: "from", type: "address" },
-            { name: "to", type: "address" },
-            { name: "deadline", type: "uint256" },
-          ],
-        },
+        REENCRYPT_REQUEST_TYPES,
         {
           tokenId: BigInt(body.tokenId),
           from: body.from,
@@ -594,54 +720,17 @@ export async function startOracle(config: OracleConfig): Promise<void> {
 
   // ─── Validation endpoint ────────────────────────────────────────────────────
 
-  const validateRequestBodySchema = z.object({
-    requestHash: z.string(),
-    agentId: z.union([z.string(), z.number()]),
-    /** The claim / input to validate — oracle runs the skill handler on this. */
-    payload: z.record(z.string(), z.unknown()),
-    validationRegistryAddress: z.string(),
-    /** Override the AgentRegistry used to look up the skill blob (optional). */
-    registryAddress: z.string().optional(),
-    responseURI: z.string().optional().default(""),
-    responseHash: z.string().optional().default(ethers.ZeroHash),
-    tag: z.string().optional().default(""),
-    signature: z.string(),
-    deadline: z.number().int().positive(),
-  });
-
   app.post("/validate", async (req: Request, res: Response) => {
     try {
       const body = validateRequestBodySchema.parse(req.body);
-      const agentIdBig = BigInt(body.agentId);
-      const registryAddress = body.registryAddress ?? AGENT_REGISTRY_ADDRESS;
-      console.log(
-        `[oracle] /validate agentId=${agentIdBig} registry=${registryAddress}`,
-      );
-      if (!registryAddress) {
-        console.error(`[oracle] /validate AGENT_REGISTRY_ADDRESS not set`);
-        res.status(400).json({
-          error: "AGENT_REGISTRY_ADDRESS is not configured on the oracle.",
-        });
-        return;
-      }
+      const erc8004AgentId = BigInt(body.erc8004AgentId);
+      console.log(`[oracle] /validate erc8004AgentId=${erc8004AgentId}`);
 
-      // payloadHash commits the payload into the EIP-712 signature so the
-      // caller cannot swap out the payload after signing.
-      const payloadHash = ethers.keccak256(
-        ethers.toUtf8Bytes(JSON.stringify(body.payload)),
-      ) as `0x${string}`;
-
+      const payloadHash = hashPayload(body.payload);
       const signer = verifyEip712(
+        VALIDATE_REQUEST_TYPES,
         {
-          ValidateRequest: [
-            { name: "agentId", type: "uint256" },
-            { name: "requestHash", type: "bytes32" },
-            { name: "payloadHash", type: "bytes32" },
-            { name: "deadline", type: "uint256" },
-          ],
-        },
-        {
-          agentId: agentIdBig,
+          erc8004AgentId,
           requestHash: body.requestHash,
           payloadHash,
           deadline: body.deadline,
@@ -649,84 +738,86 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         body.signature,
         body.deadline,
       );
-      await assertOwner(agentIdBig, registryAddress, signer);
+      // Ownership check against the official ERC-8004 Identity Registry.
+      await assertErc8004Owner(erc8004AgentId, signer);
 
-      // Resolve the agent's skill and run the handler to compute the score.
-      // The oracle — not the caller — determines the outcome.
-      const agentData = await getAgentData(agentIdBig, registryAddress);
+      // body.payload is the runMeta encoded in the on-chain requestURI:
+      // { type, outcome, payload (original claim), quote, timestamp, agentId }
+      const runMeta = body.payload as {
+        outcome?: Record<string, unknown>;
+        payload?: Record<string, unknown>;
+      };
+      const originalOutcome = runMeta.outcome ?? {};
+      const originalPayload = runMeta.payload ?? {};
 
-      // Oracle is single-purpose: use the first registered handler.
-      const handlerEntry = Object.entries(config.handlers)[0];
-      if (!handlerEntry) {
-        res.status(400).json({
-          error:
-            "No handlers registered. Add handlers via startOracle({ handlers: { ... } }).",
-        });
-        return;
-      }
-      const [, handler] = handlerEntry;
-
-      const result = await handler.run(
-        agentData.skillContent,
-        agentData.config,
-        body.payload,
-        { wallet, signingKey, blobs: agentData.blobs },
+      // Ask the LLM to re-verify the original claim and rate the accuracy of
+      // the recorded result on a scale of 0–100.
+      const { score, reasoning } = await scoreWithLLM(
+        originalPayload,
+        originalOutcome,
       );
 
-      // Derive score from the handler — never trust a caller-supplied value.
-      const rawScore = handler.score
-        ? handler.score(result)
-        : typeof result.score === "number"
-          ? (result.score as number)
-          : 50;
-      const score = Math.min(100, Math.max(0, Math.round(rawScore)));
+      console.log(
+        `[oracle] /validate LLM score=${score} reasoning=${reasoning.slice(0, 100)}…`,
+      );
 
-      const inner = ethers.keccak256(
+      const validationResult: Record<string, unknown> = { score, reasoning };
+
+      // Generate proof for on-chain TEEVerifier.verifyValidation():
+      //   - Simulator: 65-byte EIP-191 personal_sign signature from the TEE wallet.
+      //   - Production: full TDX DCAP quote with commitment in reportData[0:32].
+      // Both paths verify against the registered oracle address in TEEVerifier.
+      const commitment = ethers.keccak256(
         ethers.solidityPacked(
           ["uint256", "bytes32", "uint8"],
-          [agentIdBig, body.requestHash, score],
+          [erc8004AgentId, body.requestHash, score],
         ),
       );
-
-      // Generate a per-request TDX attestation quote binding (agentId, requestHash, score).
-      // The commitment is embedded in reportData[0:32] of the raw TDX quote so the
-      // on-chain TeeVerifier can verify it without trusting a pre-registered signing key.
-      // Pack commitment into first 32 bytes of the 64-byte reportData field (raw mode).
-      const reportData = new Uint8Array(64);
-      reportData.set(ethers.getBytes(inner), 0);
-      const tdxResult = await tappd.tdxQuote(reportData, "raw");
-      const proof = tdxResult.quote as `0x${string}`;
-      const dcapFee = BigInt(process.env.DCAP_FEE ?? "0");
+      let quote: string;
+      let event_log: string;
+      if (IS_SIMULATOR) {
+        // Simulator: sign the commitment with the TEE-derived wallet (EIP-191).
+        quote = await wallet.signMessage(ethers.getBytes(commitment));
+        event_log = "";
+      } else {
+        // Production: embed commitment in TDX reportData for trustless DCAP verification.
+        ({ quote, event_log } = await tdxQuoteWithCommitment(commitment));
+      }
 
       let txHash: string | undefined;
       if (RPC_URL) {
+        const txWallet = new ethers.Wallet(
+          process.env.PRIVATE_KEY ?? wallet.privateKey,
+        );
         const provider = new ethers.JsonRpcProvider(RPC_URL);
-        const connectedWallet = wallet.connect(provider);
+        const connectedWallet = txWallet.connect(provider);
         const registry = new ethers.Contract(
           body.validationRegistryAddress,
           VALIDATION_REGISTRY_ABI,
           connectedWallet,
         );
+
         const tx = (await registry.validationResponse(
           body.requestHash,
           score,
           body.responseURI,
           body.responseHash,
           body.tag,
-          proof,
-          { value: dcapFee },
+          quote,
         )) as ethers.ContractTransactionResponse;
         const receipt = await tx.wait();
         txHash = receipt?.hash;
       }
 
       console.log(
-        `[oracle] /validate ok agentId=${agentIdBig} score=${score}${txHash ? ` txHash=${txHash}` : ""}`,
+        `[oracle] /validate ok erc8004AgentId=${erc8004AgentId} score=${score}${txHash ? ` txHash=${txHash}` : ""}`,
       );
       res.json({
+        ...validationResult,
         score,
-        result,
-        proof,
+        quote,
+        event_log,
+        erc8004AgentId: erc8004AgentId.toString(),
         ...(txHash !== undefined ? { txHash } : {}),
       });
     } catch (err) {
@@ -737,14 +828,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   });
 
   // ─── Agent runner endpoint ──────────────────────────────────────────────────
-
-  const runBodySchema = z.object({
-    agentId: z.union([z.string(), z.number()]),
-    registryAddress: z.string().optional(),
-    payload: z.record(z.string(), z.unknown()),
-    signature: z.string(),
-    deadline: z.number().int().positive(),
-  });
 
   app.post("/run", async (req: Request, res: Response) => {
     try {
@@ -766,17 +849,9 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       }
 
       // EIP-712 ownership check — only the agent owner may invoke it
-      const payloadHash = ethers.keccak256(
-        ethers.toUtf8Bytes(JSON.stringify(body.payload)),
-      ) as `0x${string}`;
+      const payloadHash = hashPayload(body.payload);
       const signer = verifyEip712(
-        {
-          RunRequest: [
-            { name: "agentId", type: "uint256" },
-            { name: "payloadHash", type: "bytes32" },
-            { name: "deadline", type: "uint256" },
-          ],
-        },
+        RUN_REQUEST_TYPES,
         { agentId, payloadHash, deadline: body.deadline },
         body.signature,
         body.deadline,
@@ -786,54 +861,37 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       // Resolve + decrypt the agent's skill from the chain and 0G Storage
       const agentData = await getAgentData(agentId, registryAddress);
 
-      // Oracle is single-purpose: use the first registered handler.
-      const handlerEntry = Object.entries(config.handlers)[0];
-      if (!handlerEntry) {
-        res.status(400).json({
-          error:
-            "No handlers registered. Add handlers via startOracle({ handlers: { ... } }).",
-        });
-        return;
-      }
-      const [skillType, handler] = handlerEntry;
+      const result = await config.handler.run(body.payload, {
+        wallet,
+        signingKey,
+        blobs: agentData.blobs,
+      });
 
-      const result = await handler.run(
-        agentData.skillContent,
-        agentData.config,
-        body.payload,
-        { wallet, signingKey, blobs: agentData.blobs },
-      );
-
-      // Sign: keccak256(agentId ‖ type ‖ resultJson ‖ timestamp)
       const timestamp = Math.floor(Date.now() / 1000);
       const resultJson = JSON.stringify(result);
       const agentIdStr = agentId.toString();
-      const digest = ethers.keccak256(
-        ethers.concat([
-          ethers.toUtf8Bytes(agentIdStr),
-          ethers.toUtf8Bytes(skillType),
-          ethers.toUtf8Bytes(resultJson),
-          ethers.toBeArray(BigInt(timestamp)),
-        ]),
+
+      // Commit: keccak256(agentId ‖ resultHash ‖ timestamp)
+      // Embedding this commitment in the TDX reportData binds the exact result to
+      // the hardware attestation — verifiers don't need to trust the signing key.
+      const resultHash = ethers.keccak256(ethers.toUtf8Bytes(resultJson));
+      const commitment = ethers.keccak256(
+        ethers.solidityPacked(
+          ["uint256", "bytes32", "uint256"],
+          [agentId, resultHash, BigInt(timestamp)],
+        ),
       );
-      const messageHash = ethers.keccak256(
-        ethers.concat([
-          ethers.toUtf8Bytes("\x19Ethereum Signed Message:\n32"),
-          ethers.getBytes(digest),
-        ]),
-      );
-      const sig = signingKey.sign(messageHash);
-      const signature = ethers.Signature.from(sig).serialized as `0x${string}`;
+      const { quote, event_log } = await tdxQuoteWithCommitment(commitment);
 
       console.log(
-        `[oracle] /run ok agentId=${agentIdStr} type=${skillType} result=${JSON.stringify(result)}`,
+        `[oracle] /run ok agentId=${agentIdStr} result=${resultJson}`,
       );
       res.json({
         agentId: agentIdStr,
-        type: skillType,
         result,
         timestamp,
-        signature,
+        quote,
+        event_log,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

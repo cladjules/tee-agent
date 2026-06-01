@@ -18,20 +18,17 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { decrypt, encrypt } from "eciesjs";
-import { NFTError } from "../core/types.js";
+import { NFTError } from "./types.js";
 import type {
-  AgentNFTEncryptedData,
   AgentService,
   EncryptedBlob,
   ParsedServicesResult,
   ParseServicesOptions,
-  SecureTransferPayloads,
   TransferAccessPayload,
-  TransferOwnershipProof,
-} from "../core/types.js";
+} from "./types.js";
 import type { Address, Hex } from "viem";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { readZeroGBytes } from "../storage/zero-g.js";
 
 const ALGORITHM = "aes-256-gcm";
 const KEY_LEN = 32;
@@ -174,26 +171,25 @@ export async function hashEncryptedBlob(
 }
 
 export function parseAgentServicesJson(
-  raw: string,
+  json: any,
   options?: ParseServicesOptions,
 ): ParsedServicesResult {
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return { error: "Services must be a JSON array." };
+    if (!Array.isArray(json)) {
+      throw new Error("Services must be a JSON array.");
     }
 
-    const missingFields = parsed.filter(
+    const missingFields = json.filter(
       (service) => !service?.name?.trim() || !service?.endpoint?.trim(),
     );
 
     if (missingFields.length > 0) {
-      return {
-        error: `Each service must have a name and endpoint ${JSON.stringify(missingFields.map((s) => ({ name: s?.name, endpoint: s?.endpoint })))}`,
-      };
+      throw new Error(
+        `Each service must have a name and endpoint ${JSON.stringify(missingFields.map((s) => ({ name: s?.name, endpoint: s?.endpoint })))}`,
+      );
     }
 
-    const services = parsed.map((service) => {
+    const services = json.map((service) => {
       const name = String(service.name).trim();
       const endpoint = String(service.endpoint).trim();
       const version = service.version
@@ -222,99 +218,37 @@ export function parseAgentServicesJson(
     if (options?.allowedServiceNames) {
       const allowed = new Set(options.allowedServiceNames);
       if (services.some((service) => !allowed.has(service.name))) {
-        return {
-          error:
-            "Unsupported service name. Only EIP-8004 service names are allowed.",
-        };
+        throw new Error(
+          "Unsupported service name. Only EIP-8004 service names are allowed.",
+        );
       }
     }
 
-    return { services };
-  } catch {
-    return { error: "Services JSON is invalid." };
+    return services;
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw new Error("Services JSON is invalid.");
   }
 }
 
-export function buildAgentServiceTraits(services: readonly AgentService[]) {
-  const traits: Array<{ trait_type: string; value: string }> = [
-    { trait_type: "Services Count", value: String(services.length) },
-  ];
-
-  for (const service of services) {
-    traits.push({
-      trait_type: `Service: ${service.name}`,
-      value: service.endpoint,
-    });
-    if (service.version) {
-      traits.push({
-        trait_type: `Service Version: ${service.name}`,
-        value: service.version,
-      });
-    }
-  }
-
-  return traits;
-}
-
-export async function readJsonFromUri<T>(
-  uri: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<T> {
+export async function readJsonFromUri<T>(uri: string): Promise<T> {
   if (uri.startsWith("data:")) {
     const base64 = uri.split(",")[1] ?? "";
     return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
+  }
+  if (uri.startsWith("zerog://")) {
+    const bytes = await readZeroGBytes(uri, process.env.ZERO_G_INDEXER_URL!);
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
   // Translate ipfs:// to a public HTTP gateway
   const httpUri = uri.startsWith("ipfs://")
     ? `https://ipfs.io/ipfs/${uri.slice(7)}`
     : uri;
-  const response = await fetchImpl(httpUri);
+  const response = await fetch(httpUri);
   if (!response.ok) {
     throw new Error(`Failed to fetch JSON from ${uri}: ${response.status}`);
   }
   return (await response.json()) as T;
-}
-
-export function getPrivateMetadataEntries(
-  systemPrompt: string,
-  characterDef: string,
-) {
-  const entries: Array<{ name: string; value: unknown }> = [];
-
-  if (systemPrompt) {
-    entries.push({ name: "systemPrompt", value: systemPrompt });
-  }
-
-  if (characterDef) {
-    entries.push({ name: "characterDefinition", value: characterDef });
-  }
-
-  return entries;
-}
-
-export async function encryptIntelligentData(params: {
-  systemPrompt: string;
-  characterDef: string;
-  keyEncryptionPublicKey: Hex;
-}): Promise<AgentNFTEncryptedData[]> {
-  const { systemPrompt, characterDef, keyEncryptionPublicKey } = params;
-  const contentKey = generateContentKey();
-  const intelligentData: AgentNFTEncryptedData[] = [];
-
-  for (const entry of getPrivateMetadataEntries(systemPrompt, characterDef)) {
-    const encryptedBlob = encryptMetadata(
-      entry.name,
-      entry.value,
-      contentKey,
-      keyEncryptionPublicKey,
-    );
-    const hash = await hashEncryptedBlob(encryptedBlob);
-    const blobJson = JSON.stringify(encryptedBlob);
-    const uri = `data:application/json;base64,${Buffer.from(blobJson).toString("base64")}`;
-    intelligentData.push({ name: entry.name, uri, hash });
-  }
-
-  return intelligentData;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,183 +306,6 @@ function _computeAccessInnerHash(
   );
 }
 
-function _computeOwnershipInnerHash(
-  chainId: bigint,
-  verifierAddress: Address,
-  registryAddress: Address,
-  tokenId: bigint,
-  from: Address,
-  to: Address,
-  deadline: bigint,
-  dataHash: Hex,
-  sealedKey: Hex,
-  targetPubkey: Hex,
-  nonce: Hex,
-): Hex {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: "uint256" },
-        { type: "address" },
-        { type: "address" },
-        { type: "uint256" },
-        { type: "address" },
-        { type: "address" },
-        { type: "uint256" },
-        { type: "bytes32" },
-        { type: "bytes" },
-        { type: "bytes" },
-        { type: "bytes32" },
-      ],
-      [
-        chainId,
-        verifierAddress,
-        registryAddress,
-        tokenId,
-        from,
-        to,
-        deadline,
-        dataHash,
-        sealedKey,
-        targetPubkey,
-        nonce,
-      ],
-    ),
-  );
-}
-
-/**
- * Build signed ownership proofs and unsigned access payloads for local dev
- * (no remote TEE oracle).  Both are signed with `oraclePrivateKey`.
- * The returned `accessPayloads[].digest` values must then be signed by the
- * recipient wallet before assembling the TransferValidityProof[] structs.
- */
-export async function buildSecureTransferPayloads(params: {
-  chainId: number;
-  verifierAddress: Address;
-  registryAddress: Address;
-  tokenId: bigint;
-  from: Address;
-  to: Address;
-  currentHashes: Hex[];
-  oraclePrivateKey: Hex;
-  deadline?: bigint;
-}): Promise<SecureTransferPayloads> {
-  const {
-    chainId,
-    verifierAddress,
-    registryAddress,
-    tokenId,
-    from,
-    to,
-    currentHashes,
-    oraclePrivateKey,
-  } = params;
-  const deadline =
-    params.deadline ?? BigInt(Math.floor(Date.now() / 1000) + 3600);
-  const oracleAccount = privateKeyToAccount(oraclePrivateKey);
-
-  const accessPayloads: TransferAccessPayload[] = [];
-  const ownershipProofs: TransferOwnershipProof[] = [];
-  let sealedKey = "0x" as Hex;
-
-  for (let index = 0; index < currentHashes.length; index += 1) {
-    const dataHash = currentHashes[index] as Hex;
-    // In the local dev path the target pubkey is just the ABI-encoded recipient address.
-    const targetPubkey = encodeAbiParameters(
-      [{ type: "address" }],
-      [to],
-    ) as Hex;
-
-    const accessNonce = keccak256(
-      encodeAbiParameters(
-        [{ type: "uint256" }, { type: "uint256" }, { type: "string" }],
-        [tokenId, BigInt(index), "access"],
-      ),
-    );
-    const ownershipNonce = keccak256(
-      encodeAbiParameters(
-        [{ type: "uint256" }, { type: "uint256" }, { type: "string" }],
-        [tokenId, BigInt(index), "ownership"],
-      ),
-    );
-
-    const generatedSealedKey = keccak256(
-      encodeAbiParameters(
-        [
-          { type: "uint256" },
-          { type: "bytes32" },
-          { type: "address" },
-          { type: "uint256" },
-        ],
-        [tokenId, dataHash, to, BigInt(index)],
-      ),
-    );
-
-    const accessInnerHash = _computeAccessInnerHash(
-      BigInt(chainId),
-      verifierAddress,
-      registryAddress,
-      tokenId,
-      from,
-      to,
-      deadline,
-      dataHash,
-      targetPubkey,
-      accessNonce,
-    );
-
-    const ownershipInnerHash = _computeOwnershipInnerHash(
-      BigInt(chainId),
-      verifierAddress,
-      registryAddress,
-      tokenId,
-      from,
-      to,
-      deadline,
-      dataHash,
-      generatedSealedKey,
-      targetPubkey,
-      ownershipNonce,
-    );
-
-    const ownershipSignature = await oracleAccount.signMessage({
-      message: ownershipInnerHash,
-    });
-
-    accessPayloads.push({
-      dataHash,
-      targetPubkey,
-      nonce: accessNonce,
-      digest: accessInnerHash,
-    });
-
-    ownershipProofs.push({
-      oracleType: 0,
-      dataHash,
-      sealedKey: generatedSealedKey,
-      targetPubkey,
-      nonce: ownershipNonce,
-      proof: ownershipSignature,
-    });
-
-    if (index === 0) {
-      sealedKey = generatedSealedKey;
-    }
-  }
-
-  return {
-    from,
-    to,
-    tokenId,
-    deadline,
-    newDataHashes: [...currentHashes],
-    sealedKey,
-    accessPayloads,
-    ownershipProofs,
-  };
-}
-
 /**
  * Build unsigned access payloads for the oracle path.
  *
@@ -604,41 +361,4 @@ export function buildAccessPayloads(params: {
       digest: innerHash,
     };
   });
-}
-
-export function buildDecryptMessage(
-  agentId: string,
-  ownerAddress: string,
-  signedAt: number,
-) {
-  return `Tee Agent decrypt request\nagentId:${agentId}\nowner:${ownerAddress.toLowerCase()}\nsignedAt:${signedAt}`;
-}
-
-export function decryptEncryptedBlob(
-  blob: Record<string, unknown>,
-  oraclePrivateKey: Hex,
-): unknown {
-  const encryptedKey =
-    typeof blob.encryptedKey === "string" ? blob.encryptedKey : "";
-  const ciphertext = typeof blob.ciphertext === "string" ? blob.ciphertext : "";
-  const iv = typeof blob.iv === "string" ? blob.iv : "";
-  const authTag = typeof blob.authTag === "string" ? blob.authTag : "";
-  const name = typeof blob.name === "string" ? blob.name : "";
-
-  if (!encryptedKey || !ciphertext || !iv || !authTag) {
-    throw new Error("Encrypted blob format is invalid.");
-  }
-
-  const contentKey = decryptContentKey({ encryptedKey }, oraclePrivateKey);
-  return decryptMetadata(
-    {
-      name,
-      encryptedKey,
-      ciphertext,
-      iv,
-      authTag,
-      algorithm: "aes-256-gcm",
-    },
-    contentKey,
-  );
 }

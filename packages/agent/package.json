@@ -5,27 +5,27 @@
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
     "./types": {
-      "types": "./dist/core/types.d.ts",
+      "types": "./src/core/types.ts",
       "import": "./dist/core/types.js"
     },
     "./config": {
-      "types": "./dist/core/config.d.ts",
+      "types": "./src/core/config.ts",
       "import": "./dist/core/config.js"
     },
     "./encryption": {
-      "types": "./dist/crypto/index.d.ts",
-      "import": "./dist/crypto/index.js"
+      "types": "./src/core/crypto.ts",
+      "import": "./dist/core/crypto.js"
     },
     "./abis": {
       "types": "./dist/abis.d.ts",
       "import": "./dist/abis.js"
     },
     "./ipfs": {
-      "types": "./dist/storage/ipfs.d.ts",
+      "types": "./src/storage/ipfs.ts",
       "import": "./dist/storage/ipfs.js"
     },
     "./registry": {
@@ -33,28 +33,82 @@
       "import": "./dist/core/registry.js"
     },
     "./zero-g": {
-      "types": "./dist/storage/zero-g.d.ts",
+      "types": "./src/storage/zero-g.ts",
       "import": "./dist/storage/zero-g.js"
     },
     "./mint": {
-      "types": "./dist/ops/mint.d.ts",
+      "types": "./src/ops/mint.ts",
       "import": "./dist/ops/mint.js"
     },
     "./transfer": {
-      "types": "./dist/ops/transfer.d.ts",
+      "types": "./src/ops/transfer.ts",
       "import": "./dist/ops/transfer.js"
     },
-    "./agent-services": {
-      "types": "./dist/ops/agent-services.d.ts",
-      "import": "./dist/ops/agent-services.js"
+    "./services": {
+      "types": "./src/ops/services.ts",
+      "import": "./dist/ops/services.js"
     },
-    "./oracle": {
-      "types": "./dist/ops/oracle.d.ts",
-      "import": "./dist/ops/oracle.js"
+    "./feedback": {
+      "types": "./src/ops/feedback.ts",
+      "import": "./dist/ops/feedback.js"
     },
-    "./resolve": {
-      "types": "./dist/ops/resolve.d.ts",
-      "import": "./dist/ops/resolve.js"
+    "./validate": {
+      "types": "./src/ops/validate.ts",
+      "import": "./dist/ops/validate.js"
+    },
+    "./typed-data": {
+      "types": "./src/typed-data.ts",
+      "import": "./dist/typed-data.js"
+    },
+    "./sdk": {
+      "types": "./src/ops/agent-sdk.ts",
+      "import": "./dist/ops/agent-sdk.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "types": [
+        "./src/core/types.ts"
+      ],
+      "config": [
+        "./src/core/config.ts"
+      ],
+      "encryption": [
+        "./src/core/crypto.ts"
+      ],
+      "abis": [
+        "./dist/abis.d.ts"
+      ],
+      "ipfs": [
+        "./src/storage/ipfs.ts"
+      ],
+      "registry": [
+        "./dist/core/registry.d.ts"
+      ],
+      "zero-g": [
+        "./src/storage/zero-g.ts"
+      ],
+      "mint": [
+        "./src/ops/mint.ts"
+      ],
+      "transfer": [
+        "./src/ops/transfer.ts"
+      ],
+      "services": [
+        "./src/ops/services.ts"
+      ],
+      "feedback": [
+        "./src/ops/feedback.ts"
+      ],
+      "validate": [
+        "./src/ops/validate.ts"
+      ],
+      "typed-data": [
+        "./src/typed-data.ts"
+      ],
+      "sdk": [
+        "./src/ops/agent-sdk.ts"
+      ]
     }
   },
   "scripts": {

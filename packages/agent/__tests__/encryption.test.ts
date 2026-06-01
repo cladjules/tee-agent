@@ -6,7 +6,7 @@ import {
   decryptContentKey,
   hashEncryptedBlob,
   parseAgentServicesJson,
-} from "../src/crypto/index.js";
+} from "../src/core/crypto.js";
 import { PrivateKey } from "eciesjs";
 
 // Generate a fresh ECIES key pair for each test run
@@ -144,65 +144,54 @@ describe("hashEncryptedBlob", () => {
 
 describe("parseAgentServicesJson", () => {
   it("parses a valid services array", () => {
-    const raw = JSON.stringify([
-      { name: "web", endpoint: "https://example.com" },
-    ]);
+    const raw = [{ name: "web", endpoint: "https://example.com" }];
     const result = parseAgentServicesJson(raw);
-    expect(result.error).toBeUndefined();
-    expect(result.services).toHaveLength(1);
-    expect(result.services![0]!.name).toBe("web");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.name).toBe("web");
   });
 
   it("parses optional fields", () => {
-    const raw = JSON.stringify([
+    const raw = [
       {
         name: "MCP",
         endpoint: "https://mcp.example.com",
         version: "2025-06-18",
       },
-    ]);
-    const { services } = parseAgentServicesJson(raw);
-    expect(services![0]!.version).toBe("2025-06-18");
+    ];
+    const result = parseAgentServicesJson(raw);
+    expect(result[0]!.version).toBe("2025-06-18");
   });
 
-  it("returns error for non-array input", () => {
-    const { error } = parseAgentServicesJson('{"name":"web"}');
-    expect(error).toMatch(/array/i);
+  it("throws for non-array input", () => {
+    expect(() => parseAgentServicesJson('{"name":"web"}')).toThrow(/array/i);
   });
 
-  it("returns error when name is missing", () => {
-    const raw = JSON.stringify([{ endpoint: "https://example.com" }]);
-    const { error } = parseAgentServicesJson(raw);
-    expect(error).toBeTruthy();
+  it("throws when name is missing", () => {
+    const raw = [{ endpoint: "https://example.com" }];
+    expect(() => parseAgentServicesJson(raw)).toThrow();
   });
 
-  it("returns error when endpoint is missing", () => {
-    const raw = JSON.stringify([{ name: "web" }]);
-    const { error } = parseAgentServicesJson(raw);
-    expect(error).toBeTruthy();
+  it("throws when endpoint is missing", () => {
+    const raw = [{ name: "web" }];
+    expect(() => parseAgentServicesJson(raw)).toThrow();
   });
 
-  it("returns error for invalid JSON", () => {
-    const { error } = parseAgentServicesJson("not json");
-    expect(error).toBeTruthy();
+  it("throws for invalid JSON", () => {
+    expect(() => parseAgentServicesJson("not json")).toThrow();
   });
 
-  it("returns error for disallowed service names", () => {
-    const raw = JSON.stringify([
-      { name: "unknown", endpoint: "https://x.com" },
-    ]);
-    const { error } = parseAgentServicesJson(raw, {
-      allowedServiceNames: ["web", "MCP"],
-    });
-    expect(error).toMatch(/unsupported/i);
+  it("throws for disallowed service names", () => {
+    const raw = [{ name: "unknown", endpoint: "https://x.com" }];
+    expect(() =>
+      parseAgentServicesJson(raw, { allowedServiceNames: ["web", "MCP"] }),
+    ).toThrow(/unsupported/i);
   });
 
   it("passes when service name is in the allowed list", () => {
-    const raw = JSON.stringify([{ name: "web", endpoint: "https://x.com" }]);
-    const { error, services } = parseAgentServicesJson(raw, {
+    const raw = [{ name: "web", endpoint: "https://x.com" }];
+    const result = parseAgentServicesJson(raw, {
       allowedServiceNames: ["web", "MCP"],
     });
-    expect(error).toBeUndefined();
-    expect(services).toHaveLength(1);
+    expect(result).toHaveLength(1);
   });
 });

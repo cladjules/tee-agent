@@ -2,24 +2,24 @@
 
 import type { Address } from "viem";
 import { cfg } from "@/lib/config";
-import {
-  getCachedAgents,
-  getCachedProofs,
-  setCachedProofs,
-} from "@/lib/agent-cache";
+import { getCachedAgents } from "@/lib/agent-cache";
 import { syncEvents } from "@/lib/agent-indexer";
-import { makeAgentRegistryClient, toAgentConfig } from "@/lib/registry-client";
-import { resolveAgentProofData as sdkResolveAgentProofData } from "@tee-agent/agent/resolve";
-import {
-  prepareFeedback as sdkPrepareFeedback,
-  prepareValidation as sdkPrepareValidation,
-} from "@tee-agent/agent/oracle";
+import { AgentRegistry } from "@tee-agent/agent/registry";
+import { createPublicClient, http } from "viem";
+import { prepareFeedback as sdkPrepareFeedback } from "@tee-agent/agent/feedback";
+import { prepareValidation as sdkPrepareValidation } from "@tee-agent/agent/validate";
 import type {
   RegisteredAgent,
   ResolvedAgentProofData,
+  PrepareFeedbackParams,
   PrepareFeedbackResult,
+  PrepareValidationParams,
   PrepareValidationResult,
 } from "@tee-agent/agent/types";
+import {
+  getOracleRunHistory,
+  fetchPendingValidationsForAgent,
+} from "@/lib/actions/agents";
 
 // ─── Dashboard-local types ────────────────────────────────────────────────────
 
@@ -43,12 +43,8 @@ export type AgentFeedbackOverview = {
   feedbacks: AgentFeedbackView[];
 };
 
-type PreparedFeedbackResult = PrepareFeedbackResult;
-type PreparedValidationResult = PrepareValidationResult;
-
-function getFormValue(formData: FormData, key: string) {
-  return (formData.get(key) as string | null)?.trim() ?? "";
-}
+type PreparedFeedbackResult = PrepareFeedbackResult | { error: string };
+type PreparedValidationResult = PrepareValidationResult | { error: string };
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
@@ -70,84 +66,88 @@ export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
   }
 }
 
-export async function getAgent(id: bigint): Promise<RegisteredAgent | null> {
-  if (!cfg.registryAddress) return null;
+export async function getAgentPageData(id: string) {
+  if (!cfg.rpcUrl || !cfg.registryAddress)
+    throw new Error("Registry not configured");
+  const agentId = BigInt(id);
+  const registry = new AgentRegistry({
+    address: cfg.registryAddress,
+    publicClient: createPublicClient({
+      chain: cfg.chain,
+      transport: http(cfg.rpcUrl),
+    }),
+  });
+  const [agent, intelligentDataInfo] = await Promise.all([
+    registry.resolve(agentId).catch(() => null),
+    registry.resolveProofData(agentId).catch(
+      () =>
+        ({
+          verifierAddress: undefined,
+          erc8004AgentId: undefined,
+          intelligentData: [],
+        }) as ResolvedAgentProofData,
+    ),
+  ]);
 
-  try {
-    const registry = makeAgentRegistryClient();
-    if (!registry) return null;
-    return await registry.resolve(id);
-  } catch {
-    return null;
-  }
-}
+  const erc8004Id =
+    intelligentDataInfo.erc8004AgentId &&
+    intelligentDataInfo.erc8004AgentId !== "0"
+      ? intelligentDataInfo.erc8004AgentId
+      : null;
 
-export async function getAgentIntelligentData(
-  agentId: bigint,
-): Promise<ResolvedAgentProofData> {
-  const cached = await getCachedProofs(agentId);
-  if (cached) return cached;
-
-  const result = await sdkResolveAgentProofData(toAgentConfig(), agentId);
-
-  setCachedProofs(agentId, result).catch((err) =>
-    console.error("[registry] proofs cache write failed:", err),
-  );
-
-  return result;
-}
-
-export async function getAgentFeedbackOverview(
-  _agentId: bigint,
-): Promise<AgentFeedbackOverview> {
-  return { totalScore: 0, totalCount: 0, feedbacks: [] };
+  const [oracleRunsResult, pendingValidations] = await Promise.all([
+    getOracleRunHistory(id),
+    erc8004Id
+      ? fetchPendingValidationsForAgent(erc8004Id)
+      : Promise.resolve([]),
+  ]);
+  return {
+    agent,
+    intelligentDataInfo,
+    feedbackOverview: {
+      totalScore: 0,
+      totalCount: 0,
+      feedbacks: [],
+    } as AgentFeedbackOverview,
+    oracleRunsResult,
+    pendingValidations,
+  };
 }
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 export async function prepareFeedback(
-  formData: FormData,
+  params: PrepareFeedbackParams,
 ): Promise<PreparedFeedbackResult> {
-  const agentId = getFormValue(formData, "agentId");
-  const valueStr = getFormValue(formData, "value");
-  const tag1 = getFormValue(formData, "tag1");
-  const tag2 = getFormValue(formData, "tag2");
-  const feedbackJson = getFormValue(formData, "feedbackJson");
-  const feedbackFile = formData.get("feedbackFile");
-
-  if (!agentId) return { error: "Agent ID is required." };
-  if (!valueStr) return { error: "Feedback value is required." };
-
-  const valueNum = parseFloat(valueStr);
-  if (isNaN(valueNum) || valueNum < -1 || valueNum > 1) {
+  if (!params.agentId) return { error: "Agent ID is required." };
+  if (params.value === undefined || params.value === null)
+    return { error: "Feedback value is required." };
+  if (isNaN(params.value) || params.value < -1 || params.value > 1)
     return { error: "Feedback value must be between -1 and 1." };
-  }
 
-  return sdkPrepareFeedback(toAgentConfig(), {
-    agentId,
-    value: valueNum,
-    tag1,
-    tag2,
-    feedbackJson: feedbackJson || undefined,
-    feedbackFile: feedbackFile instanceof File ? feedbackFile : null,
-  });
+  try {
+    return await sdkPrepareFeedback(cfg, params);
+  } catch (err) {
+    return {
+      error:
+        err instanceof Error ? err.message : "Feedback preparation failed.",
+    };
+  }
 }
 
 export async function prepareValidation(
-  formData: FormData,
+  params: PrepareValidationParams,
 ): Promise<PreparedValidationResult> {
-  const agentId = getFormValue(formData, "agentId");
-  const validatorAddress = getFormValue(formData, "validatorAddress") as
-    | `0x${string}`
-    | "";
-  const requestURI = getFormValue(formData, "requestURI");
+  if (!params.agentId) return { error: "Agent ID is required." };
+  if (!params.validatorAddress)
+    return { error: "Validator address is required." };
 
-  if (!agentId) return { error: "Agent ID is required." };
-  if (!validatorAddress) return { error: "Validator address is required." };
-
-  return sdkPrepareValidation(toAgentConfig(), {
-    agentId,
-    validatorAddress,
-    requestURI,
-  });
+  try {
+    return sdkPrepareValidation(cfg, params);
+  } catch (err) {
+    return {
+      error:
+        err instanceof Error ? err.message : "Validation preparation failed.",
+    };
+  }
 }

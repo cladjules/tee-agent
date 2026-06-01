@@ -62,7 +62,7 @@ export default buildModule("TeeAgent", (m) => {
   ]);
 
   // ── ERC-8004 validation registry ──────────────────────────────────────────
-  const validationRegistry = m.contract("ValidationRegistry", [agentRegistry]);
+  const validationRegistry = m.contract("ValidationRegistry");
 
   return {
     agentRegistry,

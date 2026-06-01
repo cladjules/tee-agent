@@ -4,9 +4,6 @@
  */
 
 import type { Address, Chain, Hex, PublicClient } from "viem";
-import type { ChainNetwork } from "./config.js";
-
-export type { ChainNetwork };
 
 // ─── Agent Identity / Registry (ERC-8004) ────────────────────────────────────
 
@@ -117,10 +114,7 @@ export interface EncryptedBlob {
   algorithm: "aes-256-gcm";
 }
 
-export type ParsedServicesResult = {
-  services?: AgentService[];
-  error?: string;
-};
+export type ParsedServicesResult = AgentService[];
 
 export type ParseServicesOptions = {
   allowedServiceNames?: readonly string[];
@@ -152,17 +146,6 @@ export type TransferOwnershipProof = {
   proof: Hex;
 };
 
-export type SecureTransferPayloads = {
-  from: Address;
-  to: Address;
-  tokenId: bigint;
-  deadline: bigint;
-  newDataHashes: Hex[];
-  sealedKey: Hex;
-  accessPayloads: TransferAccessPayload[];
-  ownershipProofs: TransferOwnershipProof[];
-};
-
 // ─── IPFS ─────────────────────────────────────────────────────────────────────
 
 export interface IpfsClientOptions {
@@ -181,51 +164,20 @@ export interface IpfsUploadResult {
   readonly size: number;
 }
 
-// ─── 0G Storage ───────────────────────────────────────────────────────────────
-
-export interface ZeroGStorageOptions {
-  /** 0x-prefixed hex private key used to sign upload transactions */
-  privateKey: string;
-  /**
-   * EVM RPC endpoint for the 0G storage network.
-   * Defaults to ZERO_G_RPC_URL env var or the 0G testnet public RPC.
-   */
-  rpcUrl?: string;
-  /**
-   * 0G Indexer RPC URL.
-   * Defaults to ZERO_G_INDEXER_URL env var or the 0G testnet standard indexer.
-   */
-  indexerUrl?: string;
-}
-
-export interface ZeroGReadOptions {
-  /**
-   * 0G Indexer RPC URL.
-   * Defaults to ZERO_G_INDEXER_URL env var or the 0G testnet standard indexer.
-   */
-  indexerUrl?: string;
-}
-
-/** Result shape returned by ZeroGStorageClient.uploadJSON / uploadBytes */
-export interface ZeroGFlowUploadResult {
-  readonly cid: string;
-  readonly url: string;
-  readonly size: number;
-}
-
 // ─── AgentRegistry config ─────────────────────────────────────────────────────
 
-export interface AgentRegistryConfig {
-  agentRegistryAddress: Address;
+/** Shared config shape for IdentityRegistry, ReputationRegistry, and ValidationRegistry. */
+export interface RegistryConfig {
+  address: Address;
   publicClient: PublicClient;
 }
 
 // ─── AgentConfig (shared by SDK, CLI, and any consumer) ──────────────────────
 
 export type AgentConfig = {
-  rpcUrl: string;
+  rpcUrl?: string;
   chain: Chain;
-  registryAddress: Address;
+  registryAddress?: Address;
   /** ERC-8004 Identity Registry. Defaults to official singleton for the chain. */
   identityRegistryAddress?: Address;
   /** ERC-8004 Reputation Registry. Defaults to official singleton for the chain. */
@@ -243,56 +195,6 @@ export type AgentConfig = {
   zeroGRpcUrl?: string;
   /** 0G Storage indexer URL (default: turbo testnet indexer). */
   zeroGIndexerUrl?: string;
-};
-
-// ─── App Config ───────────────────────────────────────────────────────────────
-
-/**
- * Client-safe application config — safe to use in browser / SSR contexts.
- * Contains only non-secret data: public addresses, network id, oracle URL.
- */
-export type ClientConfig = {
-  /** Active chain network identifier. */
-  network: ChainNetwork;
-  /** Deployed AgentRegistry (ERC-721 / ERC-7857). */
-  registryAddress: Address | undefined;
-  /** ERC-8004 Reputation Registry. Defaults to official singleton for the chain. */
-  reputationAddress: Address;
-  /** Our own ValidationRegistry deployment. */
-  validationAddress: Address | undefined;
-  /** Phala Cloud TEE oracle base URL. */
-  oracleUrl: string;
-};
-
-/**
- * Server-side application config. Extends ClientConfig with secrets and
- * chain metadata. Never expose to the browser.
- */
-export type ServerConfig = ClientConfig & {
-  /** Official ERC-8004 Identity Registry singleton for the active chain. */
-  identityRegistryAddress: Address;
-  /** Deployed TEEVerifier contract. */
-  teeVerifierAddress: Address | undefined;
-  /** EVM RPC URL for the app chain. */
-  rpcUrl: string | undefined;
-  /** Deployer / server-side signer key (32-byte hex). */
-  deployerKey: Hex | undefined;
-  /** Key for 0G Storage uploads; falls back to deployerKey. */
-  zeroGKey: Hex | undefined;
-  /** 0G Storage EVM RPC endpoint. */
-  zeroGRpcUrl: string | undefined;
-  /** 0G Storage indexer URL. */
-  zeroGIndexerUrl: string | undefined;
-  /** Pinata JWT for IPFS metadata uploads. */
-  pinataJwt: string | undefined;
-  /** Starting block for Registered event log queries. */
-  registryFromBlock: bigint;
-  /** viem Chain object for the active network. */
-  chain: Chain;
-  /** Chain ID of the active network. */
-  chainId: number;
-  /** True when the minimum required env vars are set. */
-  isConfigured: boolean;
 };
 
 // ─── Mint ─────────────────────────────────────────────────────────────────────
@@ -315,17 +217,19 @@ export type MintParams = {
   ownerAddress: Address;
 };
 
-export type MintResult =
-  | {
-      contractAddress: Address;
-      agentRegistry: string;
-      publicMetadataUri: string;
-      agentMetadataUri: string;
-      mintFee: string;
-      intelligentData: Array<{ dataDescription: string; dataHash: Hex }>;
-      error?: never;
-    }
-  | { error: string };
+export type MintResult = {
+  contractAddress: Address;
+  agentRegistry: string;
+  publicMetadataUri: string;
+  agentMetadataUri: string;
+  mintFee: string;
+  intelligentData: Array<{ dataDescription: string; dataHash: Hex }>;
+  /**
+   * ERC-8004 IdentityRegistry address. Present when the AgentRegistry has
+   * co-registration enabled. Use with `prepareRegisterErc8004` post-mint.
+   */
+  erc8004RegistryAddress?: Address;
+};
 
 // ─── Transfer ─────────────────────────────────────────────────────────────────
 
@@ -337,57 +241,62 @@ export type TransferParams = {
   oracleDeadline?: string;
 };
 
-export type TransferResult =
-  | {
-      contractAddress: Address;
-      tokenId: string;
-      from?: Address;
-      to: Address;
-      deadline?: bigint;
-      newDataHashes: Hex[];
-      sealedKey: Hex;
-      accessPayloads: Array<{
-        dataHash: Hex;
-        targetPubkey: Hex;
-        nonce: Hex;
-        digest: Hex;
-      }>;
-      ownershipProofs: Array<{
-        oracleType: number;
-        dataHash: Hex;
-        sealedKey: Hex;
-        targetPubkey: Hex;
-        nonce: Hex;
-        proof: Hex;
-      }>;
-      error?: never;
-    }
-  | { error: string };
+export type TransferResult = {
+  contractAddress: Address;
+  tokenId: string;
+  from?: Address;
+  to: Address;
+  deadline?: bigint;
+  newDataHashes: Hex[];
+  sealedKey: Hex;
+  accessPayloads: Array<{
+    dataHash: Hex;
+    targetPubkey: Hex;
+    nonce: Hex;
+    digest: Hex;
+  }>;
+  ownershipProofs: Array<{
+    oracleType: number;
+    dataHash: Hex;
+    sealedKey: Hex;
+    targetPubkey: Hex;
+    nonce: Hex;
+    proof: Hex;
+  }>;
+};
 
 // ─── Services ─────────────────────────────────────────────────────────────────
 
 export type UpdateServicesParams = {
   tokenId: string;
-  servicesJson: string;
+  servicesJson: any;
 };
 
-export type UpdateServicesResult =
-  | {
-      erc8004RegistryAddress: Address;
-      erc8004AgentId: string;
-      tokenUri: string;
-      error?: never;
-    }
-  | { error: string };
+export type UpdateServicesResult = {
+  erc8004RegistryAddress: Address;
+  erc8004AgentId: string;
+  tokenUri: string;
+};
+
+/**
+ * Params for `prepareRegisterErc8004` — call post-mint with the values from
+ * the `ERC8004Registered` event emitted by `AgentRegistry.mint()`.
+ */
+export type PrepareRegisterErc8004Params = {
+  /** ERC-8004 agent ID assigned by the IdentityRegistry during mint. */
+  erc8004AgentId: string;
+  /** The `agentMetadataUri` from `MintResult` (passed as `metadataUri` to mint). */
+  agentMetadataUri: string;
+};
 
 export type FetchAgentServicesParams = {
   tokenId: string;
-  ownerAddress: string;
 };
 
-export type FetchAgentServicesResult =
-  | { services: AgentService[]; agentName: string }
-  | { error: string };
+export type FetchAgentServicesResult = {
+  services: AgentService[];
+  agentName: string;
+};
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
@@ -419,14 +328,13 @@ export type PrepareFeedbackParams = {
 };
 
 export type PrepareFeedbackResult = {
-  contractAddress?: Address;
-  agentId?: string;
-  value?: string;
-  valueDecimals?: number;
-  tag1?: string;
-  tag2?: string;
-  feedbackURI?: string;
-  error?: string;
+  contractAddress: Address;
+  agentId: string;
+  value: string;
+  valueDecimals: number;
+  tag1: string;
+  tag2: string;
+  feedbackURI: string;
 };
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -438,12 +346,11 @@ export type PrepareValidationParams = {
 };
 
 export type PrepareValidationResult = {
-  contractAddress?: Address;
-  agentId?: string;
-  validatorAddress?: Address;
-  requestURI?: string;
-  requestHash?: Hex;
-  error?: string;
+  contractAddress: Address;
+  agentId: string;
+  validatorAddress: Address;
+  requestURI: string;
+  requestHash: Hex;
 };
 
 // ─── Transfer validity proof (iTransferFrom on-chain struct) ──────────────────

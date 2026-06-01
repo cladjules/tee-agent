@@ -42,7 +42,7 @@ export default function HomePage() {
           <p className="text-lg text-slate-400 leading-relaxed max-w-xl">
             Deploy AI agents as sovereign on-chain entities — ERC-7857 +
             ERC-8004 with private encrypted data, on-chain reputation scoring,
-            and Phala Cloud TEE-secured ownership transfers.
+            and Phala Cloud TEE-secured proof generation.
           </p>
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <a

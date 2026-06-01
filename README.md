@@ -122,7 +122,7 @@ TypeScript client for ERC-8004 registry queries, AES-256-GCM encryption, 0G Stor
 import { AgentRegistry } from "@tee-agent/agent/registry";
 
 const registry = new AgentRegistry({
-  agentRegistryAddress: "0x...",
+  address: "0x...",
   publicClient,
 });
 
@@ -134,7 +134,6 @@ const agent = await registry.resolve(agentId);
 
 ```typescript
 import {
-  encryptIntelligentData, // AES-256-GCM encrypt system prompt + character def (in-memory)
   readJsonFromUri, // fetch JSON from data: or HTTPS/IPFS URIs
   buildAccessPayloads, // build owner-signed access proofs for transfer
 } from "@tee-agent/agent/encryption";
@@ -245,7 +244,7 @@ RPC_URL=https://sepolia.base.org
 
 # Contracts (from deployment above)
 AGENT_REGISTRY_ADDRESS=0x...
-NEXT_PUBLIC_TEE_VERIFIER_ADDRESS=0x...
+TEE_VERIFIER_ADDRESS=0x...
 
 # Deployer / signer
 PRIVATE_KEY=0x...
@@ -273,18 +272,18 @@ cd apps/dashboard && npm run dev
 
 ## Environment Variables
 
-| Variable                           | Required | Description                                                                                                                           |
-| ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`              | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                                                                                      |
-| `RPC_URL`                          | Yes      | EVM RPC endpoint for the app chain                                                                                                    |
-| `AGENT_REGISTRY_ADDRESS`           | Yes      | Deployed `AgentRegistry` contract address                                                                                             |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS` | No       | Deployed `TEEVerifier` address                                                                                                        |
-| `PRIVATE_KEY`                      | Yes      | Deployer / server-side signer key                                                                                                     |
-| `ZERO_G_PRIVATE_KEY`               | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`)                                                               |
-| `ZERO_G_RPC_URL`                   | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                          |
-| `ZERO_G_INDEXER_URL`               | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                   |
-| `PINATA_JWT`                       | Yes      | Pinata Bearer JWT for IPFS metadata uploads                                                                                           |
-| `NEXT_PUBLIC_ORACLE_URL`           | No       | Phala Cloud CVM URL. Used server-side (mint/transfer) and client-side (Run Oracle / Validate). Local default: `http://localhost:3001` |
+| Variable                 | Required | Description                                                                                                                           |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_NETWORK`    | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                                                                                      |
+| `RPC_URL`                | Yes      | EVM RPC endpoint for the app chain                                                                                                    |
+| `AGENT_REGISTRY_ADDRESS` | Yes      | Deployed `AgentRegistry` contract address                                                                                             |
+| `TEE_VERIFIER_ADDRESS`   | No       | Deployed `TEEVerifier` address                                                                                                        |
+| `PRIVATE_KEY`            | Yes      | Deployer / server-side signer key                                                                                                     |
+| `ZERO_G_PRIVATE_KEY`     | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`)                                                               |
+| `ZERO_G_RPC_URL`         | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                          |
+| `ZERO_G_INDEXER_URL`     | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                   |
+| `PINATA_JWT`             | Yes      | Pinata Bearer JWT for IPFS metadata uploads                                                                                           |
+| `NEXT_PUBLIC_ORACLE_URL` | No       | Phala Cloud CVM URL. Used server-side (mint/transfer) and client-side (Run Oracle / Validate). Local default: `http://localhost:3001` |
 
 ---
 

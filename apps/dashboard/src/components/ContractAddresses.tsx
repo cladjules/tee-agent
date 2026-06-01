@@ -50,9 +50,10 @@ const EXPLORER_ROOT: Record<string, string> = {
 };
 
 export default function ContractAddresses() {
-  const explorer = EXPLORER[cfg.network] ?? EXPLORER.baseSepolia;
-  const explorerRoot = EXPLORER_ROOT[cfg.network] ?? EXPLORER_ROOT.baseSepolia;
-  const networkLabel = cfg.network === "base" ? "Base" : "Base Sepolia";
+  const isBase = cfg.chain.id === 8453;
+  const explorer = isBase ? EXPLORER.base : EXPLORER.baseSepolia;
+  const explorerRoot = isBase ? EXPLORER_ROOT.base : EXPLORER_ROOT.baseSepolia;
+  const networkLabel = isBase ? "Base" : "Base Sepolia";
 
   return (
     <div className="space-y-3">
@@ -85,7 +86,7 @@ export default function ContractAddresses() {
             />
             <AddrRow
               label="ValidationRegistry"
-              address={cfg.validationAddress}
+              address={cfg.validationRegistryAddress}
               explorer={explorer}
             />
             <AddrRow
@@ -96,7 +97,7 @@ export default function ContractAddresses() {
             />
             <AddrRow
               label="Reputation Registry"
-              address={cfg.reputationAddress}
+              address={cfg.reputationRegistryAddress}
               explorer={explorer}
               tag="ERC-8004"
             />

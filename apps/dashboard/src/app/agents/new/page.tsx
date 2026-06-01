@@ -4,12 +4,17 @@ import { useState, useTransition } from "react";
 import { parseEventLogs } from "viem";
 import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/abis";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { prepareCreateAgent, fetchAgentServices } from "@/lib/actions/agents";
+import {
+  prepareCreateAgent,
+  fetchAgentServices,
+  preparePostMintRegistration,
+} from "@/lib/actions/agents";
 import { ErrorBox } from "@/components/ErrorBox";
 import {
   ServiceEditorPanel,
   type ServiceEditorEntry,
 } from "@/components/ServiceEditorPanel";
+import { IDENTITY_REGISTRY_ABI } from "../../../../../../packages/agent/src/abis";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -145,32 +150,26 @@ export default function NewAgentPage() {
     setResult(null);
 
     const oasfService = builtServices.find((s) => s.name === "OASF");
-    const formData = new FormData();
-    formData.set("name", name);
-    formData.set("description", description);
-    formData.set("imageUrl", imageUrl);
-    formData.set("agentType", agentType);
-    formData.set("x402Support", x402Support ? "true" : "false");
-    formData.set(
-      "privateEntries",
-      JSON.stringify(
-        privateEntries.filter((e) => e.name.trim() && e.data.trim()),
-      ),
-    );
-    formData.set("servicesJson", JSON.stringify(builtServices));
-    formData.set("oasfSkills", JSON.stringify(oasfService?.skills ?? []));
-    formData.set("oasfDomains", JSON.stringify(oasfService?.domains ?? []));
-    if (address) formData.set("ownerAddress", address);
 
     startTransition(async () => {
       try {
-        const prepared = await prepareCreateAgent(formData);
-        if ("error" in prepared && prepared.error) {
+        const prepared = await prepareCreateAgent({
+          name,
+          description,
+          imageUrl: imageUrl || undefined,
+          agentType,
+          x402Support,
+          privateEntries: privateEntries.filter(
+            (e) => e.name.trim() && e.data.trim(),
+          ),
+          services: builtServices,
+          oasfSkills: oasfService?.skills ?? [],
+          oasfDomains: oasfService?.domains ?? [],
+          ownerAddress: (address ?? "0x") as `0x${string}`,
+        });
+
+        if ("error" in prepared) {
           setResult({ error: prepared.error });
-          return;
-        }
-        if ("tokenId" in prepared) {
-          setResult({ tokenId: prepared.tokenId });
           return;
         }
 
@@ -474,7 +473,6 @@ export default function NewAgentPage() {
                       setImportedFrom(null);
                       const res = await fetchAgentServices(
                         importTokenId.trim(),
-                        address!,
                       );
                       setImportPending(false);
                       if ("error" in res) {
@@ -508,6 +506,7 @@ export default function NewAgentPage() {
               onChange={setBuiltServices}
               initialX402={x402Support}
               onX402Change={setX402Support}
+              hideServices={serviceMode === "import"}
             />
           </>
         )}

@@ -5,14 +5,11 @@
 import { parseAbiItem } from "viem";
 import AgentRegistryAbi from "./abis/AgentRegistry.json" with { type: "json" };
 import TEEVerifierAbi from "./abis/TEEVerifier.json" with { type: "json" };
-import VerifierAbi from "./abis/Verifier.json" with { type: "json" };
 import ReputationRegistryAbi from "./abis/ReputationRegistry.json" with { type: "json" };
 import ValidationRegistryAbi from "./abis/ValidationRegistry.json" with { type: "json" };
 
 export const AGENT_REGISTRY_ABI = AgentRegistryAbi;
-export const AGENT_NFT_ABI = AGENT_REGISTRY_ABI;
 export const TEE_VERIFIER_ABI = TEEVerifierAbi;
-export const VERIFIER_ABI = VerifierAbi;
 export const REPUTATION_REGISTRY_ABI = ReputationRegistryAbi;
 export const VALIDATION_REGISTRY_ABI = ValidationRegistryAbi;
 
@@ -50,29 +47,18 @@ export const VALIDATION_STATUS_ABI = [
   },
 ] as const;
 
-/** Minimal ERC-721 read ABI (ownerOf + tokenURI). */
-export const ERC721_ABI = [
-  {
-    name: "ownerOf",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ name: "", type: "address" }],
-  },
-  {
-    name: "tokenURI",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ name: "", type: "string" }],
-  },
-] as const;
-
 /**
  * ERC-8004 Identity Registry — minimal ABI covering the functions called by
- * the dashboard (ownerOf, tokenURI, setAgentURI).
+ * the dashboard (ownerOf, tokenURI, setAgentURI, register).
  */
 export const IDENTITY_REGISTRY_ABI = [
+  {
+    name: "register",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "agentURI", type: "string" }],
+    outputs: [{ name: "agentId", type: "uint256" }],
+  },
   {
     name: "ownerOf",
     type: "function",

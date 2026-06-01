@@ -1,13 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Expose non-secret contract addresses to the client bundle.
-  // These are public on-chain values — not secrets.
-  env: {
-    AGENT_REGISTRY_ADDRESS: process.env.AGENT_REGISTRY_ADDRESS ?? "",
-    VALIDATION_REGISTRY_ADDRESS: process.env.VALIDATION_REGISTRY_ADDRESS ?? "",
-    REPUTATION_REGISTRY_ADDRESS: process.env.REPUTATION_REGISTRY_ADDRESS ?? "",
-  },
   // Prevent Next.js from bundling packages that use node: built-ins (e.g. node:crypto).
   // They are required at runtime by Node.js instead.
   serverExternalPackages: ["@tee-agent/agent"],

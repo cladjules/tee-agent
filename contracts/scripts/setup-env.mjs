@@ -56,8 +56,8 @@ if (existsSync(journalPath)) {
 
 // Map Ignition module keys → env var names
 const KEY_MAP = {
-  "TeeAgent#AgentRegistry": "AGENT_REGISTRY_ADDRESS",
-  "TeeAgent#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
+  "TeeAgent#AgentRegistry": "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS",
+  "TeeAgent#ValidationRegistry": "NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS",
   "TeeAgent#TeeVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
 };
 
@@ -129,7 +129,7 @@ for (const [k, v] of Object.entries(resolved)) {
 console.log();
 
 // Also write AGENT_REGISTRY_ADDRESS to apps/oracle/.env or .env.local
-if (resolved.AGENT_REGISTRY_ADDRESS) {
+if (resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS) {
   const oracleEnvPath = join(ROOT, "apps/oracle/.env");
   const oracleEnvLocalPath = join(ROOT, "apps/oracle/.env.local");
   const oracleTargetPath = existsSync(oracleEnvPath)
@@ -145,10 +145,10 @@ if (resolved.AGENT_REGISTRY_ADDRESS) {
   if (oracleRegex.test(oracleExisting)) {
     oracleExisting = oracleExisting.replace(
       oracleRegex,
-      `${oracleKey}=${resolved.AGENT_REGISTRY_ADDRESS}`,
+      `${oracleKey}=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`,
     );
   } else {
-    oracleExisting += `\n${oracleKey}=${resolved.AGENT_REGISTRY_ADDRESS}`;
+    oracleExisting += `\n${oracleKey}=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`;
   }
 
   const oracleTargetFile =
@@ -158,6 +158,8 @@ if (resolved.AGENT_REGISTRY_ADDRESS) {
   writeFileSync(oracleTargetPath, oracleExisting.trimStart() + "\n");
 
   console.log(`✓ Written to ${oracleTargetFile} (chain ${chainId})\n`);
-  console.log(`  AGENT_REGISTRY_ADDRESS=${resolved.AGENT_REGISTRY_ADDRESS}`);
+  console.log(
+    `  AGENT_REGISTRY_ADDRESS=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`,
+  );
   console.log();
 }

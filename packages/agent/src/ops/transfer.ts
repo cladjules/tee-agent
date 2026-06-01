@@ -5,14 +5,14 @@
  * then builds the client-side access payloads that the recipient wallet must sign.
  */
 
-import { makePublicClient } from "../core/client.js";
-import { AgentRegistry } from "../core/registry.js";
-import { buildAccessPayloads } from "../crypto/index.js";
+import { buildAccessPayloads } from "../core/crypto.js";
 import type {
   AgentConfig,
   TransferParams,
   TransferResult,
 } from "../core/types.js";
+import { AgentRegistry } from "../core/registry/agent.js";
+import { createPublicClient, http } from "viem";
 
 export async function prepareTransfer(
   config: AgentConfig,
@@ -21,18 +21,23 @@ export async function prepareTransfer(
   const { tokenId, to, newOwnerPublicKey, oracleSignature, oracleDeadline } =
     params;
 
-  if (!tokenId) return { error: "Token ID is required." };
-  if (!to) return { error: "Recipient address is required." };
+  if (!tokenId) throw new Error("Token ID is required.");
+  if (!to) throw new Error("Recipient address is required.");
 
   const registry = new AgentRegistry({
-    agentRegistryAddress: config.registryAddress,
-    publicClient: makePublicClient(config) as any,
+    address: config.registryAddress!,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    }),
   });
   const numericTokenId = BigInt(tokenId);
 
   const intelligentDatas = await registry.intelligentDatasOf(numericTokenId);
 
-  const currentHashes = intelligentDatas.map((item) => item.dataHash);
+  const currentHashes = intelligentDatas.map(
+    (item: { dataHash: `0x${string}` }) => item.dataHash,
+  );
 
   type AccessPayload = {
     dataHash: `0x${string}`;
@@ -63,25 +68,25 @@ export async function prepareTransfer(
     from = ownerAddress;
 
     if (!config.oracleUrl) {
-      return {
-        error:
-          "oracleUrl is required for secure agent transfers. Start the oracle server and set oracleUrl in AgentConfig.",
-      };
+      throw new Error(
+        "oracleUrl is required for secure agent transfers. Start the oracle server and set oracleUrl in AgentConfig.",
+      );
     }
     if (!newOwnerPublicKey) {
-      return { error: "newOwnerPublicKey is required for remote oracle." };
+      throw new Error("newOwnerPublicKey is required for remote oracle.");
     }
     if (!oracleSignature) {
-      return {
-        error:
-          "oracleSignature is required — sign the ReencryptRequest with the owner wallet.",
-      };
+      throw new Error(
+        "oracleSignature is required — sign the ReencryptRequest with the owner wallet.",
+      );
     }
     if (!oracleDeadline) {
-      return { error: "oracleDeadline is required." };
+      throw new Error("oracleDeadline is required.");
     }
 
-    const blobUris = intelligentDatas.map((d) => d.dataDescription);
+    const blobUris = intelligentDatas.map(
+      (d: { dataDescription: string }) => d.dataDescription,
+    );
 
     const oracleResponse = await fetch(`${config.oracleUrl}/reencrypt`, {
       method: "POST",
@@ -92,7 +97,7 @@ export async function prepareTransfer(
         to,
         chainId: config.chain.id,
         verifierAddress,
-        registryAddress: config.registryAddress,
+        registryAddress: config.registryAddress!,
         deadline: Number(oracleDeadline),
         intelligentDataHashes: currentHashes,
         blobUris,
@@ -103,9 +108,9 @@ export async function prepareTransfer(
 
     if (!oracleResponse.ok) {
       const text = await oracleResponse.text().catch(() => "");
-      return {
-        error: `Oracle re-encryption failed: ${oracleResponse.status} ${text}`,
-      };
+      throw new Error(
+        `Oracle re-encryption failed: ${oracleResponse.status} ${text}`,
+      );
     }
 
     const oracleResult = (await oracleResponse.json()) as {
@@ -121,7 +126,7 @@ export async function prepareTransfer(
     accessPayloads = buildAccessPayloads({
       chainId: config.chain.id,
       verifierAddress,
-      registryAddress: config.registryAddress,
+      registryAddress: config.registryAddress!,
       tokenId: numericTokenId,
       from,
       to,
@@ -131,7 +136,7 @@ export async function prepareTransfer(
   }
 
   return {
-    contractAddress: config.registryAddress,
+    contractAddress: config.registryAddress!,
     tokenId,
     ...(from !== "0x" ? { from: from as `0x${string}` } : {}),
     to,

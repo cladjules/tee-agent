@@ -27,71 +27,62 @@ interface PinataV3Response {
   };
 }
 
-// ─── Client ───────────────────────────────────────────────────────────────────
+// ─── Upload ───────────────────────────────────────────────────────────────────
 
-export class IpfsClient {
-  private readonly _jwt: string;
-  private readonly _baseUrl: string;
-
-  constructor(opts: IpfsClientOptions = {}) {
-    const jwt = opts.jwt ?? process.env["PINATA_JWT"];
-    if (!jwt) {
-      throw new RegistryError(
-        "STORAGE_ERROR",
-        "IPFS upload requires a Pinata JWT. Set PINATA_JWT env var or pass jwt option.",
-      );
-    }
-    this._jwt = jwt;
-    this._baseUrl = opts.baseUrl ?? "https://uploads.pinata.cloud";
+/**
+ * Pin a JSON-serialisable object to IPFS via Pinata V3.
+ * Files are uploaded to the public IPFS network so they are gateway-accessible.
+ * Returns the CID, an `ipfs://` URI, and the byte size.
+ */
+export async function uploadJSONToIPFS(
+  data: unknown,
+  name?: string,
+  opts: IpfsClientOptions = {},
+): Promise<IpfsUploadResult> {
+  const jwt = opts.jwt;
+  const baseUrl = opts.baseUrl ?? "https://uploads.pinata.cloud";
+  if (!jwt) {
+    throw new RegistryError(
+      "STORAGE_ERROR",
+      "IPFS upload requires a Pinata JWT. Set PINATA_JWT env var or pass jwt option.",
+    );
   }
 
-  /**
-   * Pin a JSON-serialisable object to IPFS via Pinata V3.
-   * Files are uploaded to the public IPFS network so they are gateway-accessible.
-   * Returns the CID, an `ipfs://` URI, and the byte size.
-   */
-  async uploadJSON(data: unknown, name?: string): Promise<IpfsUploadResult> {
-    const json = JSON.stringify(data);
-    const blob = new Blob([json], { type: "application/json" });
-    const form = new FormData();
-    form.append("file", blob, name ? `${name}.json` : "upload.json");
-    form.append("network", "public");
-    if (name) form.append("name", name);
+  const json = JSON.stringify(data);
+  const blob = new Blob([json], { type: "application/json" });
+  const form = new FormData();
+  form.append("file", blob, name ? `${name}.json` : "upload.json");
+  form.append("network", "public");
+  if (name) form.append("name", name);
 
-    let response: Response;
-    try {
-      response = await fetch(`${this._baseUrl}/v3/files`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${this._jwt}` },
-        body: form,
-      });
-    } catch (err) {
-      throw new RegistryError(
-        "STORAGE_ERROR",
-        `IPFS upload network error: ${String(err)}`,
-        err,
-      );
-    }
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new RegistryError(
-        "STORAGE_ERROR",
-        `Pinata upload failed (${response.status}): ${text}`,
-      );
-    }
-
-    const result = (await response.json()) as PinataV3Response;
-    const cid = result.data.cid;
-    return {
-      cid,
-      url: `ipfs://${cid}`,
-      size: result.data.size,
-    };
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/v3/files`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${jwt}` },
+      body: form,
+    });
+  } catch (err) {
+    throw new RegistryError(
+      "STORAGE_ERROR",
+      `IPFS upload network error: ${String(err)}`,
+      err,
+    );
   }
 
-  /** Canonical `ipfs://` URI from a raw CID string. */
-  static toUri(cid: string): string {
-    return `ipfs://${cid}`;
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new RegistryError(
+      "STORAGE_ERROR",
+      `Pinata upload failed (${response.status}): ${text}`,
+    );
   }
+
+  const result = (await response.json()) as PinataV3Response;
+  const cid = result.data.cid;
+  return {
+    cid,
+    url: `ipfs://${cid}`,
+    size: result.data.size,
+  };
 }

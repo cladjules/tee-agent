@@ -9,16 +9,19 @@
 # ORACLE_ENTRY selects the entry point compiled into dist/ (required):
 #   examples/prediction-market.js   — prediction-verifier skill
 #   examples/web-data-oracle.js     — web-fetcher skill
+#
+# Attestation verification (trustless):
+#   curl -s http://localhost:3001/attestation | curl -d @- http://localhost:8080/verify | jq
 
 services:
   oracle:
     build: .
     image: tee-agent-oracle:latest
     ports:
-      - "3000:3000"
+      - "3001:3001"
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=3001
       - ORACLE_ENTRY
       # Required
       - RPC_URL
@@ -29,4 +32,21 @@ services:
       - ZERO_G_INDEXER_URL
     volumes:
       - /var/run/tappd.sock:/var/run/tappd.sock
+    restart: unless-stopped
+
+  # dstack-verifier — trustless TDX attestation verifier (no Phala Cloud dependency)
+  #
+  # Usage:
+  #   Verify the oracle locally:
+  #     curl -s http://localhost:3001/attestation | curl -d @- http://localhost:8080/verify | jq
+  #
+  #   Verify remotely (from outside):
+  #     curl -s https://your-oracle/attestation | curl -d @- http://localhost:8080/verify | jq
+  #
+  # Checks: Intel root CA, MRTD, RTMR0-3 (event log replay), TCB status, Docker image digest.
+  # See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
+  verifier:
+    image: dstacktee/dstack-verifier:latest
+    ports:
+      - "8080:8080"
     restart: unless-stopped

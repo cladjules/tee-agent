@@ -11,21 +11,16 @@
     "clean": "hardhat clean",
     "node": "hardhat node",
     "deploy:local": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network localhost --reset",
-    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --parameters ignition/parameters.baseSepolia.json && npm run setup-env:baseSepolia",
-    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --parameters ignition/parameters.base.json",
-    "verify:baseSepolia": "hardhat ignition verify --network baseSepolia",
-    "verify:base": "hardhat ignition verify --network base",
+    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env:baseSepolia",
+    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --verify --parameters ignition/parameters.base.json",
     "setOracle:baseSepolia": "yes | node scripts/set-oracle.mjs baseSepolia && hardhat ignition deploy ignition/modules/SetOracle.ts --network baseSepolia --parameters ignition/parameters.baseSepolia.json",
     "setOracle:base": "yes | hardhat ignition deploy ignition/modules/SetOracle.ts --network base --parameters ignition/parameters.base.json",
     "e2e:local": "node --import tsx __tests__/e2e.ts local",
     "e2e:baseSepolia": "node --import tsx __tests__/e2e.ts baseSepolia",
-    "e2e-sdk:local": "node --import tsx __tests__/e2e-sdk.ts local",
-    "e2e-sdk:baseSepolia": "node --import tsx __tests__/e2e-sdk.ts baseSepolia",
     "setup-env:baseSepolia": "node scripts/setup-env.mjs 84532"
   },
   "devDependencies": {
     "@tee-agent/agent": "file:../packages/agent",
-    "@tee-agent/sdk": "file:../packages/sdk",
     "@nomicfoundation/hardhat-ignition": "^3.1.4",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.4",
     "@openzeppelin/contracts": "^5.6.1",
@@ -35,6 +30,6 @@
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "hardhat": "^3.4.3",
     "typescript": "^6.0.3",
-    "viem": "^2.48.7"
+    "viem": "^2.49.3"
   }
 }
