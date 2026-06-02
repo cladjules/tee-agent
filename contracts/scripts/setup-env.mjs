@@ -75,6 +75,7 @@ const chainNames = {
 // Map Ignition module keys → shared deployment contract keys
 const KEY_MAP = {
   "TeeAgent#AgentRegistry": "agentRegistry",
+  "TeeAgent#TeeVerifier": "teeVerifier",
   "TeeAgent#ValidationRegistry": "validationRegistry",
 };
 
@@ -106,7 +107,6 @@ const nextDeployment = {
     ...resolvedContracts,
   },
 };
-delete nextDeployment.contracts.teeVerifier;
 delete nextDeployment.contracts.verifier;
 if (deploymentBlock !== null) {
   nextDeployment.fromBlock = String(deploymentBlock);

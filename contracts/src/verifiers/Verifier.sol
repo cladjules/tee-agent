@@ -202,9 +202,4 @@ contract Verifier is IERC7857DataVerifier, Ownable, Pausable, ReentrancyGuard {
         return outputs;
     }
 
-    // ─── Getters ──────────────────────────────────────────────────────────────
-
-    function teeVerifier() external view returns (address) {
-        return _teeVerifier;
-    }
 }

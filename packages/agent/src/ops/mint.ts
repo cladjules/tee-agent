@@ -229,6 +229,7 @@ export async function prepareMint(
       dataDescription: item.uri,
       dataHash: item.hash,
     })),
+    teeOracleAddress: oracle.address,
     ...(config.identityRegistryAddress !== undefined
       ? { erc8004RegistryAddress: config.identityRegistryAddress }
       : {}),

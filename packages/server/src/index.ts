@@ -64,6 +64,7 @@ import {
 import {
   AGENT_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
+  TEE_VERIFIER_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
 import {
@@ -176,6 +177,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     config.deployments ?? {},
   );
   const configuredAgentRegistryAddress = deployment.contracts.agentRegistry;
+  const configuredTeeVerifierAddress =
+    process.env.TEE_VERIFIER_ADDRESS ?? deployment.contracts.teeVerifier;
   const ZERO_G_RPC_URL = process.env.ZERO_G_RPC_URL;
   const ZERO_G_INDEXER_URL = process.env.ZERO_G_INDEXER_URL;
   // dstack-verifier sidecar URL. Defaults to Docker Compose service name (works in docker-compose
@@ -220,6 +223,64 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
   );
   console.log(`[oracle] Identity Registry: ${identityRegistryAddress}`);
+
+  function oracleAddressReportData(): Uint8Array {
+    const reportData = new Uint8Array(64);
+    reportData.set(ethers.getBytes(wallet.address), 0);
+    return reportData;
+  }
+
+  async function registerAttestedOracle(): Promise<void> {
+    if (IS_SIMULATOR) {
+      console.log(
+        "[oracle] skipping on-chain TEE oracle registration in dstack simulator mode",
+      );
+      return;
+    }
+    if (!RPC_URL) {
+      throw new Error("RPC_URL is required for TEE oracle registration.");
+    }
+    if (!configuredTeeVerifierAddress) {
+      throw new Error(
+        "TEE_VERIFIER_ADDRESS or deployments.json contracts.teeVerifier is required for TEE oracle registration.",
+      );
+    }
+    const privateKey = process.env.PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error("PRIVATE_KEY is required for TEE oracle registration.");
+    }
+
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const signer = new ethers.Wallet(privateKey, provider);
+    const teeVerifier = new ethers.Contract(
+      configuredTeeVerifierAddress,
+      TEE_VERIFIER_ABI,
+      signer,
+    );
+
+    const alreadyRegistered = (await teeVerifier.isOracleRegistered(
+      wallet.address,
+    )) as boolean;
+    if (alreadyRegistered) {
+      console.log(
+        `[oracle] TEE oracle already registered in TeeVerifier ${configuredTeeVerifierAddress}`,
+      );
+      return;
+    }
+
+    console.log(
+      `[oracle] registering TEE oracle ${wallet.address} in TeeVerifier ${configuredTeeVerifierAddress}`,
+    );
+    const quoteResult = await tappd.tdxQuote(oracleAddressReportData(), "raw");
+    const tx = await teeVerifier.initValidator(wallet.address, quoteResult.quote);
+    console.log(`[oracle] initValidator tx submitted: ${tx.hash}`);
+    const receipt = await tx.wait();
+    console.log(
+      `[oracle] TEE oracle registered in block ${receipt?.blockNumber ?? "unknown"}`,
+    );
+  }
+
+  await registerAttestedOracle();
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -601,9 +662,9 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    */
   app.get("/attestation", async (_req: Request, res: Response) => {
     try {
-      // Embed oracle address in reportData so verifiers can bind signing key to quote.
-      // wallet.address is 20 bytes (hex string); tdxQuote hashes it to fit reportData.
-      const quoteResult = await tappd.tdxQuote(wallet.address);
+      // Embed oracle address at reportData[0:20] so on-chain TeeVerifier and
+      // external verifiers can bind the signing key to this quote.
+      const quoteResult = await tappd.tdxQuote(oracleAddressReportData(), "raw");
       const appInfo = IS_SIMULATOR ? null : await tappd.info();
       res.json({
         quote: quoteResult.quote,
@@ -799,9 +860,9 @@ export async function startOracle(config: OracleConfig): Promise<void> {
 
       let txHash: string | undefined;
       if (RPC_URL) {
-        const txWallet = new ethers.Wallet(
-          process.env.PRIVATE_KEY ?? wallet.privateKey,
-        );
+        // Validation requests are assigned to this oracle's TEE-derived EOA.
+        // The response transaction must therefore come from the same address.
+        const txWallet = new ethers.Wallet(wallet.privateKey);
         const provider = new ethers.JsonRpcProvider(RPC_URL);
         const connectedWallet = txWallet.connect(provider);
         const registry = new ethers.Contract(

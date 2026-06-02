@@ -1,7 +1,6 @@
 {
   "TeeAgent": {
     "identityRegistryAddress": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
-    "dcapAttestationAddress": "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F",
-    "oracleAddress": "0xf3D21A3A689AD889541d993A51e3109aC3E36c12"
+    "dcapAttestationAddress": "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F"
   }
 }

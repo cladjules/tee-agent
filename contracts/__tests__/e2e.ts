@@ -475,18 +475,6 @@ async function testIntelligentTransfer() {
   const oracle = await getOracleInfo();
   console.log(`  Oracle: ${oracle.address}`);
 
-  // Register oracle in TeeVerifier
-  const regHash = await walletClient.writeContract({
-    address: TEE_VERIFIER_ADDRESS,
-    abi: TEE_VERIFIER_ABI,
-    functionName: "updateOracleAddress",
-    args: [oracle.address],
-    account,
-    chain,
-  });
-  await waitForReceipt(regHash, "updateOracleAddress");
-  console.log(`  ✔ oracle registered`);
-
   // Create two encrypted blobs (AES-256-GCM) using the oracle's public key:
   //   iData[0]: SKILL.md markdown string
   //   iData[1]: agent config (model, temperature, etc. — no API keys)

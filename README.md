@@ -220,7 +220,6 @@ Private blob uploads require 0G testnet tokens. Fund the wallet used by `PRIVATE
 cd contracts
 npm test                          # run contract tests first
 npm run deploy:baseSepolia        # deploys AgentRegistry, ValidationRegistry, TeeVerifier, Verifier
-npm run setOracle:baseSepolia     # fetches oracle /address and registers it on-chain
 npm run setup-env -- baseSepolia  # writes deployed addresses to deployments.json
 ```
 
@@ -271,8 +270,9 @@ npm run dev --workspace=apps/dashboard
 | `NETWORK`                   | Yes      | `base` or `baseSepolia` (default: `baseSepolia`) — selects which per-network vars to use     |
 | `RPC_URL_BASE`              | No       | EVM RPC for Base mainnet                                                                     |
 | `RPC_URL_BASE_SEPOLIA`      | No       | EVM RPC for Base Sepolia (at least one required)                                             |
-| `deployments.json`          | No       | Public deployed contract addresses and AgentRegistry scan start blocks                       |
-| `PRIVATE_KEY`               | No       | Key for on-chain validation responses and 0G Storage fees (falls back to TEE-derived wallet) |
+| `deployments.json`          | No       | Public deployed contract addresses, including `teeVerifier`, and AgentRegistry scan start blocks |
+| `TEE_VERIFIER_ADDRESS`      | No       | Optional TeeVerifier override; otherwise read from `deployments.json`                        |
+| `PRIVATE_KEY`               | Yes      | Signer used to submit `initValidator` on startup, plus validation responses and 0G fees       |
 | `ZERO_G_RPC_URL`            | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                 |
 | `ZERO_G_INDEXER_URL`        | No       | 0G Indexer URL (default: turbo testnet indexer)                                              |
 | `LLM_API_KEY`               | No       | API key for LLM scoring (Red Pill for TEE-attested models: https://red-pill.ai)              |

@@ -4,7 +4,7 @@
 # Deploy (web-fetcher):        npm run deploy:web-fetcher
 #
 # First deploy: run `phala link` afterwards to record app_id in phala.toml.
-# After deploy: GET /address → register the oracle address in TEEVerifier.
+# On startup, the oracle self-registers in TeeVerifier via initValidator + TDX quote.
 #
 # ORACLE_ENTRY selects the entry point compiled into dist/ (required):
 #   examples/prediction-market.js   — prediction-verifier skill
@@ -27,6 +27,11 @@ services:
       - NETWORK
       - RPC_URL_BASE
       - RPC_URL_BASE_SEPOLIA
+      - TEE_VERIFIER_ADDRESS
+      - PRIVATE_KEY
+      - LLM_API_KEY
+      - LLM_API_BASE
+      - LLM_VALIDATION_MODEL
       # 0G Storage
       - ZERO_G_RPC_URL
       - ZERO_G_INDEXER_URL

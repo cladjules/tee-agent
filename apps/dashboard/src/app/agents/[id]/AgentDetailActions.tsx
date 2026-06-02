@@ -32,16 +32,6 @@ import {
 } from "@/components/ServiceEditorPanel";
 import { ErrorBox } from "@/components/ErrorBox";
 
-const VERIFIER_TEE_VERIFIER_ABI = [
-  {
-    name: "teeVerifier",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-  },
-] as const;
-
 type ActionClientConfig = {
   registryAddress?: Address;
   identityRegistryAddress?: Address;
@@ -1185,23 +1175,27 @@ function OracleRunCard({
           "Agent is not registered with ERC-8004. Register it before requesting validation.",
         );
 
-      const verifierAddress = (await publicClient.readContract({
-        address: clientCfg.registryAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "verifier",
-      })) as Address;
-      const teeVerifierAddress = await publicClient.readContract({
-        address: verifierAddress,
-        abi: VERIFIER_TEE_VERIFIER_ABI,
-        functionName: "teeVerifier",
-      });
+      let validatorAddress = run.oracleAddress;
+      if (!validatorAddress) {
+        const oracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
+        if (!oracleUrl) throw new Error("Oracle URL is not configured.");
+        const addrRes = await fetch(`${oracleUrl}/address`);
+        if (!addrRes.ok)
+          throw new Error(`GET /address failed: ${addrRes.status}`);
+        validatorAddress = (
+          (await addrRes.json()) as { address?: `0x${string}` }
+        ).address;
+      }
+      if (!validatorAddress) {
+        throw new Error("Oracle address is not available.");
+      }
 
       const txHash = await walletClient.writeContract({
         address: clientCfg.validationRegistryAddress,
         abi: VALIDATION_REGISTRY_ABI,
         functionName: "validationRequest",
         args: [
-          teeVerifierAddress,
+          validatorAddress,
           BigInt(erc8004AgentId),
           requestURI,
           requestHash,

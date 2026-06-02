@@ -221,6 +221,8 @@ export type MintResult = {
   agentMetadataUri: string;
   mintFee: string;
   intelligentData: Array<{ dataDescription: string; dataHash: Hex }>;
+  /** TEE oracle signer returned by the minting teeOracle service's /address endpoint. */
+  teeOracleAddress: Address;
   /**
    * ERC-8004 IdentityRegistry address. Present when the AgentRegistry has
    * co-registration enabled. Use with `prepareRegisterErc8004` post-mint.

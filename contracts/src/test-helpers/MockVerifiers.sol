@@ -42,6 +42,14 @@ contract AlwaysFailVerifier is IERC7857DataVerifier {
     }
 }
 
+contract MockDcapAttestation {
+    function verifyAndAttestOnChain(
+        bytes calldata
+    ) external payable returns (bool success, bytes memory output) {
+        return (true, "");
+    }
+}
+
 /**
  * @dev Minimal ERC-8004 Identity Registry stand-in for AgentRegistry tests.
  */

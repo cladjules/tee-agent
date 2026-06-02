@@ -16,8 +16,6 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  * Parameters (set via --parameters flag for live networks):
  *   identityRegistryAddress  — official ERC-8004 Identity Registry passed to the AgentRegistry
  *                              constructor; zero disables co-registration (default for local)
- *   oracleAddress            — Phala CVM TEE-derived signing address registered in TeeVerifier;
- *                              defaults to deployer for local Hardhat node
  *
  * Run:
  *   npm run deploy:baseSepolia
@@ -35,10 +33,8 @@ export default buildModule("TeeAgent", (m) => {
     "dcapAttestationAddress",
     "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F",
   );
-  const oracleAddress = m.getParameter("oracleAddress", deployer);
   const teeVerifier = m.contract("TeeVerifier", [
     deployer,
-    oracleAddress,
     dcapAttestationAddress,
   ]);
 

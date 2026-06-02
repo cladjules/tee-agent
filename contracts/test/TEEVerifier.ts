@@ -121,15 +121,21 @@ async function buildOwnershipProofSignature(
 // ---------------------------------------------------------------------------
 
 describe("TeeVerifier + Verifier", function () {
+  function fakeDcapQuoteFor(address: Address): `0x${string}` {
+    const reportData = Buffer.concat([
+      Buffer.from(address.slice(2), "hex"),
+      Buffer.alloc(44),
+    ]);
+    return `0x${Buffer.concat([Buffer.alloc(568), reportData]).toString("hex")}`;
+  }
+
   async function deployFixture() {
     const [owner, oracle, alice, bob] = await viem.getWalletClients();
 
-    // TeeVerifier: admin=owner, oracle signing key=oracle.account,
-    // dcapAttestation=alice (placeholder; initValidator is not exercised in these tests)
+    const dcap = await viem.deployContract("MockDcapAttestation");
     const teeVerifier = await viem.deployContract("TeeVerifier", [
       owner.account.address,
-      oracle.account.address,
-      alice.account.address,
+      dcap.address,
     ]);
 
     // Verifier: admin=owner, teeVerifier address
@@ -152,36 +158,54 @@ describe("TeeVerifier + Verifier", function () {
 
   // ── TeeVerifier basic tests ──────────────────────────────────────────────
 
-  it("TeeVerifier: reports the correct oracle address", async function () {
+  it("TeeVerifier: initValidator registers an attested oracle", async function () {
     const { teeVerifier, oracle } =
       await networkHelpers.loadFixture(deployFixture);
-    const stored = await teeVerifier.read.teeOracleAddress();
-    assert.equal(stored.toLowerCase(), oracle.account.address.toLowerCase());
-  });
-
-  it("TeeVerifier: owner can update oracle address", async function () {
-    const { teeVerifier, owner, alice } =
-      await networkHelpers.loadFixture(deployFixture);
-    await teeVerifier.write.updateOracleAddress([alice.account.address], {
-      account: owner.account,
-    });
-    const updated = await teeVerifier.read.teeOracleAddress();
-    assert.equal(updated.toLowerCase(), alice.account.address.toLowerCase());
-  });
-
-  it("TeeVerifier: non-owner cannot update oracle address", async function () {
-    const { teeVerifier, alice, bob } =
-      await networkHelpers.loadFixture(deployFixture);
-    await assert.rejects(
-      teeVerifier.write.updateOracleAddress([bob.account.address], {
-        account: alice.account,
-      }),
+    assert.equal(
+      await teeVerifier.read.isOracleRegistered([oracle.account.address]),
+      false,
+    );
+    await teeVerifier.write.initValidator(
+      [oracle.account.address, fakeDcapQuoteFor(oracle.account.address)],
+      { account: oracle.account },
+    );
+    assert.equal(
+      await teeVerifier.read.isOracleRegistered([oracle.account.address]),
+      true,
     );
   });
 
-  it("TeeVerifier: verifyTEESignature returns true for oracle-signed hash", async function () {
+  it("TeeVerifier: initValidator rejects quotes for a different oracle address", async function () {
+    const { teeVerifier, oracle, alice } =
+      await networkHelpers.loadFixture(deployFixture);
+    await assert.rejects(
+      teeVerifier.write.initValidator(
+        [oracle.account.address, fakeDcapQuoteFor(alice.account.address)],
+        { account: oracle.account },
+      ),
+    );
+  });
+
+  async function registerOracleViaInitValidator(
+    teeVerifier: Awaited<ReturnType<typeof viem.deployContract>>,
+    oracle: WalletClient,
+    oracleAddress: Address,
+  ) {
+    await teeVerifier.write.initValidator(
+      [oracleAddress, fakeDcapQuoteFor(oracleAddress)],
+      { account: oracle.account },
+    );
+  }
+
+  it("TeeVerifier: verifyTEESignature returns true for an initValidator-registered oracle", async function () {
     const { teeVerifier, oracle } =
       await networkHelpers.loadFixture(deployFixture);
+    await registerOracleViaInitValidator(
+      teeVerifier,
+      oracle,
+      oracle.account.address,
+    );
+
     const rawData = keccak256(toHex("test-data"));
     // eth_sign prefixes with "\x19Ethereum Signed Message:\n32" and signs the 32 raw bytes.
     // hashMessage gives us the exact hash that was signed, which is what we pass to the contract.
@@ -197,6 +221,48 @@ describe("TeeVerifier + Verifier", function () {
       sig,
     ]);
     assert.equal(valid, true);
+  });
+
+  it("TeeVerifier: owner can revoke oracle addresses", async function () {
+    const { teeVerifier, owner, alice } =
+      await networkHelpers.loadFixture(deployFixture);
+    const rawData = keccak256(toHex("test-data"));
+    const sig = await alice.signMessage({
+      message: { raw: toBytes(rawData) },
+      account: alice.account,
+    });
+    const prefixedHash = hashMessage({ raw: toBytes(rawData) });
+
+    assert.equal(
+      await teeVerifier.read.verifyTEESignature([prefixedHash, sig]),
+      false,
+    );
+
+    await registerOracleViaInitValidator(
+      teeVerifier,
+      alice,
+      alice.account.address,
+    );
+    assert.equal(
+      await teeVerifier.read.isOracleRegistered([alice.account.address]),
+      true,
+    );
+    assert.equal(
+      await teeVerifier.read.verifyTEESignature([prefixedHash, sig]),
+      true,
+    );
+
+    await teeVerifier.write.revokeOracleAddress([alice.account.address], {
+      account: owner.account,
+    });
+    assert.equal(
+      await teeVerifier.read.isOracleRegistered([alice.account.address]),
+      false,
+    );
+    assert.equal(
+      await teeVerifier.read.verifyTEESignature([prefixedHash, sig]),
+      false,
+    );
   });
 
   it("TeeVerifier: verifyTEESignature returns false for non-oracle signer", async function () {
@@ -217,12 +283,97 @@ describe("TeeVerifier + Verifier", function () {
 
   // ── Full ERC-7857 iTransferFrom path ─────────────────────────────────────
 
-  it("iTransferFrom: transfers token with valid TEE proof", async function () {
+  it("iTransferFrom: fails internally for an unregistered oracle signer", async function () {
     const { registry, verifier, alice, bob, oracle } =
+      await networkHelpers.loadFixture(deployFixture);
+
+    const dataHash = keccak256(toHex("encrypted-agent-payload"));
+    await registry.write.mint(
+      [
+        alice.account.address,
+        "zerog://0xAgent123",
+        "zerog://0xAgent123",
+        [{ dataDescription: "agent-brain", dataHash }],
+      ],
+      { account: alice.account },
+    );
+
+    const tokenId = 0n;
+    const publicClient = await viem.getPublicClient();
+    const deadline = BigInt(Math.floor(Date.now() / 1000)) + 3600n;
+    const ctx: ProofContext = {
+      chainId: BigInt(await publicClient.getChainId()),
+      verifierAddress: verifier.address,
+      registryAddress: registry.address,
+      tokenId,
+      from: alice.account.address,
+      to: bob.account.address,
+      deadline,
+    };
+    const targetPubkey = toHex("some-receiver-pubkey");
+    const accessNonce = keccak256(toHex("access-nonce-unregistered-oracle"));
+    const ownershipNonce = keccak256(
+      toHex("ownership-nonce-unregistered-oracle"),
+    );
+    const sealedKey = toHex("sealed-encryption-key-for-bob");
+
+    const proof = {
+      accessProof: {
+        dataHash,
+        targetPubkey,
+        nonce: accessNonce,
+        proof: await buildAccessProofSignature(
+          bob,
+          ctx,
+          dataHash,
+          targetPubkey,
+          accessNonce,
+        ),
+      },
+      ownershipProof: {
+        oracleType: 0,
+        dataHash,
+        sealedKey,
+        targetPubkey,
+        nonce: ownershipNonce,
+        proof: await buildOwnershipProofSignature(
+          oracle,
+          ctx,
+          dataHash,
+          sealedKey,
+          targetPubkey,
+          ownershipNonce,
+        ),
+      },
+      from: alice.account.address,
+      to: bob.account.address,
+      tokenId,
+      deadline,
+    };
+
+    await registry.write.delegateAccess([bob.account.address], {
+      account: bob.account,
+    });
+    await assert.rejects(
+      registry.write.iTransferFrom(
+        [alice.account.address, bob.account.address, tokenId, [proof]],
+        { account: alice.account },
+      ),
+      /Invalid ownership proof/,
+    );
+  });
+
+  it("iTransferFrom: transfers token with valid TEE proof", async function () {
+    const { teeVerifier, registry, verifier, alice, bob, oracle } =
       await networkHelpers.loadFixture(deployFixture);
 
     // Mint a token to alice with one IntelligentData item
     const dataHash = keccak256(toHex("encrypted-agent-payload"));
+    await registerOracleViaInitValidator(
+      teeVerifier,
+      oracle,
+      oracle.account.address,
+    );
     await registry.write.mint(
       [
         alice.account.address,

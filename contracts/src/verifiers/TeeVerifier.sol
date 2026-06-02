@@ -24,34 +24,29 @@ contract TeeVerifier is Ownable {
     /// @dev Automata AutomataDcapAttestationFee contract.
     address public immutable DCAP_ATTESTATION;
 
-    uint256 private constant QUOTE_PUBKEY_OFFSET = 568; // 48 (header) + 520 (body offset to reportData)
-    uint256 private constant PUBKEY_LENGTH = 64; // uncompressed secp256k1 without 0x04 prefix
+    uint256 private constant QUOTE_REPORT_DATA_OFFSET = 568; // 48 (header) + 520 (body offset to reportData)
+    uint256 private constant REPORT_DATA_LENGTH = 64;
 
-    address private _teeOracleAddress;
+    mapping(address => bool) private _registeredOracles;
 
     error InvalidProofLength();
     error DcapVerificationFailed();
     error QuoteTooShort();
-    error PubkeyMismatch();
+    error OracleAddressMismatch();
 
-    event OracleAddressUpdated(
-        address indexed oldOracle,
-        address indexed newOracle
-    );
+    event OracleRegistered(address indexed oracle);
+    event OracleRevoked(address indexed oracle);
     event ValidatorInitialized(
-        address indexed pubkey,
+        address indexed oracleAddress,
         bytes32 indexed quoteHash
     );
 
     constructor(
         address admin_,
-        address teeOracleAddress_,
         address dcapAttestation_
     ) Ownable(admin_) {
         require(admin_ != address(0), "Invalid admin");
-        require(teeOracleAddress_ != address(0), "Invalid oracle address");
         require(dcapAttestation_ != address(0), "Invalid DCAP attestation");
-        _teeOracleAddress = teeOracleAddress_;
         DCAP_ATTESTATION = dcapAttestation_;
     }
 
@@ -60,31 +55,32 @@ contract TeeVerifier is Ownable {
      * @dev The quote reportData must start with the oracle Ethereum address.
      */
     function initValidator(
-        address pubkey,
+        address oracleAddress,
         bytes calldata rawQuote
     ) external payable {
-        require(pubkey != address(0), "Invalid pubkey");
-        if (rawQuote.length < QUOTE_PUBKEY_OFFSET + PUBKEY_LENGTH)
+        require(oracleAddress != address(0), "Invalid oracle address");
+        if (rawQuote.length < QUOTE_REPORT_DATA_OFFSET + REPORT_DATA_LENGTH)
             revert QuoteTooShort();
 
         (bool success, ) = IAutomataDcapAttestationFee(DCAP_ATTESTATION)
             .verifyAndAttestOnChain{value: msg.value}(rawQuote);
         if (!success) revert DcapVerificationFailed();
 
-        bytes memory pubkeyBytes = rawQuote[
-            QUOTE_PUBKEY_OFFSET:QUOTE_PUBKEY_OFFSET + PUBKEY_LENGTH
+        bytes memory reportDataBytes = rawQuote[
+            QUOTE_REPORT_DATA_OFFSET:QUOTE_REPORT_DATA_OFFSET +
+                REPORT_DATA_LENGTH
         ];
 
-        address derivedAddr;
+        address quotedOracleAddress;
         assembly {
-            derivedAddr := shr(96, mload(add(pubkeyBytes, 32)))
+            quotedOracleAddress := shr(96, mload(add(reportDataBytes, 32)))
         }
-        if (derivedAddr != pubkey) revert PubkeyMismatch();
+        if (quotedOracleAddress != oracleAddress)
+            revert OracleAddressMismatch();
 
-        address old = _teeOracleAddress;
-        _teeOracleAddress = pubkey;
-        emit ValidatorInitialized(pubkey, keccak256(rawQuote));
-        emit OracleAddressUpdated(old, pubkey);
+        _registeredOracles[oracleAddress] = true;
+        emit ValidatorInitialized(oracleAddress, keccak256(rawQuote));
+        emit OracleRegistered(oracleAddress);
     }
 
     /// @notice Verify a 65-byte ECDSA signature over dataHash was produced by the TEE oracle.
@@ -94,7 +90,7 @@ contract TeeVerifier is Ownable {
     ) external view returns (bool) {
         require(signature.length == 65, "Invalid signature length");
         address signer = dataHash.recover(signature);
-        return signer == _teeOracleAddress;
+        return _registeredOracles[signer];
     }
 
     /**
@@ -113,10 +109,10 @@ contract TeeVerifier is Ownable {
 
         if (proof.length == 65) {
             address signer = commitment.toEthSignedMessageHash().recover(proof);
-            return signer == _teeOracleAddress;
+            return _registeredOracles[signer];
         }
 
-        if (proof.length < QUOTE_PUBKEY_OFFSET + 32)
+        if (proof.length < QUOTE_REPORT_DATA_OFFSET + 32)
             revert InvalidProofLength();
 
         (bool success, ) = IAutomataDcapAttestationFee(DCAP_ATTESTATION)
@@ -125,21 +121,24 @@ contract TeeVerifier is Ownable {
 
         bytes32 reportData;
         assembly {
-            reportData := calldataload(add(proof.offset, QUOTE_PUBKEY_OFFSET))
+            reportData := calldataload(
+                add(proof.offset, QUOTE_REPORT_DATA_OFFSET)
+            )
         }
 
         return reportData == commitment;
     }
 
-    /// @notice Replace the oracle signing address (admin only). Use initValidator for trustless registration.
-    function updateOracleAddress(address newOracleAddress) external onlyOwner {
-        require(newOracleAddress != address(0), "Invalid oracle address");
-        address old = _teeOracleAddress;
-        _teeOracleAddress = newOracleAddress;
-        emit OracleAddressUpdated(old, newOracleAddress);
+    /// @notice Revoke a previously registered oracle signing address (admin only).
+    function revokeOracleAddress(address oracleAddress) external onlyOwner {
+        require(oracleAddress != address(0), "Invalid oracle address");
+        _registeredOracles[oracleAddress] = false;
+        emit OracleRevoked(oracleAddress);
     }
 
-    function teeOracleAddress() external view returns (address) {
-        return _teeOracleAddress;
+    function isOracleRegistered(
+        address oracleAddress
+    ) external view returns (bool) {
+        return _registeredOracles[oracleAddress];
     }
 }
