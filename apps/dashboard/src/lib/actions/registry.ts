@@ -79,37 +79,46 @@ async function fetchFeedbackOverview(
       transport: http(cfg.rpcUrl),
     });
     const agentId = BigInt(erc8004AgentId);
-    const [clients, summary] = (await Promise.all([
-      publicClient.readContract({
-        address: cfg.reputationRegistryAddress,
-        abi: REPUTATION_REGISTRY_ABI,
-        functionName: "getClients",
-        args: [agentId],
-      }),
-      publicClient.readContract({
-        address: cfg.reputationRegistryAddress,
-        abi: REPUTATION_REGISTRY_ABI,
-        functionName: "getSummary",
-        args: [agentId, [], "", ""],
-      }),
-    ])) as [Address[], [bigint, bigint, number]];
-    const summaryResult = {
-      count: summary[0],
-      summaryValue: summary[1],
-      summaryValueDecimals: summary[2],
-    };
+    const clients = (await publicClient.readContract({
+      address: cfg.reputationRegistryAddress,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "getClients",
+      args: [agentId],
+    })) as Address[];
 
     if (clients.length === 0) {
       return {
-        totalScore: normalizeScaledValue(
-          summaryResult.summaryValue,
-          summaryResult.summaryValueDecimals,
-        ),
-        totalCount: Number(summaryResult.count),
+        totalScore: 0,
+        totalCount: 0,
         feedbacks: [],
       };
     }
 
+    const [summary, feedbackRows] = (await Promise.all([
+      publicClient.readContract({
+        address: cfg.reputationRegistryAddress,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getSummary",
+        args: [agentId, clients, "", ""],
+      }),
+      publicClient.readContract({
+        address: cfg.reputationRegistryAddress,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "readAllFeedback",
+        args: [agentId, clients, "", "", true],
+      }),
+    ])) as [
+      [bigint, bigint, number],
+      [
+        Address[],
+        bigint[],
+        bigint[],
+        number[],
+        string[],
+        string[],
+        boolean[],
+      ],
+    ];
     const [
       feedbackClients,
       feedbackIndexes,
@@ -118,20 +127,12 @@ async function fetchFeedbackOverview(
       tag1s,
       tag2s,
       revokedStatuses,
-    ] = (await publicClient.readContract({
-      address: cfg.reputationRegistryAddress,
-      abi: REPUTATION_REGISTRY_ABI,
-      functionName: "readAllFeedback",
-      args: [agentId, clients, "", "", true],
-    })) as [
-      Address[],
-      bigint[],
-      bigint[],
-      number[],
-      string[],
-      string[],
-      boolean[],
-    ];
+    ] = feedbackRows;
+    const summaryResult = {
+      count: summary[0],
+      summaryValue: summary[1],
+      summaryValueDecimals: summary[2],
+    };
 
     const feedbacks = feedbackClients.map((client, index) => ({
       client,

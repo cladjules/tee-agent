@@ -45,6 +45,7 @@ export interface NetworkConfig {
 
 export type ContractDeployments = {
   agentRegistry?: Address;
+  verifier?: Address;
   teeVerifier?: Address;
   validationRegistry?: Address;
 };
@@ -145,9 +146,11 @@ export function getNetworkDeploymentByChainId(
   const addr = (v: string | undefined): Address | undefined =>
     v ? (v as Address) : undefined;
   const agentRegistry = addr(raw?.contracts?.agentRegistry);
+  const verifier = addr(raw?.contracts?.verifier);
   const teeVerifier = addr(raw?.contracts?.teeVerifier);
   const validationRegistry = addr(raw?.contracts?.validationRegistry);
   if (agentRegistry) contracts.agentRegistry = agentRegistry;
+  if (verifier) contracts.verifier = verifier;
   if (teeVerifier) contracts.teeVerifier = teeVerifier;
   if (validationRegistry) contracts.validationRegistry = validationRegistry;
   const deployment: NetworkDeployment = { contracts };

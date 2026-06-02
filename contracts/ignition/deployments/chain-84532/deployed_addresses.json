@@ -1,6 +1,6 @@
 {
-  "TeeAgent#TeeVerifier": "0x1Cf0A3cF244C8c198C0d500e46A995420ea418aA",
-  "TeeAgent#ValidationRegistry": "0x5538869217D0B76D0163D21b79b73eab5C88cE85",
-  "TeeAgent#Verifier": "0xa82C53FA842c7AA7907b4D56dCDC9cfafb05f2e8",
-  "TeeAgent#AgentRegistry": "0x768d15186f6869C5d8cb90269fAe0AD616f5FCE0"
+  "TeeAgent#TeeVerifier": "0x71e444e2de1919c5b6d0a8015490893C76EEc26c",
+  "TeeAgent#ValidationRegistry": "0x293edED21208d871aEf291CEd6D028acFBF78ecF",
+  "TeeAgent#Verifier": "0x7FAb6777240d857f6D7FDda7d597a1F56f666a3F",
+  "TeeAgent#AgentRegistry": "0x6bAf397112821efB8E035B0e71c13f4DadDEa224"
 }

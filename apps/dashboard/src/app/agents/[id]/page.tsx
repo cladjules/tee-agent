@@ -77,6 +77,7 @@ export default async function AgentDetailPage({ params }: Props) {
   const oracleRuns = oracleRunsResult.runs;
   const actionClientCfg = {
     registryAddress: clientCfg.registryAddress,
+    teeVerifierAddress: clientCfg.teeVerifierAddress,
     identityRegistryAddress: clientCfg.identityRegistryAddress,
     reputationRegistryAddress: clientCfg.reputationRegistryAddress,
     validationRegistryAddress: clientCfg.validationRegistryAddress,
@@ -141,6 +142,18 @@ export default async function AgentDetailPage({ params }: Props) {
               truncate
               href={explorerAddress(
                 clientCfg.validationRegistryAddress,
+                nc.explorerUrl,
+              )}
+            />
+          )}
+          {clientCfg.teeVerifierAddress && (
+            <DetailRow
+              label="TeeVerifier · TEE"
+              value={clientCfg.teeVerifierAddress}
+              mono
+              truncate
+              href={explorerAddress(
+                clientCfg.teeVerifierAddress,
                 nc.explorerUrl,
               )}
             />

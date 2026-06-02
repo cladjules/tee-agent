@@ -10,9 +10,9 @@ import { useAccount, useDisconnect, useSwitchChain } from "wagmi";
 import { getPublicClient, getWalletClient } from "@wagmi/core";
 import "@rainbow-me/rainbowkit/styles.css";
 import { wagmiConfig } from "@/lib/wagmi";
-import { APP_CHAIN } from "@/lib/config";
+import { clientCfg } from "@/lib/client-config";
 
-const TARGET_CHAIN_ID = APP_CHAIN.id as 8453 | 84532;
+const TARGET_CHAIN_ID = clientCfg.chain.id as 8453 | 84532;
 
 // ── Types (kept stable so all consumers compile unchanged) ────────────────────
 
@@ -107,7 +107,7 @@ export function useWallet(): WalletContextValue {
       throw lastError instanceof Error
         ? lastError
         : new Error(
-            `Wallet is not on ${APP_CHAIN.name}. Switch networks and try again.`,
+            `Wallet is not on ${clientCfg.chain.name}. Switch networks and try again.`,
           );
     }
 

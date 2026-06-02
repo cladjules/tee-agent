@@ -1,15 +1,12 @@
 {
-  "8453": {
-    "name": "base",
-    "contracts": {}
-  },
   "84532": {
     "name": "baseSepolia",
     "contracts": {
-      "agentRegistry": "0x768d15186f6869C5d8cb90269fAe0AD616f5FCE0",
-      "teeVerifier": "0x1Cf0A3cF244C8c198C0d500e46A995420ea418aA",
-      "validationRegistry": "0x5538869217D0B76D0163D21b79b73eab5C88cE85"
+      "agentRegistry": "0x6bAf397112821efB8E035B0e71c13f4DadDEa224",
+      "verifier": "0x7FAb6777240d857f6D7FDda7d597a1F56f666a3F",
+      "teeVerifier": "0xDaD26E31dE380BC9443AAf70c479b13CF73Cc763",
+      "validationRegistry": "0x293edED21208d871aEf291CEd6D028acFBF78ecF"
     },
-    "fromBlock": "42287528"
+    "fromBlock": "42331912"
   }
 }

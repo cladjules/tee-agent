@@ -34,6 +34,7 @@ import { ErrorBox } from "@/components/ErrorBox";
 
 type ActionClientConfig = {
   registryAddress?: Address;
+  teeVerifierAddress?: Address;
   identityRegistryAddress?: Address;
   reputationRegistryAddress?: Address;
   validationRegistryAddress?: Address;
@@ -1101,9 +1102,10 @@ function OracleRunCard({
     ? keccak256(toBytes(JSON.stringify(runMeta)))
     : null;
 
-  const hasOracleSource = !!run.oracleAddress || !!teeOracleUrl;
   const canRequestValidation =
-    !!clientCfg.validationRegistryAddress && hasOracleSource;
+    !!clientCfg.validationRegistryAddress &&
+    !!clientCfg.teeVerifierAddress &&
+    !!teeOracleUrl;
 
   const summary = (() => {
     if (run.result.outcome?.verdict) return String(run.result.outcome.verdict);
@@ -1167,6 +1169,10 @@ function OracleRunCard({
         throw new Error("AgentRegistry is not configured.");
       if (!clientCfg.validationRegistryAddress)
         throw new Error("ValidationRegistry is not configured.");
+      if (!clientCfg.teeVerifierAddress)
+        throw new Error("TeeVerifier is not configured.");
+      if (!teeOracleUrl.trim())
+        throw new Error("Oracle URL is not configured.");
 
       await switchChain();
       const { publicClient, walletClient } = await getViemClients();
@@ -1175,27 +1181,12 @@ function OracleRunCard({
           "Agent is not registered with ERC-8004. Register it before requesting validation.",
         );
 
-      let validatorAddress = run.oracleAddress;
-      if (!validatorAddress) {
-        const oracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
-        if (!oracleUrl) throw new Error("Oracle URL is not configured.");
-        const addrRes = await fetch(`${oracleUrl}/address`);
-        if (!addrRes.ok)
-          throw new Error(`GET /address failed: ${addrRes.status}`);
-        validatorAddress = (
-          (await addrRes.json()) as { address?: `0x${string}` }
-        ).address;
-      }
-      if (!validatorAddress) {
-        throw new Error("Oracle address is not available.");
-      }
-
       const txHash = await walletClient.writeContract({
         address: clientCfg.validationRegistryAddress,
         abi: VALIDATION_REGISTRY_ABI,
         functionName: "validationRequest",
         args: [
-          validatorAddress,
+          clientCfg.teeVerifierAddress,
           BigInt(erc8004AgentId),
           requestURI,
           requestHash,
@@ -1321,7 +1312,7 @@ function OracleRunCard({
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={isValidating && canRequestValidation}
+                disabled={isValidating || !canRequestValidation}
                 className="px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
               >
                 {isValidating ? "Submitting…" : "Validate On-chain"}
@@ -1426,6 +1417,15 @@ function ValidationJobRow({
     setIsProcessing(true);
     setError(null);
     try {
+      if (
+        clientCfg.teeVerifierAddress &&
+        job.validatorAddress.toLowerCase() !==
+          clientCfg.teeVerifierAddress.toLowerCase()
+      ) {
+        throw new Error(
+          "This validation request was created with an old validator address. Submit a new validation request.",
+        );
+      }
       const { walletClient } = await getViemClients();
 
       // Fetch the oracle's TEE-derived wallet address for EIP-712 domain.

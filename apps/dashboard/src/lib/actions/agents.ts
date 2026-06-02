@@ -18,7 +18,11 @@ import type {
   PrepareImportedErc8004TeeOracleParams,
   PrepareImportedErc8004TeeOracleResult,
 } from "@tee-agent/agent/types";
-import { getServerConfigForChain, isConfigured } from "@/lib/config";
+import {
+  getMutationConfigForChain,
+  getServerConfigForChain,
+  isConfigured,
+} from "@/lib/config";
 import { getActiveChainId } from "@/lib/active-chain";
 import {
   addCachedOracleRun,
@@ -52,7 +56,7 @@ export async function prepareCreateAgent(params: MintParams, chainId?: number) {
   if (!isConfigured) return { error: "Contracts not configured." };
   const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareMint(getServerConfigForChain(cid), params);
+    return await prepareMint(getMutationConfigForChain(cid), params);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Create preparation failed.",
@@ -69,7 +73,7 @@ export async function prepareTransferAgent(
   if (!isConfigured) return { error: "Contracts not configured." };
   const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareTransfer(getServerConfigForChain(cid), params);
+    return await prepareTransfer(getMutationConfigForChain(cid), params);
   } catch (err) {
     return {
       error:
@@ -86,7 +90,7 @@ export async function prepareUpdateAgentServices(
   if (!isConfigured) return { error: "Contracts not configured." };
   const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareUpdateServices(getServerConfigForChain(cid), params);
+    return await prepareUpdateServices(getMutationConfigForChain(cid), params);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Updating services failed.",
@@ -110,7 +114,7 @@ export async function preparePostMintRegistration(
   const cid = chainId ?? (await getActiveChainId());
   try {
     return await sdkPrepareRegisterErc8004(
-      getServerConfigForChain(cid),
+      getMutationConfigForChain(cid),
       params,
     );
   } catch (err) {
@@ -133,7 +137,7 @@ export async function prepareImportedErc8004TeeOracle(
   const cid = chainId ?? (await getActiveChainId());
   try {
     return await sdkPrepareImportedErc8004TeeOracle(
-      getServerConfigForChain(cid),
+      getMutationConfigForChain(cid),
       params,
     );
   } catch (err) {

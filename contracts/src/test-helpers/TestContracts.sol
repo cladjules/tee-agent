@@ -4,9 +4,7 @@ pragma solidity ^0.8.35;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "../interfaces/IERC7857.sol";
 
-/**
- * @dev Always-pass verifier for testing — approves every transfer proof.
- */
+/// @dev Always-pass ERC-7857 verifier for AgentRegistry tests.
 contract AlwaysPassVerifier is IERC7857DataVerifier {
     function verifyTransferValidity(
         TransferValidityProof[] calldata proofs
@@ -31,28 +29,7 @@ contract AlwaysPassVerifier is IERC7857DataVerifier {
     }
 }
 
-/**
- * @dev Always-fail verifier for testing — rejects every transfer proof.
- */
-contract AlwaysFailVerifier is IERC7857DataVerifier {
-    function verifyTransferValidity(
-        TransferValidityProof[] calldata
-    ) external pure override returns (TransferValidityProofOutput[] memory) {
-        revert("Invalid ownership proof");
-    }
-}
-
-contract MockDcapAttestation {
-    function verifyAndAttestOnChain(
-        bytes calldata
-    ) external payable returns (bool success, bytes memory output) {
-        return (true, "");
-    }
-}
-
-/**
- * @dev Minimal ERC-8004 Identity Registry stand-in for AgentRegistry tests.
- */
+/// @dev Minimal ERC-8004 Identity Registry stand-in for AgentRegistry tests.
 contract MockIdentityRegistry is ERC721 {
     uint256 private _nextId = 1;
     mapping(uint256 => string) private _uris;

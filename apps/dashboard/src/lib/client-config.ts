@@ -20,6 +20,8 @@ type RawDeployments = Record<
   {
     contracts?: {
       agentRegistry?: string;
+      verifier?: string;
+      teeVerifier?: string;
       validationRegistry?: string;
     };
     fromBlock?: string | number;
@@ -45,12 +47,16 @@ const REPUTATION_REGISTRY = {
 
 export function getDeploymentForChain(chainId: number): {
   agentRegistry?: Address;
+  verifier?: Address;
+  teeVerifier?: Address;
   validationRegistry?: Address;
   fromBlock: bigint;
 } {
   const raw = deployments[String(chainId)];
   return {
     agentRegistry: raw?.contracts?.agentRegistry as Address | undefined,
+    verifier: raw?.contracts?.verifier as Address | undefined,
+    teeVerifier: raw?.contracts?.teeVerifier as Address | undefined,
     validationRegistry: raw?.contracts?.validationRegistry as
       | Address
       | undefined,
@@ -79,6 +85,9 @@ export function getClientConfigForChain(chainId: number): AgentConfig {
 
   if (deployment.agentRegistry) {
     config.registryAddress = deployment.agentRegistry;
+  }
+  if (deployment.teeVerifier) {
+    config.teeVerifierAddress = deployment.teeVerifier;
   }
   if (deployment.validationRegistry) {
     config.validationRegistryAddress = deployment.validationRegistry;

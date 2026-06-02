@@ -6,7 +6,9 @@ export async function register() {
   if (process.env.NODE_ENV !== "development") return;
 
   const INTERVAL_MS = 30_000;
-  const url = `http://localhost:${process.env.PORT ?? 3000}/api/cron/sync-events`;
+  const port = process.env.PORT?.trim();
+  if (!port) throw new Error("PORT is required.");
+  const url = `http://localhost:${port}/api/cron/sync-events`;
 
   const run = async () => {
     try {

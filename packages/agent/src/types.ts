@@ -178,9 +178,11 @@ export type AgentConfig = {
   rpcUrl?: string;
   chain: Chain;
   registryAddress?: Address;
-  /** ERC-8004 Identity Registry. Defaults to official singleton for the chain. */
+  /** Our TeeVerifier deployment for attested TEE oracle signatures. */
+  teeVerifierAddress?: Address;
+  /** ERC-8004 Identity Registry. */
   identityRegistryAddress?: Address;
-  /** ERC-8004 Reputation Registry. Defaults to official singleton for the chain. */
+  /** ERC-8004 Reputation Registry. */
   reputationRegistryAddress?: Address;
   /** Our own ValidationRegistry deployment. */
   validationRegistryAddress?: Address;
@@ -188,9 +190,9 @@ export type AgentConfig = {
   pinataJwt?: string;
   /** Private key for 0G Storage upload transactions. */
   zeroGPrivateKey?: string;
-  /** 0G Storage EVM RPC (default: https://evmrpc-testnet.0g.ai). */
+  /** 0G Storage EVM RPC. */
   zeroGRpcUrl?: string;
-  /** 0G Storage indexer URL (default: turbo testnet indexer). */
+  /** 0G Storage indexer URL. */
   zeroGIndexerUrl?: string;
 };
 

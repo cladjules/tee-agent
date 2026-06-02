@@ -7,9 +7,10 @@
  *   npm run e2e:baseSepolia    # against Base Sepolia (chain 84532)
  *
  * Environment variables:
- *   PRIVATE_KEY          — sender key (defaults to Hardhat account #0 locally)
- *   LOCAL_RPC_URL        — local RPC override (default: http://127.0.0.1:8545)
- *   BASE_SEPOLIA_RPC_URL — testnet RPC override (default: https://sepolia.base.org)
+ *   PRIVATE_KEY          — sender key
+ *   LOCAL_RPC_URL        — local RPC
+ *   BASE_SEPOLIA_RPC_URL — Base Sepolia RPC
+ *   ORACLE_URL           — oracle HTTP base URL
  */
 import "dotenv/config";
 import {
@@ -21,8 +22,8 @@ import {
   parseEventLogs,
   zeroAddress,
 } from "viem";
-import type { PublicClient } from "viem";
-import { base, baseSepolia, hardhat } from "viem/chains";
+import type { Address, Hex, PublicClient } from "viem";
+import { baseSepolia, hardhat } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -42,44 +43,36 @@ import {
 } from "@tee-agent/agent/config";
 import {
   AGENT_REGISTRY_ABI,
-  TEE_VERIFIER_ABI,
   VALIDATION_REGISTRY_ABI,
   REPUTATION_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
-import {
-  AgentRegistry,
-  IdentityRegistry,
-  ValidationRegistry,
-  ReputationRegistry,
-} from "@tee-agent/agent/registry";
+import { AgentRegistry, ReputationRegistry } from "@tee-agent/agent/registry";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Network selection ─────────────────────────────────────────────────────────
 
-const NETWORK = process.argv[2] ?? process.env.NETWORK ?? "local";
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required.`);
+  return value;
+}
+
+const NETWORK = process.argv[2];
+if (NETWORK !== "local" && NETWORK !== "baseSepolia") {
+  throw new Error("Usage: npm run e2e:local or npm run e2e:baseSepolia");
+}
 const isLocal = NETWORK === "local";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const CHAIN_ID = isLocal ? 31337 : 84532;
-const RPC_URL = isLocal
-  ? (process.env.LOCAL_RPC_URL ?? "http://127.0.0.1:8545")
-  : (process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org");
-
-// Hardhat account #0 / #1 as defaults for local
-const HARDHAT_KEY_0 =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const HARDHAT_KEY_1 =
-  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-
-const PRIVATE_KEY = (
-  isLocal ? HARDHAT_KEY_0 : process.env.PRIVATE_KEY
-) as `0x${string}`;
-if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY not set in .env");
-
-const ORACLE_URL = process.env.ORACLE_URL ?? "http://localhost:3001";
+const RPC_URL = requiredEnv(
+  isLocal ? "LOCAL_RPC_URL" : "BASE_SEPOLIA_RPC_URL",
+);
+const PRIVATE_KEY = requiredEnv("PRIVATE_KEY") as `0x${string}`;
+const ORACLE_URL = requiredEnv("ORACLE_URL");
 
 const chain = isLocal
   ? ({ ...hardhat, rpcUrls: { default: { http: [RPC_URL] } } } as const)
@@ -107,7 +100,7 @@ if (isLocal) {
     );
   }
 
-  // Always redeploy so deployed_addresses.json reflects the current node state.
+  // Always redeploy so deployments.json reflects the current node state.
   console.log("Deploying contracts to local node...");
   execSync("npm run deploy:local", {
     cwd: resolve(__dirname, ".."),
@@ -115,30 +108,52 @@ if (isLocal) {
   });
 }
 
-// ── Load deployed addresses + ABIs ────────────────────────────────────────────
+// ── Load deployed addresses ───────────────────────────────────────────────────
 
-const deployedAddresses = JSON.parse(
-  readFileSync(
-    resolve(
-      __dirname,
-      `../ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`,
+type DeploymentJson = Record<
+  string,
+  { contracts?: Record<string, string | undefined> }
+>;
+
+function readIgnitionDeploymentContracts(): Record<string, string | undefined> {
+  const raw = JSON.parse(
+    readFileSync(
+      resolve(
+        __dirname,
+        `../ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`,
+      ),
+      "utf8",
     ),
-    "utf8",
-  ),
-);
+  ) as Record<string, string | undefined>;
+  return {
+    agentRegistry: raw["TeeAgent#AgentRegistry"],
+    teeVerifier: raw["TeeAgent#TeeVerifier"],
+    verifier: raw["TeeAgent#Verifier"],
+    validationRegistry: raw["TeeAgent#ValidationRegistry"],
+  };
+}
 
-const AGENT_REGISTRY_ADDRESS = deployedAddresses[
-  "TeeAgent#AgentRegistry"
-] as `0x${string}`;
-const TEE_VERIFIER_ADDRESS = deployedAddresses[
-  "TeeAgent#TeeVerifier"
-] as `0x${string}`;
-const VERIFIER_ADDRESS = deployedAddresses[
-  "TeeAgent#Verifier"
-] as `0x${string}`;
-const VALIDATION_REGISTRY_ADDRESS = deployedAddresses[
-  "TeeAgent#ValidationRegistry"
-] as `0x${string}`;
+const deploymentContracts = isLocal
+  ? readIgnitionDeploymentContracts()
+  : (JSON.parse(
+      readFileSync(resolve(__dirname, "../../deployments.json"), "utf8"),
+    ) as DeploymentJson)[String(CHAIN_ID)]?.contracts;
+
+function requiredDeploymentAddress(key: string): `0x${string}` {
+  const value = deploymentContracts?.[key];
+  if (!value) {
+    throw new Error(
+      `Missing deployment entry for chain ${CHAIN_ID}: contracts.${key}`,
+    );
+  }
+  return value as `0x${string}`;
+}
+
+const AGENT_REGISTRY_ADDRESS = requiredDeploymentAddress("agentRegistry");
+const teeVerifierAddress = requiredDeploymentAddress("teeVerifier");
+const VERIFIER_ADDRESS = requiredDeploymentAddress("verifier");
+const VALIDATION_REGISTRY_ADDRESS =
+  requiredDeploymentAddress("validationRegistry");
 
 /**
  * Official ERC-8004 singletons.
@@ -146,16 +161,13 @@ const VALIDATION_REGISTRY_ADDRESS = deployedAddresses[
  * Testnets (Base Sepolia): identity 0x8004A818…  reputation 0x8004B663…
  * Not present on local Hardhat nodes.
  */
-const IDENTITY_REGISTRY_ADDRESS = isLocal
+const identityRegistryAddress = isLocal
   ? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
-  : defaultIdentityRegistry(NETWORK === "base" ? base : baseSepolia);
+  : defaultIdentityRegistry(baseSepolia);
 
-const REPUTATION_REGISTRY_ADDRESS = (process.env.REPUTATION_REGISTRY_ADDRESS ??
-  (isLocal
-    ? undefined
-    : defaultReputationRegistry(NETWORK === "base" ? base : baseSepolia))) as
-  | `0x${string}`
-  | undefined;
+const REPUTATION_REGISTRY_ADDRESS = (
+  isLocal ? undefined : defaultReputationRegistry(baseSepolia)
+) as `0x${string}` | undefined;
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
@@ -173,7 +185,7 @@ const recipient = recipientAccount.address;
 
 console.log(`Network:       ${NETWORK} (chain ${CHAIN_ID})`);
 console.log(`AgentRegistry: ${AGENT_REGISTRY_ADDRESS}`);
-console.log(`TEEVerifier:   ${TEE_VERIFIER_ADDRESS}`);
+console.log(`TEEVerifier:   ${teeVerifierAddress}`);
 console.log(`Sender:        ${account.address}`);
 console.log(`Recipient:     ${recipient}`);
 
@@ -182,14 +194,6 @@ console.log(`Recipient:     ${recipient}`);
 const pc = publicClient as PublicClient;
 const agentRegistry = new AgentRegistry({
   address: AGENT_REGISTRY_ADDRESS,
-  publicClient: pc,
-});
-const identityRegistry = new IdentityRegistry({
-  address: IDENTITY_REGISTRY_ADDRESS,
-  publicClient: pc,
-});
-const validationRegistry = new ValidationRegistry({
-  address: VALIDATION_REGISTRY_ADDRESS,
   publicClient: pc,
 });
 const reputationRegistry = REPUTATION_REGISTRY_ADDRESS
@@ -675,8 +679,12 @@ async function testValidationRegistry() {
   );
 
   // Verify status
-  const { validatorAddress: validatorAddr, response: score } =
-    await validationRegistry.getValidationStatus(requestHash);
+  const [validatorAddr, , score] = (await publicClient.readContract({
+    address: VALIDATION_REGISTRY_ADDRESS,
+    abi: VALIDATION_REGISTRY_ABI,
+    functionName: "getValidationStatus",
+    args: [requestHash],
+  })) as [Address, bigint, number, Hex, string, bigint];
 
   if (validatorAddr.toLowerCase() !== account.address.toLowerCase())
     throw new Error(
@@ -689,8 +697,12 @@ async function testValidationRegistry() {
   );
 
   // Check getSummary
-  const { count, averageResponse: avgScore } =
-    await validationRegistry.getSummary(tokenId, [], "");
+  const [count, avgScore] = (await publicClient.readContract({
+    address: VALIDATION_REGISTRY_ADDRESS,
+    abi: VALIDATION_REGISTRY_ABI,
+    functionName: "getSummary",
+    args: [tokenId, [], ""],
+  })) as [bigint, number];
 
   if (count !== 1n || avgScore !== 92)
     throw new Error(`Test 4 FAILED: summary count=${count} avg=${avgScore}`);
@@ -712,7 +724,7 @@ async function testReputationFeedback() {
     console.log(`    (Run on baseSepolia or Base mainnet to test)`);
     return;
   }
-  console.log(`  IdentityRegistry:   ${IDENTITY_REGISTRY_ADDRESS}`);
+  console.log(`  IdentityRegistry:   ${identityRegistryAddress}`);
   console.log(`  ReputationRegistry: ${REPUTATION_REGISTRY_ADDRESS}`);
 
   // Mint to recipient so account can give feedback without hitting self-feedback guard.
@@ -803,14 +815,14 @@ async function testUpdateServices() {
 
   if (
     !REPUTATION_REGISTRY_ADDRESS ||
-    IDENTITY_REGISTRY_ADDRESS === "0x0000000000000000000000000000000000000000"
+    identityRegistryAddress === "0x0000000000000000000000000000000000000000"
   ) {
     console.log(
       `  ⚠ SKIPPED — ERC-8004 singletons not present on chain ${CHAIN_ID}`,
     );
     return;
   }
-  console.log(`  IdentityRegistry: ${IDENTITY_REGISTRY_ADDRESS}`);
+  console.log(`  IdentityRegistry: ${identityRegistryAddress}`);
 
   // Mint a fresh agent
   const tokenId = await mintAgentToken(
@@ -851,7 +863,7 @@ async function testUpdateServices() {
       },
       {
         agentId: Number(erc8004AgentId),
-        agentRegistry: `eip155:${CHAIN_ID}:${IDENTITY_REGISTRY_ADDRESS}`,
+        agentRegistry: `eip155:${CHAIN_ID}:${identityRegistryAddress}`,
       },
     ],
   };
@@ -860,7 +872,7 @@ async function testUpdateServices() {
   ).toString("base64")}`;
 
   const updateTx = await walletClient.writeContract({
-    address: IDENTITY_REGISTRY_ADDRESS,
+    address: identityRegistryAddress,
     abi: IDENTITY_REGISTRY_ABI,
     functionName: "setAgentURI",
     args: [erc8004AgentId, tokenUri],
@@ -871,7 +883,12 @@ async function testUpdateServices() {
   console.log(`  ✔ services updated — URI length: ${tokenUri.length}`);
 
   // Verify the URI was set
-  const storedUri = await identityRegistry.tokenURI(erc8004AgentId);
+  const storedUri = (await publicClient.readContract({
+    address: identityRegistryAddress,
+    abi: IDENTITY_REGISTRY_ABI,
+    functionName: "tokenURI",
+    args: [erc8004AgentId],
+  })) as string;
   if (storedUri !== tokenUri)
     throw new Error(`Test 6 FAILED: tokenURI mismatch`);
   console.log(`  ✔ tokenURI verified`);

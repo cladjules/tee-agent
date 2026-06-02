@@ -118,7 +118,7 @@ export async function prepareMint(
   );
   if (validEntries.length > 0 && !config.zeroGPrivateKey) {
     throw new Error(
-      "zeroGPrivateKey (or PRIVATE_KEY fallback) is required for private data uploads.",
+      "zeroGPrivateKey is required for private data uploads.",
     );
   }
 

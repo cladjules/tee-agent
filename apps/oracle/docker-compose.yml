@@ -27,7 +27,6 @@ services:
       - NETWORK
       - RPC_URL_BASE
       - RPC_URL_BASE_SEPOLIA
-      - TEE_VERIFIER_ADDRESS
       - PRIVATE_KEY
       - LLM_API_KEY
       - LLM_API_BASE

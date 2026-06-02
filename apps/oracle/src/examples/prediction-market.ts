@@ -12,7 +12,7 @@
  * Payload (caller-supplied at run time):
  *   { claim: string, evidence?: string }
  *
- * Local dev:
+ * Base Sepolia dev:
  *   npm run dev:prediction-market     # from apps/oracle/
  *
  * Deploy to Phala Cloud:
@@ -69,9 +69,8 @@ const predictionVerifier: AgentHandler = {
     const cfg = configSchema.parse(rawConfig);
     const { claim, evidence } = payloadSchema.parse(rawPayload);
 
-    const apiKey = process.env.LLM_API_KEY;
-    if (!apiKey) throw new Error("LLM_API_KEY is not set on the oracle.");
-    const apiBase = process.env.LLM_API_BASE ?? "https://api.red-pill.ai/v1";
+    const apiKey = requiredEnv("LLM_API_KEY");
+    const apiBase = requiredEnv("LLM_API_BASE");
 
     const userContent = evidence
       ? `Claim: ${claim}\n\nEvidence URL: ${evidence}`
@@ -168,6 +167,14 @@ const predictionVerifier: AgentHandler = {
     };
   },
 };
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
+}
 
 // ─── Start oracle ─────────────────────────────────────────────────────────────
 

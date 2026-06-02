@@ -50,9 +50,9 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | `RPC_URL_BASE_SEPOLIA`     | No       | EVM RPC for Base Sepolia (at least one of `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA` required)         |
 | `deployments.json`         | No       | Public deployed contract addresses and first deployment blocks (avoids scanning from genesis)       |
 | `PRIVATE_KEY`              | Yes      | Deployer / server-side signer                                                                       |
-| `ZERO_G_RPC_URL`           | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                        |
+| `ZERO_G_RPC_URL`           | Yes      | 0G Storage EVM RPC                                                                                   |
 | `PINATA_JWT`               | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                    |
-| `ZERO_G_INDEXER_URL`       | No       | 0G Indexer URL (default: `https://indexer-storage-testnet-turbo.0g.ai`)                             |
+| `ZERO_G_INDEXER_URL`       | Yes      | 0G Indexer URL                                                                                       |
 | `UPSTASH_REDIS_REST_URL`   | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com) |
 | `UPSTASH_REDIS_REST_TOKEN` | No       | Upstash Redis REST token                                                                            |
 

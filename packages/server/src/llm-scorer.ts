@@ -7,8 +7,8 @@
  *
  * Environment variables:
  *   LLM_API_KEY           — required
- *   LLM_API_BASE          — defaults to https://api.red-pill.ai/v1
- *   LLM_VALIDATION_MODEL  — overrides LLM_MODEL for validation calls
+ *   LLM_API_BASE          — required
+ *   LLM_VALIDATION_MODEL  — required
  */
 
 export interface ScoreResult {
@@ -20,11 +20,9 @@ export async function scoreWithLLM(
   originalPayload: Record<string, unknown>,
   originalResult: Record<string, unknown>,
 ): Promise<ScoreResult> {
-  const apiKey = process.env.LLM_API_KEY;
-  if (!apiKey) throw new Error("LLM_API_KEY is not set on the oracle.");
-  const apiBase = process.env.LLM_API_BASE ?? "https://api.red-pill.ai/v1";
-  const model =
-    process.env.LLM_VALIDATION_MODEL ?? "phala/gemma-4-26b-a4b-uncensored";
+  const apiKey = requiredEnv("LLM_API_KEY");
+  const apiBase = requiredEnv("LLM_API_BASE");
+  const model = requiredEnv("LLM_VALIDATION_MODEL");
 
   const res = await fetch(`${apiBase}/chat/completions`, {
     method: "POST",
@@ -71,4 +69,12 @@ export async function scoreWithLLM(
     score: Math.max(0, Math.min(100, Math.round(Number(parsed.score ?? 0)))),
     reasoning: parsed.reasoning ?? "",
   };
+}
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
 }

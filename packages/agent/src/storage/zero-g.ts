@@ -9,11 +9,9 @@
  * 0G Storage is an external file-storage layer; its endpoints are configured
  * separately via env vars or constructor options.
  *
- * Defaults to the 0G testnet storage cluster:
+ * Required 0G Storage endpoints:
  *   ZERO_G_RPC_URL     — EVM RPC for signing storage transactions
- *                        (default: https://evmrpc-testnet.0g.ai)
  *   ZERO_G_INDEXER_URL — Storage indexer URL
- *                        (default: https://indexer-storage-testnet-turbo.0g.ai)
  */
 
 import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";

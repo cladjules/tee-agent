@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   encodeAbiParameters,
+  encodePacked,
   hashMessage,
   keccak256,
   parseAbiParameters,
@@ -125,6 +126,14 @@ describe("TeeVerifier + Verifier", function () {
     const reportData = Buffer.concat([
       Buffer.from(address.slice(2), "hex"),
       Buffer.alloc(44),
+    ]);
+    return `0x${Buffer.concat([Buffer.alloc(568), reportData]).toString("hex")}`;
+  }
+
+  function fakeValidationQuote(commitment: `0x${string}`): `0x${string}` {
+    const reportData = Buffer.concat([
+      Buffer.from(commitment.slice(2), "hex"),
+      Buffer.alloc(32),
     ]);
     return `0x${Buffer.concat([Buffer.alloc(568), reportData]).toString("hex")}`;
   }
@@ -279,6 +288,49 @@ describe("TeeVerifier + Verifier", function () {
       sig,
     ]);
     assert.equal(valid, false);
+  });
+
+  it("TeeVerifier: verifyValidation requires a quote proof", async function () {
+    const { teeVerifier, oracle } =
+      await networkHelpers.loadFixture(deployFixture);
+    const agentId = 1n;
+    const requestHash = keccak256(toHex("validation-request"));
+    const response = 87;
+    const commitment = keccak256(
+      encodePacked(
+        ["uint256", "bytes32", "uint8"],
+        [agentId, requestHash, response],
+      ),
+    );
+
+    await registerOracleViaInitValidator(
+      teeVerifier,
+      oracle,
+      oracle.account.address,
+    );
+    const signatureProof = await oracle.signMessage({
+      message: { raw: toBytes(commitment) },
+      account: oracle.account,
+    });
+    await assert.rejects(
+      teeVerifier.write.verifyValidation([
+        agentId,
+        requestHash,
+        response,
+        signatureProof,
+      ]),
+      /InvalidProofLength/,
+    );
+
+    assert.equal(
+      await teeVerifier.simulate.verifyValidation([
+        agentId,
+        requestHash,
+        response,
+        fakeValidationQuote(commitment),
+      ]).then(({ result }) => result),
+      true,
+    );
   });
 
   // ── Full ERC-7857 iTransferFrom path ─────────────────────────────────────

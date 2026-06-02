@@ -11,8 +11,8 @@
     "deploy:web-fetcher": "phala deploy -e .env -e ORACLE_ENTRY=examples/web-data-oracle.js --wait",
     "dev:up": "docker compose -f docker-compose.dev.yml up -d",
     "dev:down": "docker compose -f docker-compose.dev.yml down",
-    "dev:prediction-market": "npm run dev:up && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/examples/prediction-market.ts",
-    "dev:web-fetcher": "npm run dev:up && PORT=3001 DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090 tsx src/examples/web-data-oracle.ts",
+    "dev:prediction-market": "npm run dev:up && tsx src/examples/prediction-market.ts",
+    "dev:web-fetcher": "npm run dev:up && tsx src/examples/web-data-oracle.ts",
     "dev": "npm run dev:up && npm run dev:prediction-market",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo"

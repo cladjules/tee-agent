@@ -3,7 +3,6 @@ pragma solidity ^0.8.35;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @dev Minimal interface for Automata DCAP on-chain attestation (fee variant).
 interface IAutomataDcapAttestationFee {
@@ -15,11 +14,9 @@ interface IAutomataDcapAttestationFee {
 /**
  * @title TeeVerifier
  * @notice IAgentDataVerifier implementation for Phala Cloud TDX oracle proofs.
- * @dev Supports DCAP quotes for production and 65-byte ECDSA signatures for simulator/dev.
  */
 contract TeeVerifier is Ownable {
     using ECDSA for bytes32;
-    using MessageHashUtils for bytes32;
 
     /// @dev Automata AutomataDcapAttestationFee contract.
     address public immutable DCAP_ATTESTATION;
@@ -95,7 +92,7 @@ contract TeeVerifier is Ownable {
 
     /**
      * @notice Verify a per-request TDX-attested validation response (IAgentDataVerifier interface).
-     * @dev ECDSA signatures are simulator/dev only. Other proofs are verified as DCAP quotes.
+     * @dev Verifies DCAP quotes only. Local development uses MockDcapAttestation.
      */
     function verifyValidation(
         uint256 agentId,
@@ -106,11 +103,6 @@ contract TeeVerifier is Ownable {
         bytes32 commitment = keccak256(
             abi.encodePacked(agentId, requestHash, response)
         );
-
-        if (proof.length == 65) {
-            address signer = commitment.toEthSignedMessageHash().recover(proof);
-            return _registeredOracles[signer];
-        }
 
         if (proof.length < QUOTE_REPORT_DATA_OFFSET + 32)
             revert InvalidProofLength();

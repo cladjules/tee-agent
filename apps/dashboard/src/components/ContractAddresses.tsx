@@ -49,7 +49,10 @@ export default function ContractAddresses() {
     })
     .filter(
       ({ deployment }) =>
-        deployment.agentRegistry || deployment.validationRegistry,
+        deployment.agentRegistry ||
+        deployment.verifier ||
+        deployment.teeVerifier ||
+        deployment.validationRegistry,
     );
 
   return (
@@ -79,10 +82,22 @@ export default function ContractAddresses() {
               tag="ERC-7857"
             />
             <ContractRow
+              label="Verifier"
+              address={deployment.verifier}
+              explorer={network.explorerUrl}
+              tag="ERC-7857"
+            />
+            <ContractRow
               label="ValidationRegistry"
               address={deployment.validationRegistry}
               explorer={network.explorerUrl}
               tag="ERC-8004"
+            />
+            <ContractRow
+              label="TeeVerifier"
+              address={deployment.teeVerifier}
+              explorer={network.explorerUrl}
+              tag="TEE"
             />
             <ContractRow
               label="Identity Registry"

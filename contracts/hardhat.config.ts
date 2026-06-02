@@ -10,7 +10,7 @@ export default defineConfig({
   },
   verify: {
     etherscan: {
-      apiKey: process.env.EXPLORER_API_KEY ?? "",
+      apiKey: process.env.EXPLORER_API_KEY,
     },
   },
   chainDescriptors: {

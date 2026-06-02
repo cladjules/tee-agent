@@ -13,14 +13,12 @@
  *   - NFT transfer re-encryption (/reencrypt)
  *   - Validation scoring + on-chain response submission (/validate)
  *
- * Proof selection in /validate:
- *   - Production (real Phala CVM): submits a raw TDX DCAP quote as proof.
- *     The commitment keccak256(agentId ‖ requestHash ‖ score) is embedded in
- *     reportData[0:32] so TeeVerifier can verify it without trusting a signing key.
- *   - Simulator (DSTACK_SIMULATOR_ENDPOINT set): submits a 65-byte EIP-191
- *     personal_sign signature from the TEE-derived wallet instead. The real
- *     Automata DCAP contracts reject simulator quotes, so TeeVerifier falls
- *     back to ECDSA verification when proof.length == 65.
+ * Validation proofs:
+ *   - The oracle submits a raw TDX DCAP quote as proof.
+ *   - The commitment keccak256(agentId ‖ requestHash ‖ score) is embedded in
+ *     reportData[0:32] so TeeVerifier can verify the exact validation result.
+ *   - Development deployments can use MockDcapAttestation; validation still
+ *     uses quote proofs.
  *
  * Example:
  * ```typescript
@@ -163,29 +161,44 @@ export interface OracleConfig {
   deployments?: RawDeployments;
 }
 
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
+}
+
 // ─── Oracle server factory ────────────────────────────────────────────────────
 
 export async function startOracle(config: OracleConfig): Promise<void> {
-  const PORT = parseInt(process.env.PORT ?? "3001", 10);
+  const portRaw = requiredEnv("PORT");
+  const PORT = parseInt(portRaw, 10);
+  if (!Number.isInteger(PORT) || PORT <= 0) {
+    throw new Error("PORT must be a positive integer.");
+  }
   const KEY_PATH = "oracle/reencrypt";
-  const networkName = (process.env.NETWORK ?? "baseSepolia").trim();
+  const networkName = requiredEnv("NETWORK");
+  if (!["base", "baseSepolia"].includes(networkName)) {
+    throw new Error("NETWORK must be base or baseSepolia.");
+  }
   const networkConfig = getNetworkConfig(networkName);
   const envSuffix = networkConfig.name === "base" ? "_BASE" : "_BASE_SEPOLIA";
-  const RPC_URL = process.env[`RPC_URL${envSuffix}`];
+  const RPC_URL = requiredEnv(`RPC_URL${envSuffix}`);
   const deployment = getNetworkDeploymentByChainId(
     networkConfig.chainId,
     config.deployments ?? {},
   );
   const configuredAgentRegistryAddress = deployment.contracts.agentRegistry;
-  const configuredTeeVerifierAddress =
-    process.env.TEE_VERIFIER_ADDRESS ?? deployment.contracts.teeVerifier;
-  const ZERO_G_RPC_URL = process.env.ZERO_G_RPC_URL;
-  const ZERO_G_INDEXER_URL = process.env.ZERO_G_INDEXER_URL;
-  // dstack-verifier sidecar URL. Defaults to Docker Compose service name (works in docker-compose
-  // and on Phala Cloud). Override with DSTACK_VERIFIER_URL=http://localhost:8080 for local dev.
-  const DSTACK_VERIFIER_URL = (
-    process.env.DSTACK_VERIFIER_URL ?? "http://verifier:8080"
-  ).replace(/\/$/, "");
+  const configuredTeeVerifierAddress = deployment.contracts.teeVerifier;
+  const ZERO_G_RPC_URL = requiredEnv("ZERO_G_RPC_URL");
+  const ZERO_G_INDEXER_URL = requiredEnv("ZERO_G_INDEXER_URL");
+  const PRIVATE_KEY = requiredEnv("PRIVATE_KEY");
+  const txSignerAddress = new ethers.Wallet(PRIVATE_KEY).address;
+  const DSTACK_VERIFIER_URL = requiredEnv("DSTACK_VERIFIER_URL").replace(
+    /\/$/,
+    "",
+  );
 
   // TEE key initialisation
   // IS_SIMULATOR=true when running against the local tappd simulator (DSTACK_SIMULATOR_ENDPOINT set).
@@ -198,15 +211,13 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   );
   const signingKey = new ethers.SigningKey(wallet.privateKey);
   console.log(`[oracle] TEE signing address: ${wallet.address}`);
+  console.log(`[oracle] transaction signer address: ${txSignerAddress}`);
 
   // ─── Network configuration ────────────────────────────────────────────────────
-  // Set NETWORK=base (mainnet) or NETWORK=baseSepolia (testnet, default).
+  // Set NETWORK=base (mainnet) or NETWORK=baseSepolia (testnet).
   // chainId and Identity Registry address are derived statically — no RPC call needed.
-  // Override Identity Registry with IDENTITY_REGISTRY_ADDRESS env var if needed.
   const { chainId, isTestnet } = networkConfig;
-  const identityRegistryAddress: string =
-    process.env.IDENTITY_REGISTRY_ADDRESS ??
-    networkConfig.identityRegistryAddress;
+  const identityRegistryAddress = networkConfig.identityRegistryAddress;
 
   // EIP-712 domain: verifyingContract = TEE-derived address → unique per CVM; prevents
   // cross-oracle replay. Callers fetch the oracle address from GET /address before signing.
@@ -231,27 +242,13 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   }
 
   async function registerAttestedOracle(): Promise<void> {
-    if (IS_SIMULATOR) {
-      console.log(
-        "[oracle] skipping on-chain TEE oracle registration in dstack simulator mode",
-      );
-      return;
-    }
-    if (!RPC_URL) {
-      throw new Error("RPC_URL is required for TEE oracle registration.");
-    }
     if (!configuredTeeVerifierAddress) {
       throw new Error(
-        "TEE_VERIFIER_ADDRESS or deployments.json contracts.teeVerifier is required for TEE oracle registration.",
+        "deployments.json contracts.teeVerifier is required for TEE oracle registration.",
       );
     }
-    const privateKey = process.env.PRIVATE_KEY;
-    if (!privateKey) {
-      throw new Error("PRIVATE_KEY is required for TEE oracle registration.");
-    }
-
     const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const signer = new ethers.Wallet(privateKey, provider);
+    const signer = new ethers.Wallet(PRIVATE_KEY, provider);
     const teeVerifier = new ethers.Contract(
       configuredTeeVerifierAddress,
       TEE_VERIFIER_ABI,
@@ -272,7 +269,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       `[oracle] registering TEE oracle ${wallet.address} in TeeVerifier ${configuredTeeVerifierAddress}`,
     );
     const quoteResult = await tappd.tdxQuote(oracleAddressReportData(), "raw");
-    const tx = await teeVerifier.initValidator(wallet.address, quoteResult.quote);
+    const tx = await teeVerifier.initValidator(
+      wallet.address,
+      quoteResult.quote,
+    );
     console.log(`[oracle] initValidator tx submitted: ${tx.hash}`);
     const receipt = await tx.wait();
     console.log(
@@ -281,8 +281,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   }
 
   await registerAttestedOracle();
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────────
 
   /**
    * Commits a JSON payload into a bytes32 hash for EIP-712 signatures.
@@ -429,11 +427,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         const encoded = Buffer.from(JSON.stringify(newBlob)).toString("base64");
         newBlobUri = `data:application/json;base64,${encoded}`;
       } else {
-        const zeroGKey = process.env.PRIVATE_KEY ?? wallet.privateKey;
         const blobBytes = new TextEncoder().encode(JSON.stringify(newBlob));
         newBlobUri = await uploadZeroGBytes({
           bytes: blobBytes,
-          privateKey: zeroGKey,
+          privateKey: PRIVATE_KEY,
           rpcUrl: ZERO_G_RPC_URL,
           indexerUrl: ZERO_G_INDEXER_URL,
         });
@@ -624,6 +621,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     if (IS_SIMULATOR) {
       res.json({
         simulator: true,
+        transactionSignerAddress: txSignerAddress,
         message:
           "Running against local tappd simulator — real TCB info unavailable.",
       });
@@ -631,7 +629,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     }
     try {
       const appInfo = await tappd.info();
-      res.json(appInfo);
+      res.json({
+        ...appInfo,
+        transactionSignerAddress: txSignerAddress,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(503).json({ error: `App info unavailable: ${message}` });
@@ -664,7 +665,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     try {
       // Embed oracle address at reportData[0:20] so on-chain TeeVerifier and
       // external verifiers can bind the signing key to this quote.
-      const quoteResult = await tappd.tdxQuote(oracleAddressReportData(), "raw");
+      const quoteResult = await tappd.tdxQuote(
+        oracleAddressReportData(),
+        "raw",
+      );
       const appInfo = IS_SIMULATOR ? null : await tappd.info();
       res.json({
         quote: quoteResult.quote,
@@ -694,9 +698,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    * Typical usage:
    *   curl -s https://oracle/attestation | jq '{quote,event_log}' | curl -d @- https://oracle/verify
    *
-   * Sidecar URL configured via DSTACK_VERIFIER_URL env var:
-   *   - Docker Compose / Phala Cloud: defaults to http://verifier:8080
-   *   - Local dev: set DSTACK_VERIFIER_URL=http://localhost:8080
+   * Sidecar URL configured via DSTACK_VERIFIER_URL env var.
    *
    * Note: os_image_hash_verified requires vm_config (@phala/dstack-sdk >= 0.5.x).
    * Without it, dstack-verifier still validates quote signature + event log + TCB status.
@@ -717,7 +719,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           }),
         });
       } catch {
-        // Verifier sidecar unreachable — expected in local dev.
+        // Verifier sidecar unreachable.
         res.json({ is_valid: false, unavailable: true });
         return;
       }
@@ -837,33 +839,20 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           ? ethers.keccak256(ethers.toUtf8Bytes(responseJson))
           : body.responseHash;
 
-      // Generate proof for on-chain TEEVerifier.verifyValidation():
-      //   - Simulator: 65-byte EIP-191 personal_sign signature from the TEE wallet.
-      //   - Production: full TDX DCAP quote with commitment in reportData[0:32].
-      // Both paths verify against the registered oracle address in TEEVerifier.
+      // Generate a quote for on-chain TeeVerifier.verifyValidation().
+      // Local simulator quotes pass only against the local MockDcapAttestation deployment.
       const commitment = ethers.keccak256(
         ethers.solidityPacked(
           ["uint256", "bytes32", "uint8"],
           [erc8004AgentId, body.requestHash, score],
         ),
       );
-      let quote: string;
-      let event_log: string;
-      if (IS_SIMULATOR) {
-        // Simulator: sign the commitment with the TEE-derived wallet (EIP-191).
-        quote = await wallet.signMessage(ethers.getBytes(commitment));
-        event_log = "";
-      } else {
-        // Production: embed commitment in TDX reportData for trustless DCAP verification.
-        ({ quote, event_log } = await tdxQuoteWithCommitment(commitment));
-      }
+      const { quote, event_log } = await tdxQuoteWithCommitment(commitment);
 
       let txHash: string | undefined;
       if (RPC_URL) {
-        // Validation requests are assigned to this oracle's TEE-derived EOA.
-        // The response transaction must therefore come from the same address.
-        const txWallet = new ethers.Wallet(wallet.privateKey);
         const provider = new ethers.JsonRpcProvider(RPC_URL);
+        const txWallet = new ethers.Wallet(PRIVATE_KEY, provider);
         const connectedWallet = txWallet.connect(provider);
         const registry = new ethers.Contract(
           body.validationRegistryAddress,

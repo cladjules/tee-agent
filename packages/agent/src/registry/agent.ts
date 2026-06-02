@@ -8,7 +8,9 @@ import type { Address, Hex } from "viem";
 import { AGENT_REGISTRY_ABI } from "../abis.js";
 import { readJsonFromUri } from "../crypto.js";
 
+export { IdentityRegistry } from "./identity.js";
 export { ReputationRegistry } from "./reputation.js";
+export { ValidationRegistry } from "./validation.js";
 
 export class AgentRegistry {
   private readonly _cfg: RegistryConfig;

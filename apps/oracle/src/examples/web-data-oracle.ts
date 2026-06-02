@@ -14,7 +14,7 @@
  * Payload (caller-supplied at run time):
  *   { url: string, selector?: string }
  *
- * Local dev:
+ * Base Sepolia dev:
  *   npm run dev:web-fetcher            # from apps/oracle/
  *
  * Deploy to Phala Cloud:
@@ -75,8 +75,6 @@ const webFetcher: AgentHandler = {
     const { allowedDomains } = config;
     const { url, selector } = payloadSchema.parse(rawPayload);
 
-    const apiKey = process.env.LLM_API_KEY;
-    const apiBase = process.env.LLM_API_BASE ?? "https://api.red-pill.ai/v1";
     if (allowedDomains && allowedDomains.length > 0) {
       const hostname = new URL(url).hostname;
       if (
@@ -117,7 +115,8 @@ const webFetcher: AgentHandler = {
 
     if (config.llm) {
       const { model } = config.llm;
-      if (!apiKey) throw new Error("LLM_API_KEY is not set on the oracle.");
+      const apiKey = requiredEnv("LLM_API_KEY");
+      const apiBase = requiredEnv("LLM_API_BASE");
 
       const llmRes = await fetch(`${apiBase}/chat/completions`, {
         method: "POST",
@@ -193,6 +192,14 @@ const webFetcher: AgentHandler = {
     };
   },
 };
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
+}
 
 // ─── Start oracle ─────────────────────────────────────────────────────────────
 

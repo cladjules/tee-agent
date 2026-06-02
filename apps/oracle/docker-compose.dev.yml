@@ -1,4 +1,4 @@
-# Local development services — NOT for Phala Cloud deployment
+# Base Sepolia development services — NOT for Phala Cloud deployment
 #
 # Started automatically by `npm run dev` (via dev:up).
 # Stop with: npm run dev:down
@@ -13,7 +13,7 @@
 #   npm run dev:up                  # start services only
 #   npm run dev:down                # stop services
 #
-#   Verify a real CVM quote locally:
+#   Verify a real CVM quote with the local verifier sidecar:
 #     curl -s https://your-cvm/attestation | curl -d @- http://localhost:8080/verify | jq
 
 services:

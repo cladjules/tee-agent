@@ -7,13 +7,14 @@
   "scripts": {
     "build": "hardhat build && node scripts/gen-abis.mjs",
     "test": "hardhat test && forge test --config-path foundry.toml",
-    "test:node": "hardhat test nodejs",
     "test:foundry": "forge test --config-path foundry.toml",
     "clean": "hardhat clean",
     "node": "hardhat node",
-    "deploy:local": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network localhost --reset",
-    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env -- baseSepolia",
-    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --verify --parameters ignition/parameters.base.json && npm run setup-env -- base",
+    "deploy:local": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network localhost --reset && npm run replace-tee:local",
+    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env",
+    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --verify --parameters ignition/parameters.base.json && npm run setup-env",
+    "replace-tee:real": "NETWORK=baseSepolia TEE_VERIFIER_MODE=real node scripts/replace-tee-verifier.mjs",
+    "replace-tee:fakeDcap": "NETWORK=baseSepolia TEE_VERIFIER_MODE=fakeDcap node scripts/replace-tee-verifier.mjs",
     "e2e:local": "node --import tsx __tests__/e2e.ts local",
     "e2e:baseSepolia": "node --import tsx __tests__/e2e.ts baseSepolia",
     "setup-env": "node scripts/setup-env.mjs"
