@@ -1,0 +1,32 @@
+{
+  "name": "@tee-agent/server",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Reusable TEE oracle server for ERC-7857 AgentNFT — Phala Cloud TDX re-encryption, validation and agent runner",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@tee-agent/agent": "*",
+    "@phala/dstack-sdk": "^0.1.5",
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.6",
+    "eciesjs": "^0.4.16",
+    "ethers": "6.13.1",
+    "express": "^4.21.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}

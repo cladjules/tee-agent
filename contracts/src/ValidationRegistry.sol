@@ -7,15 +7,8 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /**
  * @title ValidationRegistry
  * @notice ERC-8004 Validation Registry — on-chain validation requests and responses.
- *
- * Agents request validation of their work by calling validationRequest(), naming
- * a validator contract/address.  The validator responds via validationResponse()
- * with a score (0-100) and optional evidence URI.  Multiple responses per request
- * are allowed (e.g. progressive finality states).
  */
 contract ValidationRegistry is ReentrancyGuard {
-    // ─── Types ────────────────────────────────────────────────────────────────
-
     struct ValidationRecord {
         address validatorAddress;
         /// @dev ERC-8004 Identity Registry agent ID (NOT the ERC-721 token ID from AgentRegistry).
@@ -26,22 +19,12 @@ contract ValidationRegistry is ReentrancyGuard {
         uint256 lastUpdate;
     }
 
-    // ─── Storage ──────────────────────────────────────────────────────────────
-
-    /// @dev requestHash => ValidationRecord
     mapping(bytes32 => ValidationRecord) private _validations;
-    /// @dev requestHash => exists
     mapping(bytes32 => bool) private _requestExists;
-
-    /// @dev ERC-8004 Identity Registry agentId => requestHashes
     mapping(uint256 => bytes32[]) private _agentValidations;
-
-    /// @dev validatorAddress => requestHashes (deduplicated)
     mapping(address => bytes32[]) private _validatorRequests;
     mapping(address => mapping(bytes32 => bool))
         private _validatorRequestTracked;
-
-    // ─── Events ───────────────────────────────────────────────────────────────
 
     event ValidationRequest(
         address indexed validatorAddress,
@@ -60,23 +43,13 @@ contract ValidationRegistry is ReentrancyGuard {
         string tag
     );
 
-    // ─── Errors ───────────────────────────────────────────────────────────────
-
     error NotOwnerOrOperator();
     error RequestNotFound();
     error NotRequestedValidator();
     error InvalidResponse();
     error OracleVerificationFailed(bytes32 requestHash);
 
-    // ─── Validation Request ───────────────────────────────────────────────────
-
-    /**
-     * @notice Request validation of agent work.
-     * @param validatorAddress The validator contract/address designated to respond.
-     * @param agentId          ERC-8004 Identity Registry agent ID (NOT the ERC-721 token ID).
-     * @param requestURI       Off-chain URI with inputs/outputs needed by the validator.
-     * @param requestHash      keccak256 commitment to the request payload.
-     */
+    /// @notice Request validation of agent work.
     function validationRequest(
         address validatorAddress,
         uint256 agentId,
@@ -102,21 +75,9 @@ contract ValidationRegistry is ReentrancyGuard {
         );
     }
 
-    // ─── Validation Response ──────────────────────────────────────────────────
-
     /**
      * @notice Submit a validation response for a pending request.
-     * @dev For EOA validators: msg.sender must equal the validatorAddress from the request.
-     *      For contract validators (e.g. TEEVerifier): proof must be a raw TDX DCAP quote
-     *      verified via IAgentDataVerifier.verifyValidation(). Any ETH forwarded is passed
-     *      through to the verifier contract to cover on-chain attestation fees.
-     *      May be called multiple times (progressive finality).
-     * @param requestHash  Identifies the request.
-     * @param response     Score 0-100 (0 = fail, 100 = pass, or intermediate).
-     * @param responseURI  Optional off-chain evidence URI (emitted only).
-     * @param responseHash Optional keccak256 of responseURI content.
-     * @param tag          Optional custom tag (stored on-chain).
-     * @param proof        Empty for EOA validators; raw TDX DCAP quote for contract validators.
+     * @dev Contract validators verify `proof`; EOA validators must be msg.sender.
      */
     function validationResponse(
         bytes32 requestHash,
@@ -160,11 +121,7 @@ contract ValidationRegistry is ReentrancyGuard {
         );
     }
 
-    // ─── Read Functions ───────────────────────────────────────────────────────
-
-    /**
-     * @notice Get the status and metadata of a validation request.
-     */
+    /// @notice Get the status and metadata of a validation request.
     function getValidationStatus(
         bytes32 requestHash
     )
@@ -193,8 +150,7 @@ contract ValidationRegistry is ReentrancyGuard {
 
     /**
      * @notice Aggregated validation statistics for an agent.
-     * @dev agentId is mandatory; validatorAddresses and tag are optional filters.
-     *      Only requests that have received at least one response are counted.
+     * @dev Counts only requests with at least one response.
      */
     function getSummary(
         uint256 agentId,

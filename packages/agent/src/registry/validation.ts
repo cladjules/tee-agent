@@ -1,6 +1,6 @@
 import type { RegistryConfig } from "../types.js";
 import type { Address, Hex, PublicClient } from "viem";
-import { VALIDATION_REGISTRY_ABI, VALIDATION_STATUS_ABI } from "../../abis.js";
+import { VALIDATION_REGISTRY_ABI, VALIDATION_STATUS_ABI } from "../abis.js";
 
 export class ValidationRegistry {
   private readonly _addr: Address;

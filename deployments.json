@@ -1,0 +1,14 @@
+{
+  "8453": {
+    "name": "base",
+    "contracts": {}
+  },
+  "84532": {
+    "name": "baseSepolia",
+    "contracts": {
+      "agentRegistry": "0x768d15186f6869C5d8cb90269fAe0AD616f5FCE0",
+      "validationRegistry": "0x5538869217D0B76D0163D21b79b73eab5C88cE85"
+    },
+    "fromBlock": "42287528"
+  }
+}

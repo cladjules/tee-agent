@@ -11,16 +11,17 @@
  *  6. Return calldata params for the mint transaction
  */
 
-import { parseAgentServicesJson } from "../core/crypto.js";
+import { parseAgentServicesJson } from "../crypto.js";
 import { uploadEncryptedIntelligentData } from "../storage/zero-g.js";
 import { uploadMetadata } from "./metadata.js";
+import { verifyTeeOracleEndpoint } from "./services.js";
 import type {
   AgentConfig,
   AgentService,
   MintParams,
   MintResult,
-} from "../core/types.js";
-import { AgentRegistry } from "../core/registry/agent.js";
+} from "../types.js";
+import { AgentRegistry } from "../registry/agent.js";
 import { IDENTITY_REGISTRY_ABI } from "../abis.js";
 import { createPublicClient, http } from "viem";
 
@@ -46,26 +47,6 @@ export async function prepareMint(
   if (!ownerAddress)
     throw new Error("Connect your wallet before creating an agent.");
 
-  // ── Fetch oracle public key ──────────────────────────────────────────────
-  let keyEncryptionPublicKey: string | undefined;
-  if (config.oracleUrl) {
-    try {
-      const addrRes = await fetch(`${config.oracleUrl}/address`);
-      if (!addrRes.ok)
-        throw new Error(`oracle /address returned ${addrRes.status}`);
-      const addrJson = (await addrRes.json()) as { publicKey?: string };
-      keyEncryptionPublicKey = addrJson.publicKey;
-    } catch (err) {
-      console.warn("[prepareMint] could not fetch oracle public key", err);
-    }
-  }
-
-  if (!keyEncryptionPublicKey) {
-    throw new Error(
-      "Could not retrieve TEE encryption public key from oracle. Is oracleUrl set and the oracle running?",
-    );
-  }
-
   // ── Parse services ────────────────────────────────────────────────────────
   const parsedServices = parseAgentServicesJson(rawServices);
 
@@ -76,6 +57,19 @@ export async function prepareMint(
     ...(s.skills && s.skills.length > 0 ? { skills: [...s.skills] } : {}),
     ...(s.domains && s.domains.length > 0 ? { domains: [...s.domains] } : {}),
   })) as AgentService[];
+  const teeOracleService = services.find((s) => s.name === "teeOracle");
+  if (!teeOracleService?.endpoint) {
+    throw new Error("A teeOracle service URL is required.");
+  }
+
+  // ── Fetch oracle public key ──────────────────────────────────────────────
+  const oracle = await verifyTeeOracleEndpoint(teeOracleService.endpoint);
+  services = services.map((service) =>
+    service.name === "teeOracle"
+      ? { ...service, endpoint: oracle.url }
+      : service,
+  );
+  const keyEncryptionPublicKey = oracle.publicKey;
 
   // ── Chain reads ───────────────────────────────────────────────────────────
   const registry = new AgentRegistry({

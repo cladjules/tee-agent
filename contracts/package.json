@@ -6,18 +6,19 @@
   "type": "module",
   "scripts": {
     "build": "hardhat build && node scripts/gen-abis.mjs",
-    "test": "hardhat test",
+    "test": "hardhat test && forge test --config-path foundry.toml",
     "test:node": "hardhat test nodejs",
+    "test:foundry": "forge test --config-path foundry.toml",
     "clean": "hardhat clean",
     "node": "hardhat node",
     "deploy:local": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network localhost --reset",
-    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env:baseSepolia",
-    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --verify --parameters ignition/parameters.base.json",
+    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --reset --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env -- baseSepolia",
+    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --reset --verify --parameters ignition/parameters.base.json && npm run setup-env -- base",
     "setOracle:baseSepolia": "yes | node scripts/set-oracle.mjs baseSepolia && hardhat ignition deploy ignition/modules/SetOracle.ts --network baseSepolia --parameters ignition/parameters.baseSepolia.json",
     "setOracle:base": "yes | hardhat ignition deploy ignition/modules/SetOracle.ts --network base --parameters ignition/parameters.base.json",
     "e2e:local": "node --import tsx __tests__/e2e.ts local",
     "e2e:baseSepolia": "node --import tsx __tests__/e2e.ts baseSepolia",
-    "setup-env:baseSepolia": "node scripts/setup-env.mjs 84532"
+    "setup-env": "node scripts/setup-env.mjs"
   },
   "devDependencies": {
     "@tee-agent/agent": "file:../packages/agent",

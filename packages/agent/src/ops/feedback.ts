@@ -6,7 +6,7 @@ import type {
   AgentConfig,
   PrepareFeedbackParams,
   PrepareFeedbackResult,
-} from "../core/types.js";
+} from "../types.js";
 
 function toScaledFeedbackValue(valueNum: number, decimals: number): bigint {
   return BigInt(Math.round(valueNum * Math.pow(10, decimals)));

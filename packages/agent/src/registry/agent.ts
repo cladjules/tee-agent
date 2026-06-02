@@ -5,8 +5,10 @@ import type {
   ResolvedAgentProofData,
 } from "../types.js";
 import type { Address, Hex } from "viem";
-import { AGENT_REGISTRY_ABI } from "../../abis.js";
+import { AGENT_REGISTRY_ABI } from "../abis.js";
 import { readJsonFromUri } from "../crypto.js";
+
+export { ReputationRegistry } from "./reputation.js";
 
 export class AgentRegistry {
   private readonly _cfg: RegistryConfig;

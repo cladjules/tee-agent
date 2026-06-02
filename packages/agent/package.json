@@ -4,33 +4,25 @@
   "type": "module",
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "import": "./dist/index.js"
-    },
     "./types": {
-      "types": "./src/core/types.ts",
-      "import": "./dist/core/types.js"
+      "types": "./src/types.ts",
+      "import": "./dist/types.js"
     },
     "./config": {
-      "types": "./src/core/config.ts",
-      "import": "./dist/core/config.js"
+      "types": "./src/config.ts",
+      "import": "./dist/config.js"
     },
     "./encryption": {
-      "types": "./src/core/crypto.ts",
-      "import": "./dist/core/crypto.js"
+      "types": "./src/crypto.ts",
+      "import": "./dist/crypto.js"
     },
     "./abis": {
       "types": "./dist/abis.d.ts",
       "import": "./dist/abis.js"
     },
-    "./ipfs": {
-      "types": "./src/storage/ipfs.ts",
-      "import": "./dist/storage/ipfs.js"
-    },
     "./registry": {
-      "types": "./dist/core/registry.d.ts",
-      "import": "./dist/core/registry.js"
+      "types": "./src/registry/agent.ts",
+      "import": "./dist/registry/agent.js"
     },
     "./zero-g": {
       "types": "./src/storage/zero-g.ts",
@@ -59,31 +51,24 @@
     "./typed-data": {
       "types": "./src/typed-data.ts",
       "import": "./dist/typed-data.js"
-    },
-    "./sdk": {
-      "types": "./src/ops/agent-sdk.ts",
-      "import": "./dist/ops/agent-sdk.js"
     }
   },
   "typesVersions": {
     "*": {
       "types": [
-        "./src/core/types.ts"
+        "./src/types.ts"
       ],
       "config": [
-        "./src/core/config.ts"
+        "./src/config.ts"
       ],
       "encryption": [
-        "./src/core/crypto.ts"
+        "./src/crypto.ts"
       ],
       "abis": [
         "./dist/abis.d.ts"
       ],
-      "ipfs": [
-        "./src/storage/ipfs.ts"
-      ],
       "registry": [
-        "./dist/core/registry.d.ts"
+        "./src/registry/agent.ts"
       ],
       "zero-g": [
         "./src/storage/zero-g.ts"
@@ -105,9 +90,6 @@
       ],
       "typed-data": [
         "./src/typed-data.ts"
-      ],
-      "sdk": [
-        "./src/ops/agent-sdk.ts"
       ]
     }
   },
@@ -116,13 +98,11 @@
     "dev": "tsc --build --watch",
     "clean": "rm -rf dist .turbo",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
     "lint": "eslint src --ext .ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "^1.2.8",

@@ -7,7 +7,7 @@ import type {
   AgentConfig,
   PrepareValidationParams,
   PrepareValidationResult,
-} from "../core/types.js";
+} from "../types.js";
 
 export function prepareValidation(
   config: AgentConfig,

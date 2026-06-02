@@ -1073,6 +1073,120 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "bytes",
+                "name": "targetPubkey",
+                "type": "bytes"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "nonce",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "bytes",
+                "name": "proof",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct AccessProof",
+            "name": "accessProof",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
+                "internalType": "enum OracleType",
+                "name": "oracleType",
+                "type": "uint8"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "bytes",
+                "name": "sealedKey",
+                "type": "bytes"
+              },
+              {
+                "internalType": "bytes",
+                "name": "targetPubkey",
+                "type": "bytes"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "nonce",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "bytes",
+                "name": "proof",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct OwnershipProof",
+            "name": "ownershipProof",
+            "type": "tuple"
+          },
+          {
+            "internalType": "address",
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "deadline",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct TransferValidityProof[]",
+        "name": "proofs",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "iTransferFromWithIdentity",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"

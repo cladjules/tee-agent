@@ -1,10 +1,12 @@
 "use server";
 
 import type { Address } from "viem";
-import { cfg } from "@/lib/config";
 import { getCachedAgents } from "@/lib/agent-cache";
 import { syncEvents } from "@/lib/agent-indexer";
+import { getServerConfigForChain } from "@/lib/config";
+import { getActiveChainId } from "@/lib/active-chain";
 import { AgentRegistry } from "@tee-agent/agent/registry";
+import { REPUTATION_REGISTRY_ABI } from "@tee-agent/agent/abis";
 import { createPublicClient, http } from "viem";
 import { prepareFeedback as sdkPrepareFeedback } from "@tee-agent/agent/feedback";
 import { prepareValidation as sdkPrepareValidation } from "@tee-agent/agent/validate";
@@ -43,22 +45,139 @@ export type AgentFeedbackOverview = {
   feedbacks: AgentFeedbackView[];
 };
 
+export type TransferRecipientAgent = {
+  agentId: string;
+  name: string;
+  owner: Address;
+  teeOracleUrl?: string;
+};
+
 type PreparedFeedbackResult = PrepareFeedbackResult | { error: string };
 type PreparedValidationResult = PrepareValidationResult | { error: string };
 
+function teeOracleUrlFromServices(
+  services: readonly { name: string; endpoint: string }[] | undefined,
+): string | undefined {
+  return services?.find((service) => service.name === "teeOracle")?.endpoint;
+}
+
+function normalizeScaledValue(value: bigint, decimals: number): number {
+  return Number(value) / Math.pow(10, decimals);
+}
+
+async function fetchFeedbackOverview(
+  cfg: ReturnType<typeof getServerConfigForChain>,
+  erc8004AgentId: string | null,
+): Promise<AgentFeedbackOverview> {
+  if (!erc8004AgentId || !cfg.reputationRegistryAddress || !cfg.rpcUrl) {
+    return { totalScore: 0, totalCount: 0, feedbacks: [] };
+  }
+
+  try {
+    const publicClient = createPublicClient({
+      chain: cfg.chain,
+      transport: http(cfg.rpcUrl),
+    });
+    const agentId = BigInt(erc8004AgentId);
+    const [clients, summary] = (await Promise.all([
+      publicClient.readContract({
+        address: cfg.reputationRegistryAddress,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getClients",
+        args: [agentId],
+      }),
+      publicClient.readContract({
+        address: cfg.reputationRegistryAddress,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getSummary",
+        args: [agentId, [], "", ""],
+      }),
+    ])) as [Address[], [bigint, bigint, number]];
+    const summaryResult = {
+      count: summary[0],
+      summaryValue: summary[1],
+      summaryValueDecimals: summary[2],
+    };
+
+    if (clients.length === 0) {
+      return {
+        totalScore: normalizeScaledValue(
+          summaryResult.summaryValue,
+          summaryResult.summaryValueDecimals,
+        ),
+        totalCount: Number(summaryResult.count),
+        feedbacks: [],
+      };
+    }
+
+    const [
+      feedbackClients,
+      feedbackIndexes,
+      values,
+      valueDecimals,
+      tag1s,
+      tag2s,
+      revokedStatuses,
+    ] = (await publicClient.readContract({
+      address: cfg.reputationRegistryAddress,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "readAllFeedback",
+      args: [agentId, clients, "", "", true],
+    })) as [
+      Address[],
+      bigint[],
+      bigint[],
+      number[],
+      string[],
+      string[],
+      boolean[],
+    ];
+
+    const feedbacks = feedbackClients.map((client, index) => ({
+      client,
+      feedbackIndex: Number(feedbackIndexes[index] ?? 0n),
+      value: (values[index] ?? 0n).toString(),
+      valueDecimals: valueDecimals[index] ?? 0,
+      normalizedValue: normalizeScaledValue(
+        values[index] ?? 0n,
+        valueDecimals[index] ?? 0,
+      ),
+      tag1: tag1s[index] ?? "",
+      tag2: tag2s[index] ?? "",
+      isRevoked: revokedStatuses[index] ?? false,
+    }));
+
+    return {
+      totalScore: normalizeScaledValue(
+        summaryResult.summaryValue,
+        summaryResult.summaryValueDecimals,
+      ),
+      totalCount: Number(summaryResult.count),
+      feedbacks,
+    };
+  } catch (err) {
+    console.error("[registry] fetchFeedbackOverview failed:", err);
+    return { totalScore: 0, totalCount: 0, feedbacks: [] };
+  }
+}
+
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
+export async function getRegisteredAgents(
+  chainId?: number,
+): Promise<RegisteredAgent[]> {
+  const cid = chainId ?? (await getActiveChainId());
+  const cfg = getServerConfigForChain(cid);
   if (!cfg.registryAddress) return [];
 
   try {
-    await syncEvents();
+    await syncEvents(cid);
   } catch (err) {
     console.error("[registry] syncEvents failed:", err);
   }
 
   try {
-    const cached = await getCachedAgents();
+    const cached = await getCachedAgents(cid, cfg.registryAddress);
     return (cached?.agents ?? []).slice().reverse();
   } catch (err) {
     console.error("[registry] getRegisteredAgents failed:", err);
@@ -66,7 +185,9 @@ export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
   }
 }
 
-export async function getAgentPageData(id: string) {
+export async function getAgentPageData(id: string, chainId?: number) {
+  const cid = chainId ?? (await getActiveChainId());
+  const cfg = getServerConfigForChain(cid);
   if (!cfg.rpcUrl || !cfg.registryAddress)
     throw new Error("Registry not configured");
   const agentId = BigInt(id);
@@ -95,22 +216,38 @@ export async function getAgentPageData(id: string) {
       ? intelligentDataInfo.erc8004AgentId
       : null;
 
-  const [oracleRunsResult, pendingValidations] = await Promise.all([
-    getOracleRunHistory(id),
+  const [
+    oracleRunsResult,
+    pendingValidations,
+    registeredAgents,
+    feedbackOverview,
+  ] = await Promise.all([
+    getOracleRunHistory(id, cid),
     erc8004Id
-      ? fetchPendingValidationsForAgent(erc8004Id)
+      ? fetchPendingValidationsForAgent(erc8004Id, cid)
       : Promise.resolve([]),
+    getRegisteredAgents(cid),
+    fetchFeedbackOverview(cfg, erc8004Id),
   ]);
+  const recipientAgents: TransferRecipientAgent[] = registeredAgents
+    .filter((item) => item.agentId.toString() !== id)
+    .map((item) => {
+      const teeOracleUrl = teeOracleUrlFromServices(item.metadata.services);
+      return {
+        agentId: item.agentId.toString(),
+        name: item.metadata.name,
+        owner: item.owner,
+        ...(teeOracleUrl ? { teeOracleUrl } : {}),
+      };
+    });
+
   return {
     agent,
     intelligentDataInfo,
-    feedbackOverview: {
-      totalScore: 0,
-      totalCount: 0,
-      feedbacks: [],
-    } as AgentFeedbackOverview,
+    feedbackOverview,
     oracleRunsResult,
     pendingValidations,
+    recipientAgents,
   };
 }
 
@@ -126,7 +263,10 @@ export async function prepareFeedback(
     return { error: "Feedback value must be between -1 and 1." };
 
   try {
-    return await sdkPrepareFeedback(cfg, params);
+    return await sdkPrepareFeedback(
+      getServerConfigForChain(await getActiveChainId()),
+      params,
+    );
   } catch (err) {
     return {
       error:
@@ -143,7 +283,10 @@ export async function prepareValidation(
     return { error: "Validator address is required." };
 
   try {
-    return sdkPrepareValidation(cfg, params);
+    return sdkPrepareValidation(
+      getServerConfigForChain(await getActiveChainId()),
+      params,
+    );
   } catch (err) {
     return {
       error:

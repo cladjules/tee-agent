@@ -8,6 +8,7 @@ import {
   prepareCreateAgent,
   fetchAgentServices,
   preparePostMintRegistration,
+  prepareImportedErc8004TeeOracle,
 } from "@/lib/actions/agents";
 import { ErrorBox } from "@/components/ErrorBox";
 import {
@@ -15,6 +16,7 @@ import {
   type ServiceEditorEntry,
 } from "@/components/ServiceEditorPanel";
 import { IDENTITY_REGISTRY_ABI } from "../../../../../../packages/agent/src/abis";
+import type { PrepareImportedErc8004TeeOracleResult } from "@tee-agent/agent/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -119,6 +121,12 @@ export default function NewAgentPage() {
   const [importPending, setImportPending] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [verifiedImport, setVerifiedImport] = useState<{
+    tokenId: string;
+    owner: `0x${string}`;
+  } | null>(null);
+  const [serviceStepError, setServiceStepError] = useState<string | null>(null);
+  const [serviceStepVerifying, setServiceStepVerifying] = useState(false);
   // Bumping this key forces ServiceEditorPanel to remount with new initialServices.
   const [servicesPanelKey, setServicesPanelKey] = useState(0);
   const [importedServices, setImportedServices] = useState<
@@ -141,7 +149,78 @@ export default function NewAgentPage() {
   function canAdvance(): boolean {
     if (step === 0)
       return name.trim().length > 0 && description.trim().length > 0;
+    if (step === 1) {
+      if (serviceMode === "import") {
+        if (!importTokenId.trim() || !address) return false;
+        if (
+          verifiedImport?.tokenId !== importTokenId.trim() ||
+          verifiedImport.owner.toLowerCase() !== address.toLowerCase()
+        ) {
+          return false;
+        }
+      }
+      return !!teeOracleUrlFromServices(builtServices);
+    }
     return true;
+  }
+
+  async function verifyTeeOracleBeforeNext(): Promise<boolean> {
+    const teeOracleUrl = teeOracleUrlFromServices(builtServices);
+    if (!teeOracleUrl) {
+      setServiceStepError("teeOracle URL is required.");
+      return false;
+    }
+    setServiceStepVerifying(true);
+    setServiceStepError(null);
+    try {
+      const normalizedUrl = teeOracleUrl.trim().replace(/\/+$/, "");
+      const res = await fetch(`${normalizedUrl}/address`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw new Error(`teeOracle /address returned ${res.status}.`);
+      }
+      const body = (await res.json()) as {
+        address?: string;
+        publicKey?: string;
+      };
+      if (
+        !body.address?.startsWith("0x") ||
+        !body.publicKey?.startsWith("0x")
+      ) {
+        throw new Error(
+          "teeOracle /address must return address and publicKey.",
+        );
+      }
+      return true;
+    } catch (err) {
+      setServiceStepError(
+        err instanceof Error ? err.message : "teeOracle verification failed.",
+      );
+      return false;
+    } finally {
+      setServiceStepVerifying(false);
+    }
+  }
+
+  async function handleNext() {
+    if (step === 1) {
+      if (
+        serviceMode === "import" &&
+        (!verifiedImport ||
+          verifiedImport.tokenId !== importTokenId.trim() ||
+          !address ||
+          verifiedImport.owner.toLowerCase() !== address.toLowerCase())
+      ) {
+        setServiceStepError(
+          "Load an ERC-8004 agent you own before continuing.",
+        );
+        return;
+      }
+      const ok = await verifyTeeOracleBeforeNext();
+      if (!ok) return;
+    }
+    setStep((s) => s + 1);
   }
 
   // ── Submit (step 3 → mint) ──────────────────────────────────────────────────
@@ -153,6 +232,32 @@ export default function NewAgentPage() {
 
     startTransition(async () => {
       try {
+        await switchChain();
+        const { publicClient, walletClient } = await getViemClients();
+
+        const isImport =
+          serviceMode === "import" && importTokenId.trim() !== "";
+        let importedErc8004Update:
+          | PrepareImportedErc8004TeeOracleResult
+          | undefined;
+
+        if (isImport) {
+          const teeOracleUrl = teeOracleUrlFromServices(builtServices);
+          if (!teeOracleUrl) {
+            setResult({ error: "teeOracle URL is required." });
+            return;
+          }
+          const preparedImport = await prepareImportedErc8004TeeOracle({
+            erc8004AgentId: importTokenId.trim(),
+            teeOracleUrl,
+          });
+          if ("error" in preparedImport) {
+            setResult({ error: preparedImport.error });
+            return;
+          }
+          importedErc8004Update = preparedImport;
+        }
+
         const prepared = await prepareCreateAgent({
           name,
           description,
@@ -173,11 +278,21 @@ export default function NewAgentPage() {
           return;
         }
 
-        await switchChain();
-        const { publicClient, walletClient } = await getViemClients();
+        if (isImport && importedErc8004Update) {
+          const updateHash = await walletClient.writeContract({
+            address: importedErc8004Update.erc8004RegistryAddress,
+            abi: IDENTITY_REGISTRY_ABI,
+            functionName: "setAgentURI",
+            args: [
+              BigInt(importedErc8004Update.erc8004AgentId),
+              importedErc8004Update.tokenUri,
+            ],
+            chain: walletClient.chain,
+            account: walletClient.account!,
+          });
+          await publicClient.waitForTransactionReceipt({ hash: updateHash });
+        }
 
-        const isImport =
-          serviceMode === "import" && importTokenId.trim() !== "";
         const mintHash = await walletClient.writeContract(
           isImport
             ? {
@@ -410,7 +525,12 @@ export default function NewAgentPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setServiceMode("new")}
+                onClick={() => {
+                  setServiceMode("new");
+                  setVerifiedImport(null);
+                  setImportError(null);
+                  setImportedFrom(null);
+                }}
                 className={`rounded-lg border p-4 text-left transition-colors ${
                   serviceMode === "new"
                     ? "border-violet-500 bg-violet-950/40"
@@ -426,7 +546,11 @@ export default function NewAgentPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setServiceMode("import")}
+                onClick={() => {
+                  setServiceMode("import");
+                  setVerifiedImport(null);
+                  setImportedFrom(null);
+                }}
                 className={`rounded-lg border p-4 text-left transition-colors ${
                   serviceMode === "import"
                     ? "border-violet-500 bg-violet-950/40"
@@ -446,9 +570,8 @@ export default function NewAgentPage() {
             {serviceMode === "import" && (
               <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4 space-y-3">
                 <p className="text-xs text-gray-400">
-                  Enter the ERC-8004 token ID you own. Its services will be
-                  pre-filled below and the existing identity will be attached at
-                  mint (no new registration created).
+                  Enter the ERC-8004 token ID you own. Existing metadata stays
+                  unchanged except for the required teeOracle service entry.
                 </p>
                 <div className="flex gap-2">
                   <input
@@ -458,6 +581,8 @@ export default function NewAgentPage() {
                     onChange={(e) => {
                       setImportTokenId(e.target.value);
                       setImportError(null);
+                      setImportedFrom(null);
+                      setVerifiedImport(null);
                     }}
                     placeholder="ERC-8004 Token ID"
                     className={`${INPUT} flex-1`}
@@ -471,15 +596,31 @@ export default function NewAgentPage() {
                       setImportPending(true);
                       setImportError(null);
                       setImportedFrom(null);
+                      setVerifiedImport(null);
+                      setServiceStepError(null);
                       const res = await fetchAgentServices(
                         importTokenId.trim(),
+                        address,
                       );
                       setImportPending(false);
                       if ("error" in res) {
                         setImportError(res.error);
                       } else {
-                        setImportedServices(res.services);
+                        setImportedServices(
+                          res.teeOracleUrl
+                            ? [
+                                {
+                                  name: "teeOracle",
+                                  endpoint: res.teeOracleUrl,
+                                },
+                              ]
+                            : [],
+                        );
                         setImportedFrom(res.agentName);
+                        setVerifiedImport({
+                          tokenId: importTokenId.trim(),
+                          owner: address,
+                        });
                         setServicesPanelKey((k) => k + 1);
                       }
                     }}
@@ -493,8 +634,8 @@ export default function NewAgentPage() {
                 )}
                 {importedFrom && (
                   <p className="text-xs text-green-400">
-                    ✓ Loaded &ldquo;{importedFrom}&rdquo; — edit services below
-                    if needed
+                    ✓ Loaded &ldquo;{importedFrom}&rdquo; — add or confirm the
+                    teeOracle endpoint below
                   </p>
                 )}
               </div>
@@ -508,6 +649,7 @@ export default function NewAgentPage() {
               onX402Change={setX402Support}
               hideServices={serviceMode === "import"}
             />
+            {serviceStepError && <ErrorBox message={serviceStepError} />}
           </>
         )}
 
@@ -719,11 +861,11 @@ export default function NewAgentPage() {
         {step < 3 ? (
           <button
             type="button"
-            onClick={() => setStep((s) => s + 1)}
-            disabled={!canAdvance()}
+            onClick={() => void handleNext()}
+            disabled={!canAdvance() || serviceStepVerifying}
             className="px-6 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
           >
-            Next →
+            {serviceStepVerifying ? "Checking…" : "Next →"}
           </button>
         ) : (
           <button
@@ -790,6 +932,12 @@ function ReviewRow({
       </span>
     </div>
   );
+}
+
+function teeOracleUrlFromServices(
+  services: readonly ServiceEditorEntry[],
+): string | undefined {
+  return services.find((service) => service.name === "teeOracle")?.endpoint;
 }
 
 function validateJson(input: string): string | null {

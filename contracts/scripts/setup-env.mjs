@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // setup-env.mjs
-// Reads Hardhat Ignition deployed_addresses.json and writes apps/dashboard/.env.local
+// Reads Hardhat Ignition deployed_addresses.json and writes shared deployment JSON
 //
 // Usage:
-//   node contracts/scripts/setup-env.mjs [chainId]
-//   node contracts/scripts/setup-env.mjs 84532   # default Base Sepolia
+//   node contracts/scripts/setup-env.mjs [network|chainId]
+//   node contracts/scripts/setup-env.mjs baseSepolia   # default
+//   node contracts/scripts/setup-env.mjs base
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -13,7 +14,19 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
 
-const chainId = process.argv[2] ?? "84532";
+const networkOrChainId = process.argv[2] ?? "baseSepolia";
+const CHAIN_ID_BY_NETWORK = {
+  base: "8453",
+  baseSepolia: "84532",
+};
+const chainId = CHAIN_ID_BY_NETWORK[networkOrChainId] ?? networkOrChainId;
+
+if (!["8453", "84532"].includes(chainId)) {
+  console.error(
+    `Unknown network or chain ID "${networkOrChainId}". Use base, baseSepolia, 8453, or 84532.`,
+  );
+  process.exit(1);
+}
 
 const deployedPath = join(
   ROOT,
@@ -54,112 +67,59 @@ if (existsSync(journalPath)) {
   }
 }
 
-// Map Ignition module keys → env var names
-const KEY_MAP = {
-  "TeeAgent#AgentRegistry": "NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS",
-  "TeeAgent#ValidationRegistry": "NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS",
-  "TeeAgent#TeeVerifier": "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",
+const chainNames = {
+  8453: "base",
+  84532: "baseSepolia",
 };
 
-const resolved = {};
-for (const [ignitionKey, envKey] of Object.entries(KEY_MAP)) {
+// Map Ignition module keys → shared deployment contract keys
+const KEY_MAP = {
+  "TeeAgent#AgentRegistry": "agentRegistry",
+  "TeeAgent#ValidationRegistry": "validationRegistry",
+};
+
+const resolvedContracts = {};
+for (const [ignitionKey, contractKey] of Object.entries(KEY_MAP)) {
   if (raw[ignitionKey]) {
-    resolved[envKey] = raw[ignitionKey];
+    resolvedContracts[contractKey] = raw[ignitionKey];
   }
 }
 
-if (Object.keys(resolved).length === 0) {
+if (Object.keys(resolvedContracts).length === 0) {
   console.error(
     "ERROR: No matching contract addresses found in deployed_addresses.json",
   );
   process.exit(1);
 }
 
-// Write to .env if it exists, otherwise .env.local
-const envPath = join(ROOT, "apps/dashboard/.env");
-const envLocalPath = join(ROOT, "apps/dashboard/.env.local");
-const targetPath = existsSync(envPath) ? envPath : envLocalPath;
+const deploymentsPath = join(ROOT, "deployments.json");
+const deployments = existsSync(deploymentsPath)
+  ? JSON.parse(readFileSync(deploymentsPath, "utf8"))
+  : {};
 
-// Read existing file or start fresh
-let existing = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "";
-
-// Upsert each env var
-for (const [key, value] of Object.entries(resolved)) {
-  const regex = new RegExp(`^${key}=.*$`, "m");
-  if (regex.test(existing)) {
-    existing = existing.replace(regex, `${key}=${value}`);
-  } else {
-    existing += `\n${key}=${value}`;
-  }
-}
-
-const networkByChainId = {
-  1: "mainnet",
-  8453: "base",
-  84532: "baseSepolia",
+const existingDeployment = deployments[chainId] ?? {};
+const nextDeployment = {
+  ...existingDeployment,
+  name: chainNames[chainId] ?? existingDeployment.name,
+  contracts: {
+    ...(existingDeployment.contracts ?? {}),
+    ...resolvedContracts,
+  },
 };
-const network = networkByChainId[chainId] ?? "baseSepolia";
-const networkRegex = /^NEXT_PUBLIC_NETWORK=.*$/m;
-if (networkRegex.test(existing)) {
-  existing = existing.replace(networkRegex, `NEXT_PUBLIC_NETWORK=${network}`);
-} else {
-  existing += `\nNEXT_PUBLIC_NETWORK=${network}`;
-}
-
+delete nextDeployment.contracts.teeVerifier;
+delete nextDeployment.contracts.verifier;
 if (deploymentBlock !== null) {
-  const fromBlockRegex = /^AGENT_REGISTRY_FROM_BLOCK=.*$/m;
-  if (fromBlockRegex.test(existing)) {
-    existing = existing.replace(
-      fromBlockRegex,
-      `AGENT_REGISTRY_FROM_BLOCK=${deploymentBlock}`,
-    );
-  } else {
-    existing += `\nAGENT_REGISTRY_FROM_BLOCK=${deploymentBlock}`;
-  }
+  nextDeployment.fromBlock = String(deploymentBlock);
 }
 
-const targetFile =
-  targetPath === envPath ? "apps/dashboard/.env" : "apps/dashboard/.env.local";
-writeFileSync(targetPath, existing.trimStart() + "\n");
+deployments[chainId] = nextDeployment;
+writeFileSync(deploymentsPath, `${JSON.stringify(deployments, null, 2)}\n`);
 
-console.log(`\n✓ Written to ${targetFile} (chain ${chainId})\n`);
-for (const [k, v] of Object.entries(resolved)) {
+console.log(`\n✓ Written to deployments.json (chain ${chainId})\n`);
+for (const [k, v] of Object.entries(resolvedContracts)) {
   console.log(`  ${k}=${v}`);
 }
-console.log();
-
-// Also write AGENT_REGISTRY_ADDRESS to apps/oracle/.env or .env.local
-if (resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS) {
-  const oracleEnvPath = join(ROOT, "apps/oracle/.env");
-  const oracleEnvLocalPath = join(ROOT, "apps/oracle/.env.local");
-  const oracleTargetPath = existsSync(oracleEnvPath)
-    ? oracleEnvPath
-    : oracleEnvLocalPath;
-
-  let oracleExisting = existsSync(oracleTargetPath)
-    ? readFileSync(oracleTargetPath, "utf8")
-    : "";
-
-  const oracleKey = "AGENT_REGISTRY_ADDRESS";
-  const oracleRegex = new RegExp(`^${oracleKey}=.*$`, "m");
-  if (oracleRegex.test(oracleExisting)) {
-    oracleExisting = oracleExisting.replace(
-      oracleRegex,
-      `${oracleKey}=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`,
-    );
-  } else {
-    oracleExisting += `\n${oracleKey}=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`;
-  }
-
-  const oracleTargetFile =
-    oracleTargetPath === oracleEnvPath
-      ? "apps/oracle/.env"
-      : "apps/oracle/.env.local";
-  writeFileSync(oracleTargetPath, oracleExisting.trimStart() + "\n");
-
-  console.log(`✓ Written to ${oracleTargetFile} (chain ${chainId})\n`);
-  console.log(
-    `  AGENT_REGISTRY_ADDRESS=${resolved.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}`,
-  );
-  console.log();
+if (deploymentBlock !== null) {
+  console.log(`  fromBlock=${deploymentBlock}`);
 }
+console.log();

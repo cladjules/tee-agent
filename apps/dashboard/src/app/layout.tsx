@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import WalletConnectButton from "@/components/wallet/WalletConnectButton";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
+import ChainSync from "@/components/ChainSync";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -24,6 +25,7 @@ export default function RootLayout({
     <html lang="en" className={inter.className}>
       <body className="min-h-screen bg-[#04040a] text-slate-100 antialiased">
         <WalletProvider>
+          <ChainSync />
           {/* Subtle grid overlay */}
           <div className="fixed inset-0 bg-grid pointer-events-none" />
           {/* Top ambient violet glow */}

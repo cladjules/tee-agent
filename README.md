@@ -9,9 +9,9 @@ Create, own, and manage AI agents on-chain with verifiable identity, private enc
 
 ## What is it?
 
-Tee Agent (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a TEE oracle.
+Tee Agent is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a Phala Cloud Intel TDX TEE oracle.
 
-**Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation.
+**Architecture:** The Next.js dashboard owns all contract writes directly via viem. SDK packages provide read-only clients, encryption/decryption helpers, and a reusable oracle server factory. The oracle runs inside a TEE enclave — private data never leaves it in plaintext.
 
 ---
 
@@ -19,27 +19,27 @@ Tee Agent (OAT) is a full-stack framework for deploying AI agents as sovereign o
 
 ### 1. On-Chain Agent Identity — ERC-721 + ERC-8004
 
-Every agent is minted as an **ERC-721 NFT** on Base. Ownership is registered on-chain with an **EIP-712 typed-data proof**, ensuring the agent wallet signature is verifiable by anyone.
+Every agent is minted as an **ERC-721 NFT**. Ownership is registered on-chain with an **EIP-712 typed-data proof**, ensuring the agent wallet signature is verifiable by anyone.
 
 - Agent identity is tied to the NFT token ID — transferable and composable with existing NFT infrastructure
-- Agents are discoverable on-chain via `AgentRegistry` (ERC-8004)
+- Agents are minted through `AgentRegistry` (ERC-7857) and co-registered with the official ERC-8004 Identity Registry
 - Service endpoints (MCP, A2A, web, DID, etc.) are defined on-chain with the agent
 
 ### 2. Private Intelligent Data — ERC-7857 + TEE Oracle
 
-Sensitive agent data — system prompts, agent definitions, API keys, knowledge bases — is stored as **Intelligent Data** per the [ERC-7857](https://eips.ethereum.org/EIPS/eip-7857) standard. All data is AES-256-GCM encrypted and uploaded to **0G Storage** (a decentralised, content-addressed storage network). The `zerog://` URI and a content hash are anchored on-chain.
+Sensitive agent data — system prompts, API keys, knowledge bases — is stored as **Intelligent Data** per [ERC-7857](https://eips.ethereum.org/EIPS/eip-7857). All data is AES-256-GCM encrypted and uploaded to **0G Storage**. The `zerog://` URI and a content hash are anchored on-chain.
 
 - Data is encrypted with **AES-256-GCM**, with sealed keys managed by a **TEE Oracle** (Intel TDX via Phala Cloud)
 - Only the current owner (or explicitly approved wallets) can decrypt and use the agent's private data
-- **Approve** another wallet to access your agent's data without transferring ownership
 - **Transfer** the NFT — private data is automatically re-encrypted for the new owner inside the TEE, verified on-chain by `TEEVerifier`. No plaintext ever leaves the secure enclave.
 
-### 3. On-Chain Reputation & Services — ERC-8004
+### 3. On-Chain Reputation & Validation — ERC-8004
 
-Agents earn a verifiable, tamper-proof reputation through the [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) standard. Other agents and clients can submit scored feedback on-chain, building a trustless track record.
+Agents earn a verifiable, tamper-proof reputation through [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004).
 
-- **Reputation scores** are fixed-point values (int128 × 10^decimals) stored on-chain with Sybil-resistant client filtering
-- Define **service endpoints** directly on-chain: MCP, A2A, web, DID, email, and custom protocols
+- **Validation requests** can be submitted on-chain, naming a validator contract (e.g. `TEEVerifier`) or EOA to respond
+- **Validation responses** carry a score (0–100) and optional evidence URI; the `TEEVerifier` path requires a TDX-attested proof
+- **Reputation scores** are fixed-point values (int128 × 10^decimals) stored on-chain
 - Reputation and service definitions travel with the agent NFT — new owners inherit the agent's full history
 
 ---
@@ -47,31 +47,34 @@ Agents earn a verifiable, tamper-proof reputation through the [ERC-8004](https:/
 ## Full Lifecycle
 
 1. **Register** — Mint an ERC-721 NFT on Base. Sign an EIP-712 proof to link the agent wallet on-chain.
-2. **Encrypt & Store** — Private data (prompts, config, API keys) is AES-256-GCM encrypted and uploaded to **0G Storage** (decentralised content-addressed storage). The `zerog://` URI and a content hash are anchored on-chain.
-3. **Define Services** — Publish MCP, A2A, web, and other endpoints on-chain so other agents and clients can discover and connect to your agent.
-4. **Approve or Transfer** — Approve other wallets to access your agent's private data, or transfer the NFT entirely. On transfer, the TEE re-encrypts all private data for the new owner — verified on-chain.
-5. **Earn Reputation** — Other agents and clients submit feedback scores on-chain. Reputation accumulates on the agent NFT and persists across ownership changes.
-6. **Discover** — Browse all registered agents, filter by reputation, and connect via their published service endpoints.
+2. **Encrypt & Store** — Private data is AES-256-GCM encrypted and uploaded to **0G Storage**. The `zerog://` URI and content hash are anchored on-chain.
+3. **Define Services** — Publish MCP, A2A, web, and other endpoints on-chain so other agents and clients can discover and connect.
+4. **Approve or Transfer** — Approve wallets to access your agent's private data, or transfer the NFT. On transfer, the TEE re-encrypts all private data for the new owner — verified on-chain.
+5. **Validate** — Request on-chain validation by submitting a `validationRequest` naming `TEEVerifier`. The oracle scores the result inside the TEE and submits a `validationResponse` with a TDX-attested proof (production) or ECDSA signature (simulator).
+6. **Earn Reputation** — Validation scores accumulate on-chain and persist across ownership changes.
 
 ---
 
 ## Repository Structure
 
 ```
-tee-agent/
+open-agent/
 ├── packages/
-│   └── agent/         # Types, encryption/decryption, ABIs, registry client
-├── contracts/         # Solidity 0.8.35 (Hardhat + viaIR)
+│   ├── agent/          # Types, ABIs, encryption, registry clients, network config
+│   └── server/         # Reusable TEE oracle server factory (startOracle)
+├── contracts/          # Solidity 0.8.35 (Hardhat + viaIR)
 │   ├── src/
-│   │   ├── AgentRegistry.sol   # ERC-8004 + ERC-721 — core agent NFT + identity
-│   │   ├── ERC7857.sol         # ERC-7857 Intelligent Digital Asset base
-│   │   ├── TeeVerifier.sol     # ECDSA attestation verifier for TEE oracle proofs
-│   │   └── Verifier.sol        # ERC-7857 data verifier (wraps TeeVerifier)
-│   ├── test/           # Contract tests (node:test + viem)
-│   └── ignition/       # Hardhat Ignition deployment modules
+│   │   ├── AgentRegistry.sol      # ERC-7857 agent NFT + encrypted data
+│   │   ├── ERC7857.sol            # ERC-7857 Intelligent Digital Asset base
+│   │   ├── ValidationRegistry.sol # ERC-8004 validation requests + responses
+│   │   ├── verifiers/
+│   │   │   └── TeeVerifier.sol    # IAgentDataVerifier — TDX DCAP + ECDSA proofs
+│   │   └── Utils.sol              # ERC-7857 data verifier (wraps TeeVerifier)
+│   ├── test/                      # Contract tests (Hardhat)
+│   └── ignition/                  # Hardhat Ignition deployment modules + parameters
 └── apps/
     ├── dashboard/      # Next.js 16 App Router — agent management UI
-    └── oracle/         # Phala Cloud TEE re-encryption oracle server
+    └── oracle/         # Example oracle deployments (prediction-market, web-fetcher)
 ```
 
 ---
@@ -83,117 +86,108 @@ tee-agent/
 | Base         | 8453     | https://mainnet.base.org | https://basescan.org         |
 | Base Sepolia | 84532    | https://sepolia.base.org | https://sepolia.basescan.org |
 
-Set `NEXT_PUBLIC_NETWORK=base` or `NEXT_PUBLIC_NETWORK=baseSepolia` (default: `baseSepolia`).
+Set `NETWORK=base` or `NETWORK=baseSepolia` (default: `baseSepolia`) in `apps/oracle/.env`. The dashboard uses both networks simultaneously — switch via the RainbowKit network selector.
 
 ---
 
 ## Smart Contracts
 
-| Contract        | Standard           | Description                                                           |
-| --------------- | ------------------ | --------------------------------------------------------------------- |
-| `AgentRegistry` | ERC-8004 / ERC-721 | Core agent identity — mint NFT, store metadata URI, on-chain services |
-| `TeeVerifier`   | ERC-7857           | ECDSA attestation verifier for TEE oracle signing keys                |
-| `Verifier`      | ERC-7857           | ERC-7857 data verifier that wraps `TeeVerifier`                       |
+| Contract             | Standard | Description                                                                     |
+| -------------------- | -------- | ------------------------------------------------------------------------------- |
+| `AgentRegistry`      | ERC-7857 | Agent NFT with encrypted intelligent data and ERC-8004 co-registration          |
+| `ValidationRegistry` | ERC-8004 | Validation requests and responses with optional TDX-attested proofs             |
+| `TeeVerifier`        | ERC-7857 | `IAgentDataVerifier` — verifies TDX DCAP quotes or ECDSA signatures from oracle |
+| `Verifier`           | ERC-7857 | ERC-7857 data verifier for NFT transfers (wraps `TeeVerifier`)                  |
 
-Contract ABIs are exported from `@tee-agent/agent`:
+ABIs are exported from `@tee-agent/agent/abis`:
 
 ```typescript
-// Server-side
 import {
   AGENT_REGISTRY_ABI,
-  AGENT_NFT_ABI,
+  VALIDATION_REGISTRY_ABI,
   TEE_VERIFIER_ABI,
-  VERIFIER_ABI,
 } from "@tee-agent/agent/abis";
-
-// Browser / frontend (no Node.js deps)
-import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/browser";
 ```
 
 ---
 
-## SDK — `@tee-agent/agent`
+## Packages
 
-TypeScript client for ERC-8004 registry queries, AES-256-GCM encryption, 0G Storage uploads, and server-side data preparation.
+### `@tee-agent/agent`
 
-### `AgentRegistry` — registry reads
+Types, ABIs, encryption/decryption utilities, registry clients, 0G Storage, and network config.
+
+Sub-path exports: `./types`, `./config`, `./encryption`, `./abis`, `./registry`, `./zero-g`, `./mint`, `./transfer`, `./services`, `./feedback`, `./validate`, `./typed-data`
 
 ```typescript
 import { AgentRegistry } from "@tee-agent/agent/registry";
-
-const registry = new AgentRegistry({
-  address: "0x...",
-  publicClient,
-});
-
-// Resolve agent + fetch metadata
-const agent = await registry.resolve(agentId);
-```
-
-### Encryption utilities
-
-```typescript
+import { getNetworkConfig } from "@tee-agent/agent/config";
 import {
-  readJsonFromUri, // fetch JSON from data: or HTTPS/IPFS URIs
-  buildAccessPayloads, // build owner-signed access proofs for transfer
+  readJsonFromUri,
+  buildAccessPayloads,
 } from "@tee-agent/agent/encryption";
+import { ZeroGStorageClient } from "@tee-agent/agent/zero-g";
 ```
 
-### 0G Storage — `ZeroGStorageClient`
-
-Encrypted private blobs and public metadata are stored on **0G Storage** — a decentralised, content-addressed storage network. The returned `zerog://` URIs are anchored on-chain.
+`getNetworkConfig` returns per-chain addresses, explorer URLs, and OpenSea links — keyed by chain name:
 
 ```typescript
-import {
-  ZeroGStorageClient,
-  uploadEncryptedIntelligentData,
-} from "@tee-agent/agent/zero-g";
-
-// Upload a JSON object and get a zerog:// URI
-const client = new ZeroGStorageClient({ privateKey: "0x..." });
-const uri = await client.uploadJSON({ name: "my-agent", version: "1" });
-// uri = "zerog://0x<rootHash>"
+import { getNetworkConfigByChainId } from "@tee-agent/agent/config";
+const nc = getNetworkConfigByChainId(84532);
+// nc.chain, nc.chainId, nc.isTestnet,
+// nc.identityRegistryAddress, nc.reputationRegistryAddress,
+// nc.explorerUrl, nc.erc8004ScanUrl, nc.openseaUrl
 ```
 
-**Mint flow:**
+### `@tee-agent/server`
+
+Reusable TEE oracle server factory. Implement an `AgentHandler` and call `startOracle`:
 
 ```typescript
-// 1. Server action — encrypt + upload private blobs to 0G Storage
-const intelligentData = await uploadEncryptedIntelligentData({
-  systemPrompt,
-  characterDef,
-  keyEncryptionPublicKey,
-  zeroGPrivateKey: process.env.ZERO_G_PRIVATE_KEY,
-});
-// intelligentData = [{ name, uri: "zerog://0x...", hash: "0x..." }, ...]
+import { startOracle, type AgentHandler } from "@tee-agent/server";
 
-// 2. Upload public metadata to 0G Storage
-const metadataUri = await client.uploadJSON(agentMetadata);
-// metadataUri = "zerog://0x..."
+const handler: AgentHandler = {
+  async run(payload, ctx) {
+    // ctx.blobs contains decrypted private data from 0G Storage
+    return { result: "..." };
+  },
+};
 
-// 3. Frontend — mint via viem
-await walletClient.writeContract({
-  address: registryAddress,
-  abi: AGENT_REGISTRY_ABI,
-  functionName: "mint",
-  args: [
-    agentWallet,
-    tokenUri,
-    metadataUri,
-    intelligentData.map((d) => ({ dataDescription: d.uri, dataHash: d.hash })),
-  ],
-});
+await startOracle({ handler });
 ```
+
+The server handles: TEE key derivation via Phala dstack SDK, 0G Storage blob fetch + ECIES-unwrap + AES-256-GCM decrypt, EIP-712 signature verification, TDX DCAP attestation, and on-chain validation response submission.
+
+HTTP endpoints: `GET /health`, `GET /address`, `GET /info`, `GET /attestation`, `POST /verify`, `POST /reencrypt`, `POST /run`, `POST /validate`
 
 ---
 
-## Dashboard
+## Apps
 
-The `apps/dashboard` Next.js 16 app is the primary UI. Connects to Base or Base Sepolia.
+### `apps/dashboard`
+
+Next.js 16 App Router UI. Connects to Base or Base Sepolia.
 
 - All contract writes execute in the browser via viem — no backend proxy
-- Server Actions (`/lib/actions/`) handle encryption and oracle calls
-- No API routes for internal use
+- Server Actions (`src/lib/actions/`) handle encryption and oracle calls
+- No API routes for internal mutations; the only API route is the cron sync endpoint
+
+### `apps/oracle`
+
+Example oracle deployments built on `@tee-agent/server`:
+
+| Example                             | Description                             |
+| ----------------------------------- | --------------------------------------- |
+| `src/examples/prediction-market.ts` | Price/outcome oracle with LLM scoring   |
+| `src/examples/web-data-oracle.ts`   | Fetches and summarises web data via LLM |
+
+```bash
+# Local dev (starts tappd simulator via Docker Compose)
+npm run dev:prediction-market --prefix apps/oracle
+
+# Deploy to Phala Cloud
+npm run deploy:prediction-market --prefix apps/oracle
+```
 
 ---
 
@@ -201,89 +195,102 @@ The `apps/dashboard` Next.js 16 app is the primary UI. Connects to Base or Base 
 
 ### Prerequisites
 
-- Node.js ≥ 20
-- npm ≥ 10
+- Node.js ≥ 20, npm ≥ 10
+- Docker (for local tappd simulator)
 - A wallet funded on Base Sepolia (faucet: https://www.coinbase.com/faucets/base-ethereum-goerli-faucet)
 
-### 1. Install and build packages
+### 1. Install and build
 
 ```bash
 npm install
-npm run build --prefix packages
+npm run build --workspace=packages/agent
+npm run build --workspace=packages/server
 ```
 
 ### 2. Fund 0G testnet wallet
 
-Private blob and metadata uploads require a small amount of 0G testnet tokens. Use the same key as `ZERO_G_PRIVATE_KEY` (or `PRIVATE_KEY`):
+Private blob uploads require 0G testnet tokens. Fund the wallet used by `PRIVATE_KEY`:
 
 - Faucet: https://faucet.0g.ai
-- 0G testnet RPC: `https://evmrpc-testnet.0g.ai`
+- RPC: `https://evmrpc-testnet.0g.ai`
 
 ### 3. Deploy contracts to Base Sepolia
 
 ```bash
 cd contracts
-npm test                         # run contract tests first
-npm run deploy:baseSepolia
-npm run setOracle:baseSepolia    # register the TEE oracle address
+npm test                          # run contract tests first
+npm run deploy:baseSepolia        # deploys AgentRegistry, ValidationRegistry, TeeVerifier, Verifier
+npm run setOracle:baseSepolia     # fetches oracle /address and registers it on-chain
+npm run setup-env -- baseSepolia  # writes deployed addresses to deployments.json
 ```
 
-Copy the deployed contract addresses into your dashboard env.
-
-### 4. Configure environment
+### 4. Configure environment files
 
 ```bash
-cd apps/dashboard
-cp .env.example .env
+cp apps/dashboard/.env.example apps/dashboard/.env
+cp apps/oracle/.env.example    apps/oracle/.env
+cp contracts/.env.example      contracts/.env
 ```
 
-```env
-# Chain
-NEXT_PUBLIC_NETWORK=baseSepolia
-RPC_URL=https://sepolia.base.org
+Fill in the required values in each file — see the tables below.
 
-# Contracts (from deployment above)
-AGENT_REGISTRY_ADDRESS=0x...
-TEE_VERIFIER_ADDRESS=0x...
-
-# Deployer / signer
-PRIVATE_KEY=0x...
-
-# 0G Storage (for encrypted blob uploads only — falls back to PRIVATE_KEY)
-ZERO_G_PRIVATE_KEY=0x...
-# ZERO_G_RPC_URL=https://evmrpc-testnet.0g.ai
-# ZERO_G_INDEXER_URL=https://indexer-storage-testnet-turbo.0g.ai
-
-# Pinata IPFS (for agent metadata JSON uploads — V3 key with org:files:write scope)
-PINATA_JWT=eyJ...
-
-# Phala oracle — dashboard fetches pubkey from GET /address at mint time
-# Leave unset to skip TEE features
-NEXT_PUBLIC_ORACLE_URL=https://<app-id>-3000.dstack.host
-```
-
-### 5. Start the dashboard
+### 5. Start
 
 ```bash
-cd apps/dashboard && npm run dev
+# Dashboard + oracle together (turbo)
+npm run dev
+
+# Dashboard only
+npm run dev --workspace=apps/dashboard
 ```
 
 ---
 
 ## Environment Variables
 
-| Variable                 | Required | Description                                                                                                                           |
-| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`    | Yes      | `base` or `baseSepolia` (default: `baseSepolia`)                                                                                      |
-| `RPC_URL`                | Yes      | EVM RPC endpoint for the app chain                                                                                                    |
-| `AGENT_REGISTRY_ADDRESS` | Yes      | Deployed `AgentRegistry` contract address                                                                                             |
-| `TEE_VERIFIER_ADDRESS`   | No       | Deployed `TEEVerifier` address                                                                                                        |
-| `PRIVATE_KEY`            | Yes      | Deployer / server-side signer key                                                                                                     |
-| `ZERO_G_PRIVATE_KEY`     | Yes      | Key for 0G Storage encrypted blob uploads (falls back to `PRIVATE_KEY`)                                                               |
-| `ZERO_G_RPC_URL`         | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                          |
-| `ZERO_G_INDEXER_URL`     | No       | 0G Indexer URL (default: turbo testnet indexer — standard is currently unavailable)                                                   |
-| `PINATA_JWT`             | Yes      | Pinata Bearer JWT for IPFS metadata uploads                                                                                           |
-| `NEXT_PUBLIC_ORACLE_URL` | No       | Phala Cloud CVM URL. Used server-side (mint/transfer) and client-side (Run Oracle / Validate). Local default: `http://localhost:3001` |
+### `apps/dashboard`
+
+| Variable                               | Required | Description                                                                                      |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `RPC_URL_BASE`                         | No       | EVM RPC for Base mainnet (server-side only)                                                      |
+| `RPC_URL_BASE_SEPOLIA`                 | No       | EVM RPC for Base Sepolia (server-side only; at least one RPC URL required)                       |
+| `deployments.json`                     | No       | Public deployed contract addresses and AgentRegistry scan start blocks (auto-set by `setup-env`) |
+| `PRIVATE_KEY`                          | Yes      | Server-side signer key — never exposed to the client                                             |
+| `ZERO_G_RPC_URL`                       | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                     |
+| `ZERO_G_INDEXER_URL`                   | No       | 0G Indexer URL (default: turbo testnet indexer)                                                  |
+| `PINATA_JWT`                           | Yes      | Pinata V3 Bearer JWT for IPFS metadata uploads (`org:files:write` scope)                         |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No       | WalletConnect project ID (create at https://cloud.walletconnect.com; falls back to demo ID)      |
+| `UPSTASH_REDIS_REST_URL`               | No       | Upstash Redis REST URL — caches indexed agents + last-seen block                                 |
+| `UPSTASH_REDIS_REST_TOKEN`             | No       | Upstash Redis REST token                                                                         |
+| `CRON_SECRET`                          | No       | Bearer token Vercel injects into cron job requests (set in Vercel project settings)              |
+
+### `apps/oracle`
+
+| Variable                    | Required | Description                                                                                  |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `NETWORK`                   | Yes      | `base` or `baseSepolia` (default: `baseSepolia`) — selects which per-network vars to use     |
+| `RPC_URL_BASE`              | No       | EVM RPC for Base mainnet                                                                     |
+| `RPC_URL_BASE_SEPOLIA`      | No       | EVM RPC for Base Sepolia (at least one required)                                             |
+| `deployments.json`          | No       | Public deployed contract addresses and AgentRegistry scan start blocks                       |
+| `PRIVATE_KEY`               | No       | Key for on-chain validation responses and 0G Storage fees (falls back to TEE-derived wallet) |
+| `ZERO_G_RPC_URL`            | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                 |
+| `ZERO_G_INDEXER_URL`        | No       | 0G Indexer URL (default: turbo testnet indexer)                                              |
+| `LLM_API_KEY`               | No       | API key for LLM scoring (Red Pill for TEE-attested models: https://red-pill.ai)              |
+| `LLM_API_BASE`              | No       | OpenAI-compatible API base (default: `https://api.red-pill.ai/v1`)                           |
+| `LLM_VALIDATION_MODEL`      | No       | Model used by `/validate` scorer (default: `phala/gemma-4-26b-a4b-uncensored`)               |
+| `PORT`                      | No       | HTTP port (default: `3001`)                                                                  |
+| `IDENTITY_REGISTRY_ADDRESS` | No       | Override ERC-8004 Identity Registry (default: official singleton for the network)            |
+| `DSTACK_VERIFIER_URL`       | No       | dstack-verifier sidecar URL (default: `http://verifier:8080`)                                |
+| `DSTACK_SIMULATOR_ENDPOINT` | No       | Local tappd simulator endpoint for dev (e.g. `http://localhost:8090`)                        |
+
+### `contracts`
+
+| Variable               | Required | Description                                                         |
+| ---------------------- | -------- | ------------------------------------------------------------------- |
+| `PRIVATE_KEY`          | Yes      | Deployer key                                                        |
+| `BASE_SEPOLIA_RPC_URL` | Yes      | RPC for Base Sepolia deployments                                    |
+| `BASE_RPC_URL`         | Yes      | RPC for Base mainnet deployments                                    |
+| `EXPLORER_API_KEY`     | No       | Basescan API key for contract source verification (`--verify` flag) |
 
 ---
 

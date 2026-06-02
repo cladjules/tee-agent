@@ -11,11 +11,20 @@
  *   - 0G Storage download + ECIES-unwrap + AES-256-GCM decrypt
  *   - ECDSA signing of results (TEE-attested)
  *   - NFT transfer re-encryption (/reencrypt)
- *   - Validation response signing (/validate)
+ *   - Validation scoring + on-chain response submission (/validate)
+ *
+ * Proof selection in /validate:
+ *   - Production (real Phala CVM): submits a raw TDX DCAP quote as proof.
+ *     The commitment keccak256(agentId ‖ requestHash ‖ score) is embedded in
+ *     reportData[0:32] so TeeVerifier can verify it without trusting a signing key.
+ *   - Simulator (DSTACK_SIMULATOR_ENDPOINT set): submits a 65-byte EIP-191
+ *     personal_sign signature from the TEE-derived wallet instead. The real
+ *     Automata DCAP contracts reject simulator quotes, so TeeVerifier falls
+ *     back to ECDSA verification when proof.length == 65.
  *
  * Example:
  * ```typescript
- * import { startOracle } from './server.js'
+ * import { startOracle } from '@tee-agent/server'
  *
  * await startOracle({
  *   name: 'my-agent',
@@ -57,6 +66,11 @@ import {
   IDENTITY_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
+import {
+  getNetworkConfig,
+  getNetworkDeploymentByChainId,
+  type RawDeployments,
+} from "@tee-agent/agent/config";
 import { scoreWithLLM } from "./llm-scorer.js";
 
 // ─── Request schemas ────────────────────────────────────────────────────────────
@@ -144,18 +158,24 @@ export interface AgentHandler<
 export interface OracleConfig {
   /** The single agent handler for this oracle deployment. */
   handler: AgentHandler;
+  /** Deployed contract addresses. Import deployments.json from the app root and pass here. */
+  deployments?: RawDeployments;
 }
 
 // ─── Oracle server factory ────────────────────────────────────────────────────
 
-const TESTNET_ID_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
-const MAINNET_ID_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
-
 export async function startOracle(config: OracleConfig): Promise<void> {
   const PORT = parseInt(process.env.PORT ?? "3001", 10);
   const KEY_PATH = "oracle/reencrypt";
-  const RPC_URL = process.env.RPC_URL;
-  const AGENT_REGISTRY_ADDRESS = process.env.AGENT_REGISTRY_ADDRESS;
+  const networkName = (process.env.NETWORK ?? "baseSepolia").trim();
+  const networkConfig = getNetworkConfig(networkName);
+  const envSuffix = networkConfig.name === "base" ? "_BASE" : "_BASE_SEPOLIA";
+  const RPC_URL = process.env[`RPC_URL${envSuffix}`];
+  const deployment = getNetworkDeploymentByChainId(
+    networkConfig.chainId,
+    config.deployments ?? {},
+  );
+  const configuredAgentRegistryAddress = deployment.contracts.agentRegistry;
   const ZERO_G_RPC_URL = process.env.ZERO_G_RPC_URL;
   const ZERO_G_INDEXER_URL = process.env.ZERO_G_INDEXER_URL;
   // dstack-verifier sidecar URL. Defaults to Docker Compose service name (works in docker-compose
@@ -180,21 +200,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   // Set NETWORK=base (mainnet) or NETWORK=baseSepolia (testnet, default).
   // chainId and Identity Registry address are derived statically — no RPC call needed.
   // Override Identity Registry with IDENTITY_REGISTRY_ADDRESS env var if needed.
-  const NETWORK_CONFIG = {
-    base: {
-      chainId: 8453n,
-      isTestnet: false,
-      identityRegistryAddress: MAINNET_ID_REGISTRY,
-    },
-    baseSepolia: {
-      chainId: 84532n,
-      isTestnet: true,
-      identityRegistryAddress: TESTNET_ID_REGISTRY,
-    },
-  } as const;
-
-  const network = process.env.NETWORK as keyof typeof NETWORK_CONFIG;
-  const networkConfig = NETWORK_CONFIG[network] ?? NETWORK_CONFIG.baseSepolia;
   const { chainId, isTestnet } = networkConfig;
   const identityRegistryAddress: string =
     process.env.IDENTITY_REGISTRY_ADDRESS ??
@@ -209,7 +214,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     verifyingContract: wallet.address,
   };
   console.log(
-    `[oracle] network=${network} chainId=${chainId} isTestnet=${isTestnet}`,
+    `[oracle] network=${networkConfig.name} chainId=${chainId} isTestnet=${isTestnet}`,
   );
   console.log(
     `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
@@ -762,6 +767,14 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       );
 
       const validationResult: Record<string, unknown> = { score, reasoning };
+      const responseJson = JSON.stringify(validationResult);
+      const responseURI =
+        body.responseURI ||
+        `data:application/json;base64,${Buffer.from(responseJson, "utf8").toString("base64")}`;
+      const responseHash =
+        body.responseHash === ethers.ZeroHash && !body.responseURI
+          ? ethers.keccak256(ethers.toUtf8Bytes(responseJson))
+          : body.responseHash;
 
       // Generate proof for on-chain TEEVerifier.verifyValidation():
       //   - Simulator: 65-byte EIP-191 personal_sign signature from the TEE wallet.
@@ -800,8 +813,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         const tx = (await registry.validationResponse(
           body.requestHash,
           score,
-          body.responseURI,
-          body.responseHash,
+          responseURI,
+          responseHash,
           body.tag,
           quote,
         )) as ethers.ContractTransactionResponse;
@@ -817,6 +830,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         score,
         quote,
         event_log,
+        responseURI,
+        responseHash,
         erc8004AgentId: erc8004AgentId.toString(),
         ...(txHash !== undefined ? { txHash } : {}),
       });
@@ -833,17 +848,18 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     try {
       const body = runBodySchema.parse(req.body);
       const agentId = BigInt(body.agentId);
-      const registryAddress = body.registryAddress ?? AGENT_REGISTRY_ADDRESS;
+      const registryAddress =
+        body.registryAddress ?? configuredAgentRegistryAddress;
       console.log(
         `[oracle] /run agentId=${agentId} registry=${registryAddress}`,
       );
       if (!registryAddress) {
         console.error(
-          `[oracle] /run registryAddress not provided and AGENT_REGISTRY_ADDRESS not set`,
+          `[oracle] /run registryAddress not provided and deployments.json has no AgentRegistry for ${networkConfig.name}`,
         );
         res.status(400).json({
           error:
-            "registryAddress is required (or set AGENT_REGISTRY_ADDRESS on the oracle).",
+            "registryAddress is required because deployments.json has no AgentRegistry for this network.",
         });
         return;
       }

@@ -184,9 +184,6 @@ export type AgentConfig = {
   reputationRegistryAddress?: Address;
   /** Our own ValidationRegistry deployment. */
   validationRegistryAddress?: Address;
-  teeVerifierAddress?: Address;
-  /** Phala Cloud TDX oracle base URL. */
-  oracleUrl?: string;
   /** Pinata JWT for IPFS uploads (agentMetadataUri). */
   pinataJwt?: string;
   /** Private key for 0G Storage upload transactions. */
@@ -236,6 +233,8 @@ export type MintResult = {
 export type TransferParams = {
   tokenId: string;
   to: Address;
+  oracleUrl: string;
+  recipientOracleUrl?: string;
   newOwnerPublicKey?: Hex;
   oracleSignature?: string;
   oracleDeadline?: string;
@@ -291,11 +290,33 @@ export type PrepareRegisterErc8004Params = {
 
 export type FetchAgentServicesParams = {
   tokenId: string;
+  expectedOwner?: Address;
 };
 
 export type FetchAgentServicesResult = {
   services: AgentService[];
   agentName: string;
+  metadataUri: string;
+  teeOracleUrl?: string;
+  metadataStorage: "ipfs" | "data" | "http";
+};
+
+export type VerifyTeeOracleResult = {
+  url: string;
+  address: Address;
+  publicKey: Hex;
+};
+
+export type PrepareImportedErc8004TeeOracleParams = {
+  erc8004AgentId: string;
+  teeOracleUrl: string;
+};
+
+export type PrepareImportedErc8004TeeOracleResult = {
+  erc8004RegistryAddress: Address;
+  erc8004AgentId: string;
+  tokenUri: string;
+  teeOracleUrl: string;
 };
 
 // ─── Registry ─────────────────────────────────────────────────────────────────

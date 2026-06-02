@@ -1,46 +1,42 @@
 import { notFound } from "next/navigation";
 import { getAgentPageData } from "@/lib/actions/registry";
+import { getClientConfigForChain } from "@/lib/client-config";
 import AgentDetailActions from "./AgentDetailActions";
+import { getNetworkConfigByChainId } from "@tee-agent/agent/config";
+import { getActiveChainId } from "@/lib/active-chain";
+import type {
+  AgentIntelligentDataEntry,
+  AgentService,
+} from "@tee-agent/agent/types";
 
-// ─── Chain helpers ────────────────────────────────────────────────────────────
+// ─── Chain helpers (pure — receive URLs as args) ──────────────────────────────
 
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "baseSepolia") as
-  | "base"
-  | "baseSepolia";
-
-const EXPLORER_BASE =
-  NETWORK === "base" ? "https://basescan.org" : "https://sepolia.basescan.org";
-
-const ERC8004_SCAN_BASE =
-  NETWORK === "base" ? "https://8004scan.io" : "https://testnet.8004scan.io";
-
-const ERC8004_CHAIN_SLUG = NETWORK === "base" ? "base" : "base-sepolia";
-
-const OPENSEA_BASE =
-  NETWORK === "base"
-    ? "https://opensea.io/assets/base"
-    : "https://testnets.opensea.io/assets/base-sepolia";
-
-function openseaNft(contractAddr: string, tokenId: string | bigint) {
-  return `${OPENSEA_BASE}/${contractAddr}/${tokenId}`;
+function openseaNft(
+  contractAddr: string,
+  tokenId: string | bigint,
+  openseaUrl: string,
+) {
+  return `${openseaUrl}/${contractAddr}/${tokenId}`;
 }
 
-const ERC8004_IDENTITY_REGISTRY =
-  NETWORK === "base"
-    ? "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
-    : "0x8004A818BFB912233c491871b3d84c89A494BD9e";
-
-const ERC8004_REPUTATION_REGISTRY =
-  NETWORK === "base"
-    ? "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
-    : "0x8004B663056A597Dffe9eCcC1965A193B7388713";
-
-function explorerAddress(addr: string) {
-  return `${EXPLORER_BASE}/address/${addr}`;
+function explorerAddress(addr: string, explorerUrl: string) {
+  return `${explorerUrl}/address/${addr}`;
 }
 
-function explorerNft(contractAddr: string, tokenId: string | bigint) {
-  return `${EXPLORER_BASE}/nft/${contractAddr}/${tokenId}`;
+function explorerNft(
+  contractAddr: string,
+  tokenId: string | bigint,
+  explorerUrl: string,
+) {
+  return `${explorerUrl}/nft/${contractAddr}/${tokenId}`;
+}
+
+function erc8004ScanUrl(
+  agentId: string,
+  erc8004ScanBase: string,
+  erc8004ChainSlug: string,
+) {
+  return `${erc8004ScanBase}/agents/${erc8004ChainSlug}/${agentId}`;
 }
 
 function ipfsGatewayUrl(uri: string) {
@@ -48,10 +44,6 @@ function ipfsGatewayUrl(uri: string) {
     return `https://gateway.pinata.cloud/ipfs/${uri.slice(7)}`;
   }
   return null;
-}
-
-function erc8004ScanUrl(agentId: string) {
-  return `${ERC8004_SCAN_BASE}/agents/${ERC8004_CHAIN_SLUG}/${agentId}`;
 }
 
 interface Props {
@@ -68,17 +60,27 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function AgentDetailPage({ params }: Props) {
   const { id } = await params;
+  const chainId = await getActiveChainId();
+  const nc = getNetworkConfigByChainId(chainId);
+  const clientCfg = getClientConfigForChain(chainId);
   const {
     agent,
     intelligentDataInfo,
     feedbackOverview,
     oracleRunsResult,
     pendingValidations,
-  } = await getAgentPageData(id);
+    recipientAgents,
+  } = await getAgentPageData(id, chainId);
 
   if (!agent) notFound();
 
   const oracleRuns = oracleRunsResult.runs;
+  const actionClientCfg = {
+    registryAddress: clientCfg.registryAddress,
+    identityRegistryAddress: clientCfg.identityRegistryAddress,
+    reputationRegistryAddress: clientCfg.reputationRegistryAddress,
+    validationRegistryAddress: clientCfg.validationRegistryAddress,
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -120,69 +122,26 @@ export default async function AgentDetailPage({ params }: Props) {
             value={agent.owner}
             mono
             truncate
-            href={explorerAddress(agent.owner)}
+            href={explorerAddress(agent.owner, nc.explorerUrl)}
           />
-          {agent.agentWallet &&
-            agent.agentWallet !==
-              "0x0000000000000000000000000000000000000000" && (
-              <DetailRow
-                label="Agent Wallet"
-                value={agent.agentWallet}
-                mono
-                truncate
-                href={explorerAddress(agent.agentWallet)}
-              />
-            )}
-          {intelligentDataInfo.verifierAddress &&
-            intelligentDataInfo.verifierAddress !==
-              "0x0000000000000000000000000000000000000000" && (
-              <DetailRow
-                label="Verifier"
-                value={intelligentDataInfo.verifierAddress}
-                mono
-                truncate
-                href={explorerAddress(intelligentDataInfo.verifierAddress)}
-              />
-            )}
-          {process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS && (
+          {clientCfg.registryAddress && (
             <DetailRow
-              label="AgentRegistry"
-              value={process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS}
+              label="AgentRegistry · ERC-7857"
+              value={clientCfg.registryAddress}
               mono
               truncate
-              href={explorerAddress(
-                process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS,
-              )}
+              href={explorerAddress(clientCfg.registryAddress, nc.explorerUrl)}
             />
           )}
-          <DetailRow
-            label="Identity Registry"
-            value={ERC8004_IDENTITY_REGISTRY}
-            mono
-            truncate
-            href={explorerAddress(ERC8004_IDENTITY_REGISTRY)}
-          />
-          <DetailRow
-            label="Reputation Registry"
-            value={
-              process.env.NEXT_PUBLIC_REPUTATION_REGISTRY_ADDRESS ||
-              ERC8004_REPUTATION_REGISTRY
-            }
-            mono
-            truncate
-            href={explorerAddress(
-              process.env.NEXT_PUBLIC_REPUTATION_REGISTRY_ADDRESS ||
-                ERC8004_REPUTATION_REGISTRY,
-            )}
-          />
-          {process.env.NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS && (
+          {clientCfg.validationRegistryAddress && (
             <DetailRow
-              label="Validation Registry"
-              value={process.env.NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS}
+              label="ValidationRegistry · ERC-8004"
+              value={clientCfg.validationRegistryAddress}
               mono
               truncate
               href={explorerAddress(
-                process.env.NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS,
+                clientCfg.validationRegistryAddress,
+                nc.explorerUrl,
               )}
             />
           )}
@@ -192,15 +151,16 @@ export default async function AgentDetailPage({ params }: Props) {
           <h2 className="font-semibold text-xs text-gray-500 uppercase tracking-wider">
             On-chain
           </h2>
-          {process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS && (
+          {clientCfg.registryAddress && (
             <>
               <DetailRow
                 label="ERC-721"
                 value={`#${agent.agentId.toString()}`}
                 mono
                 href={explorerNft(
-                  process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS,
+                  clientCfg.registryAddress,
                   agent.agentId,
+                  nc.explorerUrl,
                 )}
               />
               <DetailRow
@@ -208,8 +168,9 @@ export default async function AgentDetailPage({ params }: Props) {
                 value={`#${agent.agentId.toString()}`}
                 mono
                 href={openseaNft(
-                  process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS,
+                  clientCfg.registryAddress,
                   agent.agentId,
+                  nc.openseaUrl,
                 )}
               />
             </>
@@ -220,7 +181,11 @@ export default async function AgentDetailPage({ params }: Props) {
                 label="ERC-8004"
                 value={`#${intelligentDataInfo.erc8004AgentId}`}
                 mono
-                href={erc8004ScanUrl(intelligentDataInfo.erc8004AgentId)}
+                href={erc8004ScanUrl(
+                  intelligentDataInfo.erc8004AgentId,
+                  nc.erc8004ScanUrl,
+                  nc.erc8004ChainSlug,
+                )}
               />
             )}
           {agent.publicMetadataUri && (
@@ -252,6 +217,8 @@ export default async function AgentDetailPage({ params }: Props) {
         initialServices={agent.metadata.services ?? []}
         initialRuns={oracleRuns}
         initialPendingValidations={pendingValidations}
+        recipientAgents={recipientAgents}
+        clientCfg={actionClientCfg}
       />
 
       {/* Secondary sections */}
@@ -335,7 +302,7 @@ export default async function AgentDetailPage({ params }: Props) {
         </h2>
         {(agent.metadata.services?.length ?? 0) > 0 ? (
           <div className="space-y-3">
-            {agent.metadata.services.map((service) => (
+            {agent.metadata.services.map((service: AgentService) => (
               <div
                 key={`${service.name}:${service.endpoint}`}
                 className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2"
@@ -367,26 +334,28 @@ export default async function AgentDetailPage({ params }: Props) {
         </h2>
         {intelligentDataInfo.intelligentData.length > 0 ? (
           <div className="space-y-3">
-            {intelligentDataInfo.intelligentData.map((entry, idx) => (
-              <div
-                key={`${entry.dataHash}:${idx}`}
-                className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2"
-              >
-                {entry.name && (
-                  <p className="text-xs font-semibold text-gray-400">
-                    {entry.name}
+            {intelligentDataInfo.intelligentData.map(
+              (entry: AgentIntelligentDataEntry, idx: number) => (
+                <div
+                  key={`${entry.dataHash}:${idx}`}
+                  className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2"
+                >
+                  {entry.name && (
+                    <p className="text-xs font-semibold text-gray-400">
+                      {entry.name}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500">Proof Hash</p>
+                  <p className="text-xs text-gray-300 break-all font-mono">
+                    {entry.dataHash}
                   </p>
-                )}
-                <p className="text-xs text-gray-500">Proof Hash</p>
-                <p className="text-xs text-gray-300 break-all font-mono">
-                  {entry.dataHash}
-                </p>
-                <p className="text-xs text-gray-500">Address / URI</p>
-                <p className="text-xs text-gray-300 break-all font-mono">
-                  {entry.dataDescription}
-                </p>
-              </div>
-            ))}
+                  <p className="text-xs text-gray-500">Address / URI</p>
+                  <p className="text-xs text-gray-300 break-all font-mono">
+                    {entry.dataDescription}
+                  </p>
+                </div>
+              ),
+            )}
           </div>
         ) : (
           <p className="text-gray-500 text-sm">

@@ -17,7 +17,7 @@ import type {
   TransferAccessPayload,
   TransferOwnershipProof,
   TransferValidityProof,
-} from "./core/types.js";
+} from "./types.js";
 
 // ─── EIP-712 type schemas ─────────────────────────────────────────────────────
 // Exported as plain mutable objects so they are compatible with both

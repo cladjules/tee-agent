@@ -24,10 +24,10 @@ services:
       - PORT=3001
       - ORACLE_ENTRY
       # Required
-      - RPC_URL
-      - AGENT_REGISTRY_ADDRESS
+      - NETWORK
+      - RPC_URL_BASE
+      - RPC_URL_BASE_SEPOLIA
       # 0G Storage
-      - ZERO_G_PRIVATE_KEY
       - ZERO_G_RPC_URL
       - ZERO_G_INDEXER_URL
     volumes:

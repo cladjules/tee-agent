@@ -5,21 +5,17 @@
  * then builds the client-side access payloads that the recipient wallet must sign.
  */
 
-import { buildAccessPayloads } from "../core/crypto.js";
-import type {
-  AgentConfig,
-  TransferParams,
-  TransferResult,
-} from "../core/types.js";
-import { AgentRegistry } from "../core/registry/agent.js";
+import { buildAccessPayloads } from "../crypto.js";
+import type { AgentConfig, TransferParams, TransferResult } from "../types.js";
+import { AgentRegistry } from "../registry/agent.js";
 import { createPublicClient, http } from "viem";
+import { verifyTeeOracleEndpoint } from "./services.js";
 
 export async function prepareTransfer(
   config: AgentConfig,
   params: TransferParams,
 ): Promise<TransferResult> {
-  const { tokenId, to, newOwnerPublicKey, oracleSignature, oracleDeadline } =
-    params;
+  const { tokenId, to, oracleSignature, oracleDeadline } = params;
 
   if (!tokenId) throw new Error("Token ID is required.");
   if (!to) throw new Error("Recipient address is required.");
@@ -67,13 +63,19 @@ export async function prepareTransfer(
     ]);
     from = ownerAddress;
 
-    if (!config.oracleUrl) {
-      throw new Error(
-        "oracleUrl is required for secure agent transfers. Start the oracle server and set oracleUrl in AgentConfig.",
-      );
+    const oracleUrl = params.oracleUrl.trim().replace(/\/+$/, "");
+    if (!oracleUrl) {
+      throw new Error("teeOracle URL is required for secure agent transfers.");
     }
-    if (!newOwnerPublicKey) {
-      throw new Error("newOwnerPublicKey is required for remote oracle.");
+    const targetEncryptionPublicKey =
+      params.newOwnerPublicKey ??
+      (params.recipientOracleUrl
+        ? (await verifyTeeOracleEndpoint(params.recipientOracleUrl)).publicKey
+        : undefined);
+    if (!targetEncryptionPublicKey) {
+      throw new Error(
+        "recipientOracleUrl or newOwnerPublicKey is required for encrypted transfers.",
+      );
     }
     if (!oracleSignature) {
       throw new Error(
@@ -88,7 +90,7 @@ export async function prepareTransfer(
       (d: { dataDescription: string }) => d.dataDescription,
     );
 
-    const oracleResponse = await fetch(`${config.oracleUrl}/reencrypt`, {
+    const oracleResponse = await fetch(`${oracleUrl}/reencrypt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -101,7 +103,7 @@ export async function prepareTransfer(
         deadline: Number(oracleDeadline),
         intelligentDataHashes: currentHashes,
         blobUris,
-        targetPubkey: newOwnerPublicKey,
+        targetPubkey: targetEncryptionPublicKey,
         signature: oracleSignature,
       }),
     });
@@ -132,6 +134,7 @@ export async function prepareTransfer(
       to,
       deadline: deadlineBig,
       currentHashes,
+      targetPubkey: targetEncryptionPublicKey,
     });
   }
 

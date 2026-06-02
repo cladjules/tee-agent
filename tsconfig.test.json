@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./__tests__/dist",
+    "rootDir": "./__tests__",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "composite": false
+  },
+  "include": ["./__tests__/**/*.ts"]
+}

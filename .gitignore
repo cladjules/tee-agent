@@ -160,6 +160,7 @@ package-lock.json
 /contracts/artifacts
 /contracts/deployments
 /contracts/cache
+/contracts/artifacts-foundry
 /contracts/types
 /contracts/coverage
 /contracts/.gas-snapshot

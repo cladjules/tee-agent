@@ -90,6 +90,15 @@ interface IERC7857 is IERC721, IERC7857Metadata {
         TransferValidityProof[] calldata proofs
     ) external;
 
+    /// @notice Transfer the ERC-7857 token and its linked ERC-8004 identity token atomically.
+    /// @dev Requires this AgentRegistry contract to be approved to move the linked ERC-8004 token.
+    function iTransferFromWithIdentity(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) external;
+
     // ─── Access delegation ────────────────────────────────────────────────────
 
     /// @notice Delegate access-proof signing to an assistant address (or zero to revoke).
@@ -135,7 +144,7 @@ interface IERC8004IdentityRegistry is IERC721 {
 // ─── IAgentRegistry ──────────────────────────────────────────────────────────
 
 /// @title IAgentRegistry
-/// @notice Interface for the AgentRegistry ERC-721 / ERC-7857 / ERC-8004 contract.
+/// @notice Interface for the ERC-7857 AgentRegistry contract.
 interface IAgentRegistry is IERC721, IERC7857 {
     // --- Events ---------------------------------------------------------------
 

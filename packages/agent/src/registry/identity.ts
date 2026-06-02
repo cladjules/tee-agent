@@ -1,6 +1,6 @@
 import type { RegistryConfig } from "../types.js";
 import type { Address, PublicClient } from "viem";
-import { IDENTITY_REGISTRY_ABI } from "../../abis.js";
+import { IDENTITY_REGISTRY_ABI } from "../abis.js";
 
 export class IdentityRegistry {
   private readonly _addr: Address;

@@ -1,6 +1,6 @@
 import type { RegistryConfig } from "../types.js";
 import type { Address, PublicClient } from "viem";
-import { REPUTATION_REGISTRY_ABI } from "../../abis.js";
+import { REPUTATION_REGISTRY_ABI } from "../abis.js";
 
 export class ReputationRegistry {
   readonly address: Address;
@@ -19,6 +19,15 @@ export class ReputationRegistry {
       functionName: "getLastIndex",
       args: [agentId, clientAddress],
     }) as Promise<bigint>;
+  }
+
+  async getClients(agentId: bigint): Promise<Address[]> {
+    return this._pc.readContract({
+      address: this.address,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "getClients",
+      args: [agentId],
+    }) as Promise<Address[]>;
   }
 
   async readFeedback(
@@ -60,5 +69,54 @@ export class ReputationRegistry {
         args: [agentId, clientAddresses, tag1, tag2],
       })) as [bigint, bigint, number];
     return { count, summaryValue, summaryValueDecimals };
+  }
+
+  async readAllFeedback(
+    agentId: bigint,
+    clientAddresses: Address[],
+    tag1: string,
+    tag2: string,
+    includeRevoked: boolean,
+  ): Promise<{
+    clients: Address[];
+    feedbackIndexes: bigint[];
+    values: bigint[];
+    valueDecimals: number[];
+    tag1s: string[];
+    tag2s: string[];
+    revokedStatuses: boolean[];
+  }> {
+    const [
+      clients,
+      feedbackIndexes,
+      values,
+      valueDecimals,
+      tag1s,
+      tag2s,
+      revokedStatuses,
+    ] = (await this._pc.readContract({
+      address: this.address,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "readAllFeedback",
+      args: [agentId, clientAddresses, tag1, tag2, includeRevoked],
+    })) as [
+      Address[],
+      bigint[],
+      bigint[],
+      number[],
+      string[],
+      string[],
+      boolean[],
+    ];
+
+    return {
+      clients,
+      feedbackIndexes,
+      values,
+      valueDecimals,
+      tag1s,
+      tag2s,
+      revokedStatuses,
+    };
   }
 }

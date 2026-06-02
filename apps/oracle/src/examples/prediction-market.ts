@@ -21,7 +21,8 @@
 
 import "dotenv/config";
 import { z } from "zod";
-import { startOracle, type AgentHandler } from "../server.js";
+import { startOracle, type AgentHandler } from "@tee-agent/server";
+import deploymentsJson from "../../../../deployments.json" with { type: "json" };
 
 // ─── Config schema ───────────────────────────────────────────────────────────
 // Shape of data encrypted into the agent's ERC-7857 config blob (iData[1]).
@@ -172,4 +173,5 @@ const predictionVerifier: AgentHandler = {
 
 await startOracle({
   handler: predictionVerifier,
+  deployments: deploymentsJson,
 });

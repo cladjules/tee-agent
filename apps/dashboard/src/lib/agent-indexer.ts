@@ -17,7 +17,7 @@ import {
 } from "@/lib/agent-cache";
 import { AgentRegistry } from "@tee-agent/agent/registry";
 import { createPublicClient, http, type PublicClient } from "viem";
-import { cfg, registryFromBlock } from "@/lib/config";
+import { getServerConfigForChain } from "@/lib/config";
 import {
   REGISTERED_EVENT,
   VALIDATION_REQUEST_EVENT,
@@ -39,6 +39,23 @@ type IndexResult =
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function decodeJsonDataUri(uri: string): Record<string, unknown> | undefined {
+  const prefix = "data:application/json;base64,";
+  if (!uri.startsWith(prefix)) return undefined;
+
+  try {
+    const json = Buffer.from(uri.slice(prefix.length), "base64").toString(
+      "utf8",
+    );
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Incrementally sync ValidationRequest / ValidationResponse events
  * for the given block range only.
@@ -49,6 +66,8 @@ type IndexResult =
  * Returns { added, updated } = number of *newly added* and *updated* pending requests this run.
  */
 async function syncValidations(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   fromBlock: bigint,
   latestBlock: bigint,
   publicClient: PublicClient,
@@ -115,7 +134,11 @@ async function syncValidations(
   await Promise.all(
     [...affectedIds].map(async (agentId) => {
       // Load existing pending set for this agent.
-      const existing = await getCachedValidations(agentId);
+      const existing = await getCachedValidations(
+        chainId,
+        registryAddress,
+        agentId,
+      );
       const pendingMap = new Map<string, CachedValidation>(
         existing.map((r) => [r.requestHash.toLowerCase(), r]),
       );
@@ -125,8 +148,11 @@ async function syncValidations(
         if (res.args.agentId === agentId) {
           const hash = res.args.requestHash.toLowerCase();
           const original = pendingMap.get(hash);
-
-          console.log("UP", original, res.args.response, res.transactionHash);
+          const evidence = decodeJsonDataUri(res.args.responseURI);
+          const reasoning =
+            typeof evidence?.reasoning === "string"
+              ? evidence.reasoning
+              : undefined;
 
           // Only update if we have the original request in Redis.
           if (!original) continue;
@@ -137,6 +163,11 @@ async function syncValidations(
               score: res.args.response,
               txHash: res.transactionHash,
               timestamp: Math.floor(Date.now() / 1000),
+              responseURI: res.args.responseURI,
+              responseHash: res.args.responseHash,
+              tag: res.args.tag,
+              reasoning,
+              evidence,
             },
           } satisfies CachedValidation);
 
@@ -159,7 +190,7 @@ async function syncValidations(
         }
       }
 
-      await setCachedValidations(agentId, [
+      await setCachedValidations(chainId, registryAddress, agentId, [
         ...pendingMap.values(),
       ] as CachedValidation[]);
     }),
@@ -171,7 +202,9 @@ async function syncValidations(
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 /** Scan new blocks since the last cached block, update the agent cache, and sync pending validations. */
-export async function syncEvents(): Promise<IndexResult> {
+export async function syncEvents(chainId: number): Promise<IndexResult> {
+  const cfg = getServerConfigForChain(chainId);
+
   if (!cfg.registryAddress) {
     return { ok: false, skipped: true, reason: "no registry address" };
   }
@@ -190,9 +223,9 @@ export async function syncEvents(): Promise<IndexResult> {
     return { ok: false, skipped: true, reason: "no rpc/registry" };
   }
 
-  const cached = await getCachedAgents();
+  const cached = await getCachedAgents(chainId, cfg.registryAddress);
   const existingAgents = cached?.agents ?? [];
-  const fromBlock = cached ? cached.lastBlock + 1n : registryFromBlock;
+  const fromBlock = cached ? cached.lastBlock + 1n : cfg.registryFromBlock;
   const latestBlock = await publicClient.getBlockNumber();
 
   if (fromBlock > latestBlock) {
@@ -243,6 +276,8 @@ export async function syncEvents(): Promise<IndexResult> {
   const { added: validationsAdded, updated: validationsUpdated } =
     cfg.validationRegistryAddress
       ? await syncValidations(
+          chainId,
+          cfg.registryAddress,
           fromBlock,
           latestBlock,
           publicClient,
@@ -252,7 +287,7 @@ export async function syncEvents(): Promise<IndexResult> {
       : { added: 0, updated: 0 };
 
   // Advance lastBlock only after all processing for this range is complete.
-  await setCachedAgents(merged, latestBlock);
+  await setCachedAgents(chainId, cfg.registryAddress, merged, latestBlock);
 
   return {
     ok: true,

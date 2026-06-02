@@ -34,7 +34,7 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | Base / Base Sepolia only                              | Single well-supported L2; old 0G chain (chainId 16602) removed                                                                                                                                                                                                                                                                                                                       | May 2026 |
 | 0G Storage for encrypted blobs only                   | 0G is used exclusively for ERC-7857 encrypted intelligent data blobs (`zerog://` URIs). Agent metadata (ERC-8004 registration JSON) is pinned to IPFS via Pinata (`ipfs://` URIs) — content-addressed and publicly readable without a storage-layer key.                                                                                                                             | May 2026 |
 | Use official ERC-8004 singletons                      | Mainnet: Identity `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` / Reputation `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`. Testnet: Identity `0x8004A818BFB912233c491871b3d84c89A494BD9e` / Reputation `0x8004B663056A597Dffe9eCcC1965A193B7388713`. The Identity Registry address is passed to the `AgentRegistry` constructor (immutable); `erc8004AgentId` is used for reputation. | May 2026 |
-| Deploy our own ValidationRegistry                     | No confirmed global singleton exists for ValidationRegistry. `ValidationRegistry` is deployed alongside `AgentRegistry` in the Ignition module and takes `agentRegistry` as constructor arg. Address set via `VALIDATION_REGISTRY_ADDRESS` env var after deployment.                                                                                                                 | May 2026 |
+| Deploy our own ValidationRegistry                     | No confirmed global singleton exists for ValidationRegistry. `ValidationRegistry` is deployed alongside `AgentRegistry`; its address is stored in root `deployments.json`.                                                                                                                                                                                                           | May 2026 |
 | ABI exports as JSON                                   | `packages/agent/src/abis/*.json` are the source of truth; `abis.ts` is a thin re-exporter. `gen-abis.mjs` writes the JSON files; `ReputationRegistry.json` is maintained manually from upstream.                                                                                                                                                                                     | May 2026 |
 | Server Actions only, no API routes                    | Next.js best practice for internal mutations/fetches                                                                                                                                                                                                                                                                                                                                 | May 2026 |
 | Raw `fetch` to oracle, no `PhalaOracleClient` wrapper | Wrapper package (`packages/compute`) deleted — dashboard calls oracle directly                                                                                                                                                                                                                                                                                                       | May 2026 |
@@ -44,23 +44,17 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 ## Environment Variables
 
-| Variable                      | Required | Description                                                                                                                                  |
-| ----------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_NETWORK`         | Yes      | `base` or `baseSepolia` (default: baseSepolia)                                                                                               |
-| `RPC_URL`                     | Yes      | EVM RPC for the app chain                                                                                                                    |
-| `AGENT_REGISTRY_ADDRESS`      | Yes      | Deployed `AgentRegistry` contract                                                                                                            |
-| `TEE_VERIFIER_ADDRESS`        | No       | Deployed `TEEVerifier`                                                                                                                       |
-| `REPUTATION_REGISTRY_ADDRESS` | No       | Overrides ERC-8004 Reputation Registry (default: `0x8004BAa1…` mainnet / `0x8004B663…` testnet)                                              |
-| `VALIDATION_REGISTRY_ADDRESS` | No       | Deployed `ValidationRegistry` contract (our own deployment — no default)                                                                     |
-| `PRIVATE_KEY`                 | Yes      | Deployer / server-side signer                                                                                                                |
-| `ZERO_G_PRIVATE_KEY`          | Yes      | Key for 0G Storage uploads of encrypted blobs (falls back to `PRIVATE_KEY`)                                                                  |
-| `ZERO_G_RPC_URL`              | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                                                                 |
-| `PINATA_JWT`                  | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                                                             |
-| `ZERO_G_INDEXER_URL`          | No       | 0G Indexer URL (default: `https://indexer-storage-testnet-turbo.0g.ai`)                                                                      |
-| `TEE_ENCRYPTION_PUBLIC_KEY`   | No       | Removed — the dashboard now fetches the oracle's public key live from `GET /address` at mint time.                                           |
-| `UPSTASH_REDIS_REST_URL`      | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com)                                          |
-| `UPSTASH_REDIS_REST_TOKEN`    | No       | Upstash Redis REST token                                                                                                                     |
-| `NEXT_PUBLIC_ORACLE_URL`      | No       | Phala Cloud CVM URL — used server-side (mint/transfer) and client-side (Run Oracle / Validate forms). Local default: `http://localhost:3001` |
+| Variable                   | Required | Description                                                                                         |
+| -------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `RPC_URL_BASE`             | No       | EVM RPC for Base mainnet                                                                            |
+| `RPC_URL_BASE_SEPOLIA`     | No       | EVM RPC for Base Sepolia (at least one of `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA` required)         |
+| `deployments.json`         | No       | Public deployed contract addresses and first deployment blocks (avoids scanning from genesis)       |
+| `PRIVATE_KEY`              | Yes      | Deployer / server-side signer                                                                       |
+| `ZERO_G_RPC_URL`           | No       | 0G Storage EVM RPC (default: `https://evmrpc-testnet.0g.ai`)                                        |
+| `PINATA_JWT`               | Yes      | Pinata Bearer JWT for IPFS metadata uploads (`agentMetadataUri`)                                    |
+| `ZERO_G_INDEXER_URL`       | No       | 0G Indexer URL (default: `https://indexer-storage-testnet-turbo.0g.ai`)                             |
+| `UPSTASH_REDIS_REST_URL`   | No       | Upstash Redis REST URL — caches indexed agents + last-seen block (free tier at console.upstash.com) |
+| `UPSTASH_REDIS_REST_TOKEN` | No       | Upstash Redis REST token                                                                            |
 
 ## Requirements
 
@@ -81,6 +75,7 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 ### Pending / In Progress
 
 - [ ] Deploy oracle to Phala Cloud; register oracle address in `TEEVerifier`
+- [ ] Add `forge test` step to CI (`npm run test:foundry` in `contracts/`)
 - [ ] Basescan source verification after Base Sepolia deployment
 - [ ] Trustless Agents Plus (TAP) support
 
@@ -96,5 +91,5 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 - All mutations and client-triggered data fetches use **Server Actions** in `apps/dashboard/src/lib/actions/` — no API routes for internal use
 - Internal imports use `.js` extensions (NodeNext resolution)
-- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/encryption`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/registry`, `@tee-agent/agent/abis`, `@tee-agent/agent/browser`
+- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/config`, `@tee-agent/agent/encryption`, `@tee-agent/agent/abis`, `@tee-agent/agent/registry`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/mint`, `@tee-agent/agent/transfer`, `@tee-agent/agent/services`, `@tee-agent/agent/feedback`, `@tee-agent/agent/validate`, `@tee-agent/agent/typed-data`
 - `zerog://` is the canonical URI scheme for private encrypted blobs; `data:application/json;base64,…` is used for public on-chain metadata

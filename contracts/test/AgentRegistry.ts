@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { zeroAddress } from "viem";
+import { keccak256, toHex, zeroAddress } from "viem";
 import { network } from "hardhat";
 
 const { viem, networkHelpers } = await network.create();
@@ -17,6 +17,52 @@ describe("AgentRegistry", function () {
     ]);
     const publicClient = await viem.getPublicClient();
     return { registry, alice, bob, publicClient };
+  }
+
+  async function deployIdentityFixture() {
+    const [alice, bob] = await viem.getWalletClients();
+    const verifier = await viem.deployContract("AlwaysPassVerifier");
+    const identity = await viem.deployContract("MockIdentityRegistry");
+    const registry = await viem.deployContract("AgentRegistry", [
+      "AgentRegistry",
+      "AGENT",
+      alice.account.address,
+      verifier.address,
+      identity.address,
+    ]);
+    return { registry, identity, alice, bob };
+  }
+
+  function dummyProof({
+    dataHash,
+    from,
+    to,
+  }: {
+    dataHash: `0x${string}`;
+    from: `0x${string}`;
+    to: `0x${string}`;
+  }) {
+    const nonce = keccak256(toHex("nonce"));
+    return {
+      accessProof: {
+        dataHash,
+        targetPubkey: "0x1234",
+        nonce,
+        proof: "0x",
+      },
+      ownershipProof: {
+        oracleType: 0,
+        dataHash,
+        sealedKey: "0xabcd",
+        targetPubkey: "0x1234",
+        nonce,
+        proof: "0x",
+      },
+      from,
+      to,
+      tokenId: 0n,
+      deadline: BigInt(Math.floor(Date.now() / 1000)) + 3600n,
+    };
   }
 
   it("mint: mints token with correct owner and URI", async function () {
@@ -42,7 +88,7 @@ describe("AgentRegistry", function () {
     assert.equal(await registry.read.totalSupply(), 1n);
   });
 
-  it("mint: stores and retrieves metadataUri", async function () {
+  it("mint: getMetadataUri returns empty when ERC-8004 registry is disabled", async function () {
     const { registry, alice } = await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
       [
@@ -54,10 +100,7 @@ describe("AgentRegistry", function () {
       { account: alice.account },
     );
     const id = 0n;
-    assert.equal(
-      await registry.read.getMetadataUri([id]),
-      "zerog://0xRegistryFile",
-    );
+    assert.equal(await registry.read.getMetadataUri([id]), "");
   });
 
   it("mint: increments totalSupply", async function () {
@@ -127,6 +170,61 @@ describe("AgentRegistry", function () {
     );
     assert.equal(
       (await registry.read.ownerOf([0n])).toLowerCase(),
+      bob.account.address.toLowerCase(),
+    );
+  });
+
+  it("iTransferFromWithIdentity: requires ERC-8004 approval then transfers both tokens", async function () {
+    const { registry, identity, alice, bob } = await networkHelpers.loadFixture(
+      deployIdentityFixture,
+    );
+    const dataHash = keccak256(toHex("encrypted-agent-payload"));
+
+    await registry.write.mint(
+      [
+        alice.account.address,
+        "zerog://0xAgent123",
+        "ipfs://metadata",
+        [{ dataDescription: "agent-brain", dataHash }],
+      ],
+      { account: alice.account },
+    );
+
+    const tokenId = 0n;
+    const erc8004AgentId = await registry.read.getERC8004AgentId([tokenId]);
+    assert.equal(erc8004AgentId, 1n);
+    assert.equal(
+      (await identity.read.ownerOf([erc8004AgentId])).toLowerCase(),
+      alice.account.address.toLowerCase(),
+    );
+
+    const proof = dummyProof({
+      dataHash,
+      from: alice.account.address,
+      to: bob.account.address,
+    });
+
+    await assert.rejects(
+      registry.write.iTransferFromWithIdentity(
+        [alice.account.address, bob.account.address, tokenId, [proof]],
+        { account: alice.account },
+      ),
+    );
+
+    await identity.write.approve([registry.address, erc8004AgentId], {
+      account: alice.account,
+    });
+    await registry.write.iTransferFromWithIdentity(
+      [alice.account.address, bob.account.address, tokenId, [proof]],
+      { account: alice.account },
+    );
+
+    assert.equal(
+      (await registry.read.ownerOf([tokenId])).toLowerCase(),
+      bob.account.address.toLowerCase(),
+    );
+    assert.equal(
+      (await identity.read.ownerOf([erc8004AgentId])).toLowerCase(),
       bob.account.address.toLowerCase(),
     );
   });

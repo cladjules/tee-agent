@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
   generateContentKey,
   encryptMetadata,
@@ -6,7 +7,7 @@ import {
   decryptContentKey,
   hashEncryptedBlob,
   parseAgentServicesJson,
-} from "../src/core/crypto.js";
+} from "../src/crypto.js";
 import { PrivateKey } from "eciesjs";
 
 // Generate a fresh ECIES key pair for each test run
@@ -17,14 +18,15 @@ const recipientPrivKeyBytes = recipientPrivKey.secret; // 32-byte private key
 describe("generateContentKey", () => {
   it("returns a 32-byte Uint8Array", () => {
     const key = generateContentKey();
-    expect(key).toBeInstanceOf(Uint8Array);
-    expect(key.length).toBe(32);
+    assert.ok(key instanceof Uint8Array);
+    assert.strictEqual(key.length, 32);
   });
 
   it("returns different keys on successive calls", () => {
     const a = generateContentKey();
     const b = generateContentKey();
-    expect(Buffer.from(a).toString("hex")).not.toBe(
+    assert.notStrictEqual(
+      Buffer.from(a).toString("hex"),
       Buffer.from(b).toString("hex"),
     );
   });
@@ -42,15 +44,15 @@ describe("encryptMetadata / decryptMetadata", () => {
       recipientPubKeyBytes,
     );
 
-    expect(blob.algorithm).toBe("aes-256-gcm");
-    expect(blob.name).toBe("test-blob");
-    expect(blob.ciphertext).toBeTruthy();
-    expect(blob.iv).toBeTruthy();
-    expect(blob.authTag).toBeTruthy();
-    expect(blob.encryptedKey).toBeTruthy();
+    assert.strictEqual(blob.algorithm, "aes-256-gcm");
+    assert.strictEqual(blob.name, "test-blob");
+    assert.ok(blob.ciphertext);
+    assert.ok(blob.iv);
+    assert.ok(blob.authTag);
+    assert.ok(blob.encryptedKey);
 
     const decrypted = decryptMetadata<typeof payload>(blob, contentKey);
-    expect(decrypted).toEqual(payload);
+    assert.deepStrictEqual(decrypted, payload);
   });
 
   it("round-trips a nested object", () => {
@@ -62,7 +64,7 @@ describe("encryptMetadata / decryptMetadata", () => {
       contentKey,
       recipientPubKeyBytes,
     );
-    expect(decryptMetadata(blob, contentKey)).toEqual(payload);
+    assert.deepStrictEqual(decryptMetadata(blob, contentKey), payload);
   });
 
   it("throws on wrong content key", () => {
@@ -74,7 +76,7 @@ describe("encryptMetadata / decryptMetadata", () => {
       recipientPubKeyBytes,
     );
     const wrongKey = generateContentKey();
-    expect(() => decryptMetadata(blob, wrongKey)).toThrow();
+    assert.throws(() => decryptMetadata(blob, wrongKey));
   });
 });
 
@@ -89,7 +91,8 @@ describe("decryptContentKey", () => {
     );
 
     const recovered = decryptContentKey(blob, recipientPrivKeyBytes);
-    expect(Buffer.from(recovered).toString("hex")).toBe(
+    assert.strictEqual(
+      Buffer.from(recovered).toString("hex"),
       Buffer.from(contentKey).toString("hex"),
     );
   });
@@ -103,8 +106,8 @@ describe("decryptContentKey", () => {
       recipientPubKeyBytes,
     );
     const wrongPrivKey = new PrivateKey();
-    expect(() => decryptContentKey(blob, wrongPrivKey.secret)).toThrow();
-    void recipientPrivKeyBytes; // suppress unused warning
+    assert.throws(() => decryptContentKey(blob, wrongPrivKey.secret));
+    void recipientPrivKeyBytes;
   });
 });
 
@@ -118,7 +121,7 @@ describe("hashEncryptedBlob", () => {
       recipientPubKeyBytes,
     );
     const hash = await hashEncryptedBlob(blob);
-    expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
+    assert.match(hash, /^0x[0-9a-f]{64}$/);
   });
 
   it("is deterministic for the same blob", async () => {
@@ -131,14 +134,17 @@ describe("hashEncryptedBlob", () => {
     );
     const h1 = await hashEncryptedBlob(blob);
     const h2 = await hashEncryptedBlob(blob);
-    expect(h1).toBe(h2);
+    assert.strictEqual(h1, h2);
   });
 
   it("differs for different blobs", async () => {
     const key = generateContentKey();
     const b1 = encryptMetadata("a", { x: 1 }, key, recipientPubKeyBytes);
     const b2 = encryptMetadata("b", { x: 2 }, key, recipientPubKeyBytes);
-    expect(await hashEncryptedBlob(b1)).not.toBe(await hashEncryptedBlob(b2));
+    assert.notStrictEqual(
+      await hashEncryptedBlob(b1),
+      await hashEncryptedBlob(b2),
+    );
   });
 });
 
@@ -146,8 +152,8 @@ describe("parseAgentServicesJson", () => {
   it("parses a valid services array", () => {
     const raw = [{ name: "web", endpoint: "https://example.com" }];
     const result = parseAgentServicesJson(raw);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe("web");
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0]!.name, "web");
   });
 
   it("parses optional fields", () => {
@@ -159,32 +165,34 @@ describe("parseAgentServicesJson", () => {
       },
     ];
     const result = parseAgentServicesJson(raw);
-    expect(result[0]!.version).toBe("2025-06-18");
+    assert.strictEqual(result[0]!.version, "2025-06-18");
   });
 
   it("throws for non-array input", () => {
-    expect(() => parseAgentServicesJson('{"name":"web"}')).toThrow(/array/i);
+    assert.throws(() => parseAgentServicesJson('{"name":"web"}'), /array/i);
   });
 
   it("throws when name is missing", () => {
     const raw = [{ endpoint: "https://example.com" }];
-    expect(() => parseAgentServicesJson(raw)).toThrow();
+    assert.throws(() => parseAgentServicesJson(raw));
   });
 
   it("throws when endpoint is missing", () => {
     const raw = [{ name: "web" }];
-    expect(() => parseAgentServicesJson(raw)).toThrow();
+    assert.throws(() => parseAgentServicesJson(raw));
   });
 
   it("throws for invalid JSON", () => {
-    expect(() => parseAgentServicesJson("not json")).toThrow();
+    assert.throws(() => parseAgentServicesJson("not json"));
   });
 
   it("throws for disallowed service names", () => {
     const raw = [{ name: "unknown", endpoint: "https://x.com" }];
-    expect(() =>
-      parseAgentServicesJson(raw, { allowedServiceNames: ["web", "MCP"] }),
-    ).toThrow(/unsupported/i);
+    assert.throws(
+      () =>
+        parseAgentServicesJson(raw, { allowedServiceNames: ["web", "MCP"] }),
+      /unsupported/i,
+    );
   });
 
   it("passes when service name is in the allowed list", () => {
@@ -192,6 +200,6 @@ describe("parseAgentServicesJson", () => {
     const result = parseAgentServicesJson(raw, {
       allowedServiceNames: ["web", "MCP"],
     });
-    expect(result).toHaveLength(1);
+    assert.strictEqual(result.length, 1);
   });
 });

@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 // set-oracle.mjs
 // Fetches the TEE oracle address from GET /address and writes it into:
-//   - contracts/ignition/parameters.<network>.json  (for setOracle Ignition module)
-//   - apps/dashboard/.env (or .env.local)           (TEE_VERIFIER_ADDRESS is
-//                                                    set separately; oracle addr is for info)
+//   - contracts/ignition/parameters.<network>.json  (TeeAgent.oracleAddress — used at deploy
+//                                                    time and by the SetOracle module for updates)
 //
 // Usage:
 //   node contracts/scripts/set-oracle.mjs [network] [oracleUrl]
 //   node contracts/scripts/set-oracle.mjs baseSepolia http://localhost:3001
 //   node contracts/scripts/set-oracle.mjs base https://<app-id>-3000.dstack.host
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,31 +52,10 @@ console.log(`Oracle address: ${oracleAddress}`);
 
 // Update parameters JSON
 const params = JSON.parse(readFileSync(paramsPath, "utf8"));
-params["SetOracle"] = { ...params["SetOracle"], oracleAddress };
+params["TeeAgent"] = { ...params["TeeAgent"], oracleAddress };
 writeFileSync(paramsPath, JSON.stringify(params, null, 2) + "\n");
 console.log(`✔ Updated ${paramsPath.replace(ROOT + "/", "")}`);
 
-// Update dashboard .env / .env.local
-const envPath = join(ROOT, "apps/dashboard/.env");
-const envLocalPath = join(ROOT, "apps/dashboard/.env.local");
-const targetPath = existsSync(envPath)
-  ? envPath
-  : existsSync(envLocalPath)
-    ? envLocalPath
-    : null;
-
-if (targetPath) {
-  let existing = readFileSync(targetPath, "utf8");
-  const key = "NEXT_PUBLIC_ORACLE_URL";
-  const line = `${key}=${oracleUrl}`;
-  const regex = new RegExp(`^${key}=.*$`, "m");
-  existing = regex.test(existing)
-    ? existing.replace(regex, line)
-    : existing + `\n${line}`;
-  writeFileSync(targetPath, existing);
-  console.log(
-    `✔ Set ${key}=${oracleUrl} in ${targetPath.replace(ROOT + "/", "")}`,
-  );
-}
-
-console.log(`\nNext: run   npm run setOracle:${network} --prefix contracts\n`);
+console.log(
+  `\nNext: redeploy or run   npm run setOracle:${network} --prefix contracts\n`,
+);

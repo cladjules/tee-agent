@@ -12,6 +12,8 @@ import "@rainbow-me/rainbowkit/styles.css";
 import { wagmiConfig } from "@/lib/wagmi";
 import { APP_CHAIN } from "@/lib/config";
 
+const TARGET_CHAIN_ID = APP_CHAIN.id as 8453 | 84532;
+
 // ── Types (kept stable so all consumers compile unchanged) ────────────────────
 
 type WalletStatus = "idle" | "connecting" | "connected";
@@ -77,18 +79,38 @@ export function useWallet(): WalletContextValue {
   }, [disconnectAsync]);
 
   const switchChain = useCallback(async () => {
-    await switchChainAsync({ chainId: APP_CHAIN.id });
+    await switchChainAsync({ chainId: TARGET_CHAIN_ID });
   }, [switchChainAsync]);
 
   const getViemClients = useCallback(async () => {
     if (!rawAddress) throw new Error("Wallet not connected.");
     const publicClient = getPublicClient(wagmiConfig, {
-      chainId: APP_CHAIN.id as 8453 | 84532,
+      chainId: TARGET_CHAIN_ID,
     });
-    const walletClient = await getWalletClient(wagmiConfig, {
-      chainId: APP_CHAIN.id as 8453 | 84532,
-    });
+
+    let walletClient: WalletClient | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        walletClient = (await getWalletClient(wagmiConfig, {
+          chainId: TARGET_CHAIN_ID,
+        })) as WalletClient | undefined;
+        if (walletClient?.chain?.id === TARGET_CHAIN_ID) break;
+      } catch (err) {
+        lastError = err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
     if (!walletClient) throw new Error("Wallet client unavailable.");
+    if (walletClient.chain?.id !== TARGET_CHAIN_ID) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error(
+            `Wallet is not on ${APP_CHAIN.name}. Switch networks and try again.`,
+          );
+    }
+
     return {
       address: rawAddress,
       publicClient: publicClient as PublicClient,

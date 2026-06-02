@@ -18,14 +18,14 @@
 
 import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";
 import { ethers } from "ethers";
-import { RegistryError } from "../core/types.js";
-import type { AgentNFTEncryptedData } from "../core/types.js";
+import { RegistryError } from "../types.js";
+import type { AgentNFTEncryptedData } from "../types.js";
 import type { Hex } from "viem";
 import {
   encryptMetadata,
   generateContentKey,
   hashEncryptedBlob,
-} from "../core/crypto.js";
+} from "../crypto.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -8,8 +8,8 @@
  * Uploaded content is pinned publicly at `ipfs://<CID>`.
  */
 
-import { RegistryError } from "../core/types.js";
-import type { IpfsClientOptions, IpfsUploadResult } from "../core/types.js";
+import { RegistryError } from "../types.js";
+import type { IpfsClientOptions, IpfsUploadResult } from "../types.js";
 
 // ─── Pinata V3 response shape ─────────────────────────────────────────────────
 

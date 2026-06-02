@@ -1,5 +1,5 @@
 import { uploadJSONToIPFS } from "../storage/ipfs.js";
-import type { AgentConfig } from "../core/types.js";
+import type { AgentConfig } from "../types.js";
 
 /**
  * Uploads a metadata JSON object to IPFS (when pinataJwt is configured) or

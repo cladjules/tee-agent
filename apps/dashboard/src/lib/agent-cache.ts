@@ -11,7 +11,6 @@
 
 import { Redis } from "@upstash/redis";
 import type { RegisteredAgent } from "@tee-agent/agent/types";
-import { cfg } from "@/lib/config";
 
 // RegisteredAgent serialised for Redis (agentId as string — JSON can't hold bigint).
 type StoredAgent = Omit<RegisteredAgent, "agentId"> & { agentId: string };
@@ -40,19 +39,28 @@ function getRedis(): Redis | null {
   return _redis;
 }
 
-function agentsKey() {
-  return `agents:${cfg.chain.id}:${cfg.registryAddress ?? "none"}`;
+function agentsKey(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+) {
+  return `agents:${chainId}:${registryAddress ?? "none"}`;
 }
 
-function lastBlockKey() {
-  return `lastBlock:${cfg.chain.id}:${cfg.registryAddress ?? "none"}`;
+function lastBlockKey(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+) {
+  return `lastBlock:${chainId}:${registryAddress ?? "none"}`;
 }
 
 /**
  * Reads the cached agent list and the last indexed block.
  * Returns null if Redis is not configured or the cache is empty.
  */
-export async function getCachedAgents(): Promise<{
+export async function getCachedAgents(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+): Promise<{
   agents: RegisteredAgent[];
   lastBlock: bigint;
 } | null> {
@@ -61,8 +69,8 @@ export async function getCachedAgents(): Promise<{
 
   try {
     const [storedAgents, storedBlock] = await Promise.all([
-      redis.get<StoredAgent[]>(agentsKey()),
-      redis.get<string>(lastBlockKey()),
+      redis.get<StoredAgent[]>(agentsKey(chainId, registryAddress)),
+      redis.get<string>(lastBlockKey(chainId, registryAddress)),
     ]);
 
     if (storedAgents === null || storedBlock === null) return null;
@@ -79,6 +87,8 @@ export async function getCachedAgents(): Promise<{
  * Agents must be in oldest-first order.
  */
 export async function setCachedAgents(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   agents: RegisteredAgent[],
   lastBlock: bigint,
 ): Promise<void> {
@@ -87,8 +97,8 @@ export async function setCachedAgents(
 
   try {
     await Promise.all([
-      redis.set(agentsKey(), toStored(agents)),
-      redis.set(lastBlockKey(), lastBlock.toString()),
+      redis.set(agentsKey(chainId, registryAddress), toStored(agents)),
+      redis.set(lastBlockKey(chainId, registryAddress), lastBlock.toString()),
     ]);
   } catch (err) {
     console.error("[agent-cache] write failed:", err);
@@ -129,8 +139,12 @@ export type CachedOracleRun = {
 
 const MAX_RUNS_PER_AGENT = 100;
 
-function oracleRunsKey(agentId: bigint) {
-  return `oracleRuns:${cfg.chain.id}:${cfg.registryAddress ?? "none"}:${agentId.toString()}`;
+function oracleRunsKey(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+  agentId: bigint,
+) {
+  return `oracleRuns:${chainId}:${registryAddress ?? "none"}:${agentId.toString()}`;
 }
 
 /**
@@ -138,13 +152,15 @@ function oracleRunsKey(agentId: bigint) {
  * Returns an empty array on cache miss or Redis unavailability.
  */
 export async function getCachedOracleRuns(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   agentId: bigint,
 ): Promise<CachedOracleRun[]> {
   const redis = getRedis();
   if (!redis) return [];
   try {
     const items = await redis.lrange<CachedOracleRun>(
-      oracleRunsKey(agentId),
+      oracleRunsKey(chainId, registryAddress, agentId),
       0,
       -1,
     );
@@ -160,13 +176,15 @@ export async function getCachedOracleRuns(
  * Caps the list at MAX_RUNS_PER_AGENT entries (oldest are dropped).
  */
 export async function addCachedOracleRun(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   agentId: bigint,
   run: CachedOracleRun,
 ): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
   try {
-    const key = oracleRunsKey(agentId);
+    const key = oracleRunsKey(chainId, registryAddress, agentId);
     await redis.lpush(key, run);
     await redis.ltrim(key, 0, MAX_RUNS_PER_AGENT - 1);
   } catch (err) {
@@ -187,23 +205,35 @@ export type CachedValidation = {
     score: number;
     txHash?: string;
     timestamp: number;
+    responseURI?: string;
+    responseHash?: string;
+    tag?: string;
+    reasoning?: string;
+    evidence?: Record<string, unknown>;
   };
 };
 
-function validationRequestsKey(agentId: bigint) {
-  return `validationRequests:${cfg.chain.id}:${cfg.registryAddress ?? "none"}:${agentId.toString()}`;
+function validationRequestsKey(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+  agentId: bigint,
+) {
+  return `validationRequests:${chainId}:${registryAddress ?? "none"}:${agentId.toString()}`;
 }
 
 /** Returns pending validation requests for an agent (no on-chain response yet). */
 export async function getCachedValidations(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   agentId: bigint,
 ): Promise<CachedValidation[]> {
   const redis = getRedis();
   if (!redis) return [];
   try {
     return (
-      (await redis.get<CachedValidation[]>(validationRequestsKey(agentId))) ??
-      []
+      (await redis.get<CachedValidation[]>(
+        validationRequestsKey(chainId, registryAddress, agentId),
+      )) ?? []
     );
   } catch (err) {
     console.error("[agent-cache] validation requests read failed:", err);
@@ -216,13 +246,18 @@ export async function getCachedValidations(
  * Call with the complete current pending set (indexer owns this).
  */
 export async function setCachedValidations(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
   agentId: bigint,
   items: CachedValidation[],
 ): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
   try {
-    await redis.set(validationRequestsKey(agentId), items);
+    await redis.set(
+      validationRequestsKey(chainId, registryAddress, agentId),
+      items,
+    );
   } catch (err) {
     console.error("[agent-cache] validation requests write failed:", err);
   }

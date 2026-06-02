@@ -1,16 +1,5 @@
 [
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "agentRegistry_",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
     "inputs": [],
     "name": "InvalidResponse",
     "type": "error"
@@ -125,19 +114,6 @@
     ],
     "name": "ValidationResponse",
     "type": "event"
-  },
-  {
-    "inputs": [],
-    "name": "getAgentRegistry",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
   },
   {
     "inputs": [

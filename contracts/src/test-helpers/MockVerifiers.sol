@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "../interfaces/IERC7857.sol";
 
 /**
@@ -38,5 +39,35 @@ contract AlwaysFailVerifier is IERC7857DataVerifier {
         TransferValidityProof[] calldata
     ) external pure override returns (TransferValidityProofOutput[] memory) {
         revert("Invalid ownership proof");
+    }
+}
+
+/**
+ * @dev Minimal ERC-8004 Identity Registry stand-in for AgentRegistry tests.
+ */
+contract MockIdentityRegistry is ERC721 {
+    uint256 private _nextId = 1;
+    mapping(uint256 => string) private _uris;
+
+    constructor() ERC721("MockIdentityRegistry", "MIR") {}
+
+    function register(
+        string calldata agentURI
+    ) external returns (uint256 agentId) {
+        agentId = _nextId++;
+        _mint(msg.sender, agentId);
+        _uris[agentId] = agentURI;
+    }
+
+    function setAgentURI(uint256 agentId, string calldata newURI) external {
+        require(ownerOf(agentId) == msg.sender, "Not owner");
+        _uris[agentId] = newURI;
+    }
+
+    function tokenURI(
+        uint256 agentId
+    ) public view override returns (string memory) {
+        _requireOwned(agentId);
+        return _uris[agentId];
     }
 }

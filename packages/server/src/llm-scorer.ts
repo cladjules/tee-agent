@@ -9,7 +9,6 @@
  *   LLM_API_KEY           — required
  *   LLM_API_BASE          — defaults to https://api.red-pill.ai/v1
  *   LLM_VALIDATION_MODEL  — overrides LLM_MODEL for validation calls
- *   LLM_MODEL             — default model (fallback)
  */
 
 export interface ScoreResult {
@@ -25,9 +24,7 @@ export async function scoreWithLLM(
   if (!apiKey) throw new Error("LLM_API_KEY is not set on the oracle.");
   const apiBase = process.env.LLM_API_BASE ?? "https://api.red-pill.ai/v1";
   const model =
-    process.env.LLM_VALIDATION_MODEL ??
-    process.env.LLM_MODEL ??
-    "phala/gemma-4-26b-a4b-uncensored";
+    process.env.LLM_VALIDATION_MODEL ?? "phala/gemma-4-26b-a4b-uncensored";
 
   const res = await fetch(`${apiBase}/chat/completions`, {
     method: "POST",

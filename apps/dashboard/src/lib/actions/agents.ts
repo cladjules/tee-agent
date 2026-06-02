@@ -6,6 +6,7 @@ import {
   prepareUpdateServices,
   fetchAgentServices as sdkFetchAgentServices,
   prepareRegisterErc8004 as sdkPrepareRegisterErc8004,
+  prepareImportedErc8004TeeOracle as sdkPrepareImportedErc8004TeeOracle,
 } from "@tee-agent/agent/services";
 import type {
   FetchAgentServicesResult,
@@ -14,8 +15,11 @@ import type {
   TransferParams,
   UpdateServicesParams,
   PrepareRegisterErc8004Params,
+  PrepareImportedErc8004TeeOracleParams,
+  PrepareImportedErc8004TeeOracleResult,
 } from "@tee-agent/agent/types";
-import { cfg, isConfigured } from "@/lib/config";
+import { getServerConfigForChain, isConfigured } from "@/lib/config";
+import { getActiveChainId } from "@/lib/active-chain";
 import {
   addCachedOracleRun,
   getCachedOracleRuns,
@@ -34,16 +38,21 @@ export type PendingValidation = {
     score: number;
     txHash?: string;
     timestamp: number;
+    responseURI?: string;
+    responseHash?: string;
+    tag?: string;
+    reasoning?: string;
+    evidence?: Record<string, unknown>;
   };
 };
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
-export async function prepareCreateAgent(params: MintParams) {
+export async function prepareCreateAgent(params: MintParams, chainId?: number) {
   if (!isConfigured) return { error: "Contracts not configured." };
-
+  const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareMint(cfg, params);
+    return await prepareMint(getServerConfigForChain(cid), params);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Create preparation failed.",
@@ -51,13 +60,16 @@ export async function prepareCreateAgent(params: MintParams) {
   }
 }
 
-export async function prepareTransferAgent(params: TransferParams) {
+export async function prepareTransferAgent(
+  params: TransferParams,
+  chainId?: number,
+) {
   if (!params.tokenId) return { error: "Token ID is required." };
   if (!params.to) return { error: "Recipient address is required." };
   if (!isConfigured) return { error: "Contracts not configured." };
-
+  const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareTransfer(cfg, params);
+    return await prepareTransfer(getServerConfigForChain(cid), params);
   } catch (err) {
     return {
       error:
@@ -68,12 +80,13 @@ export async function prepareTransferAgent(params: TransferParams) {
 
 export async function prepareUpdateAgentServices(
   params: UpdateServicesParams,
+  chainId?: number,
 ): Promise<UpdateServicesResult | { error: string }> {
   if (!params.tokenId) return { error: "Token ID is required." };
   if (!isConfigured) return { error: "Contracts not configured." };
-
+  const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareUpdateServices(cfg, params);
+    return await prepareUpdateServices(getServerConfigForChain(cid), params);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Updating services failed.",
@@ -88,14 +101,18 @@ export async function prepareUpdateAgentServices(
  */
 export async function preparePostMintRegistration(
   params: PrepareRegisterErc8004Params,
+  chainId?: number,
 ): Promise<UpdateServicesResult | { error: string }> {
   if (!params.erc8004AgentId) return { error: "erc8004AgentId is required." };
   if (!params.agentMetadataUri)
     return { error: "agentMetadataUri is required." };
   if (!isConfigured) return { error: "Contracts not configured." };
-
+  const cid = chainId ?? (await getActiveChainId());
   try {
-    return await sdkPrepareRegisterErc8004(cfg, params);
+    return await sdkPrepareRegisterErc8004(
+      getServerConfigForChain(cid),
+      params,
+    );
   } catch (err) {
     return {
       error:
@@ -104,13 +121,43 @@ export async function preparePostMintRegistration(
   }
 }
 
+export async function prepareImportedErc8004TeeOracle(
+  params: PrepareImportedErc8004TeeOracleParams,
+  chainId?: number,
+): Promise<PrepareImportedErc8004TeeOracleResult | { error: string }> {
+  if (!params.erc8004AgentId.trim())
+    return { error: "ERC-8004 token ID is required." };
+  if (!params.teeOracleUrl.trim())
+    return { error: "teeOracle URL is required." };
+  if (!isConfigured) return { error: "Contracts not configured." };
+  const cid = chainId ?? (await getActiveChainId());
+  try {
+    return await sdkPrepareImportedErc8004TeeOracle(
+      getServerConfigForChain(cid),
+      params,
+    );
+  } catch (err) {
+    return {
+      error:
+        err instanceof Error
+          ? err.message
+          : "Preparing ERC-8004 metadata update failed.",
+    };
+  }
+}
+
 export async function fetchAgentServices(
   tokenId: string,
+  expectedOwner?: `0x${string}`,
+  chainId?: number,
 ): Promise<FetchAgentServicesResult | { error: string }> {
   if (!isConfigured) return { error: "Contracts not configured." };
-
+  const cid = chainId ?? (await getActiveChainId());
   try {
-    return await sdkFetchAgentServices(cfg, { tokenId });
+    return await sdkFetchAgentServices(getServerConfigForChain(cid), {
+      tokenId,
+      expectedOwner,
+    });
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Failed to fetch agent.",
@@ -122,9 +169,12 @@ export async function fetchAgentServices(
 
 export async function recordOracleRun(
   run: Omit<CachedOracleRun, never>,
+  chainId?: number,
 ): Promise<{ ok: boolean; error?: string }> {
+  const cid = chainId ?? (await getActiveChainId());
+  const { registryAddress } = getServerConfigForChain(cid);
   try {
-    await addCachedOracleRun(BigInt(run.agentId), run);
+    await addCachedOracleRun(cid, registryAddress, BigInt(run.agentId), run);
     return { ok: true };
   } catch (err) {
     return {
@@ -136,9 +186,16 @@ export async function recordOracleRun(
 
 export async function fetchPendingValidationsForAgent(
   agentId: string,
+  chainId?: number,
 ): Promise<PendingValidation[]> {
+  const cid = chainId ?? (await getActiveChainId());
+  const { registryAddress } = getServerConfigForChain(cid);
   try {
-    const items = await getCachedValidations(BigInt(agentId));
+    const items = await getCachedValidations(
+      cid,
+      registryAddress,
+      BigInt(agentId),
+    );
     return items.map((item) => ({
       requestHash: item.requestHash,
       requestURI: item.requestURI,
@@ -151,9 +208,15 @@ export async function fetchPendingValidationsForAgent(
   }
 }
 
-export async function getOracleRunHistory(agentId: string) {
+export async function getOracleRunHistory(agentId: string, chainId?: number) {
+  const cid = chainId ?? (await getActiveChainId());
+  const { registryAddress } = getServerConfigForChain(cid);
   try {
-    const runs = await getCachedOracleRuns(BigInt(agentId));
+    const runs = await getCachedOracleRuns(
+      cid,
+      registryAddress,
+      BigInt(agentId),
+    );
     return { runs };
   } catch (err) {
     return {

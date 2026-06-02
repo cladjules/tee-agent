@@ -18,6 +18,11 @@
       "cache": false,
       "persistent": true
     },
+    "@tee-agent/oracle#dev": {
+      "dependsOn": ["@tee-agent/server#build"],
+      "cache": false,
+      "persistent": true
+    },
     "test": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]

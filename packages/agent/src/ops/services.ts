@@ -4,8 +4,9 @@
  * fetchAgentServices — reads existing services from an ERC-8004 Identity Registry token.
  */
 
-import { parseAgentServicesJson, readJsonFromUri } from "../core/crypto.js";
+import { parseAgentServicesJson, readJsonFromUri } from "../crypto.js";
 import { uploadMetadata } from "./metadata.js";
+import { uploadJSONToIPFS } from "../storage/ipfs.js";
 import type {
   AgentConfig,
   AgentService,
@@ -14,10 +15,146 @@ import type {
   FetchAgentServicesParams,
   FetchAgentServicesResult,
   PrepareRegisterErc8004Params,
-} from "../core/types.js";
+  PrepareImportedErc8004TeeOracleParams,
+  PrepareImportedErc8004TeeOracleResult,
+  VerifyTeeOracleResult,
+} from "../types.js";
 import { createPublicClient, http } from "viem";
-import { AgentRegistry } from "../core/registry/agent.js";
-import { IdentityRegistry } from "../core/registry/identity.js";
+import { AgentRegistry } from "../registry/agent.js";
+import { IdentityRegistry } from "../registry/identity.js";
+
+type AgentMetadataJson = Record<string, unknown> & {
+  name?: string;
+  services?: unknown;
+};
+
+function metadataStorage(uri: string): "ipfs" | "data" | "http" {
+  if (uri.startsWith("ipfs://")) return "ipfs";
+  if (uri.startsWith("data:")) return "data";
+  return "http";
+}
+
+function normalizeTeeOracleUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed) throw new Error("teeOracle URL is required.");
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("teeOracle URL must start with http:// or https://.");
+    }
+    return parsed.toString().replace(/\/+$/, "");
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("teeOracle")) {
+      throw err;
+    }
+    throw new Error("teeOracle URL is invalid.");
+  }
+}
+
+export async function verifyTeeOracleEndpoint(
+  url: string,
+): Promise<VerifyTeeOracleResult> {
+  const normalizedUrl = normalizeTeeOracleUrl(url);
+  let response: Response;
+  try {
+    response = await fetch(`${normalizedUrl}/address`, {
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new Error(
+      `Could not reach teeOracle at ${normalizedUrl}/address: ${String(err)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `teeOracle /address returned ${response.status} for ${normalizedUrl}.`,
+    );
+  }
+  const body = (await response.json()) as {
+    address?: string;
+    publicKey?: string;
+  };
+  if (!body.address?.startsWith("0x")) {
+    throw new Error("teeOracle /address did not return an EVM address.");
+  }
+  if (!body.publicKey?.startsWith("0x")) {
+    throw new Error("teeOracle /address did not return a publicKey.");
+  }
+  return {
+    url: normalizedUrl,
+    address: body.address as `0x${string}`,
+    publicKey: body.publicKey as `0x${string}`,
+  };
+}
+
+function servicesFromMetadata(metadata: AgentMetadataJson): AgentService[] {
+  const raw = Array.isArray(metadata.services) ? metadata.services : [];
+  return raw
+    .filter(
+      (svc): svc is AgentService =>
+        !!svc &&
+        typeof svc === "object" &&
+        typeof (svc as { name?: unknown }).name === "string" &&
+        typeof (svc as { endpoint?: unknown }).endpoint === "string",
+    )
+    .map((svc) => ({
+      name: svc.name,
+      endpoint: svc.endpoint,
+      ...(svc.version !== undefined ? { version: svc.version } : {}),
+      ...(svc.skills && svc.skills.length > 0
+        ? { skills: [...svc.skills] }
+        : {}),
+      ...(svc.domains && svc.domains.length > 0
+        ? { domains: [...svc.domains] }
+        : {}),
+    }));
+}
+
+function upsertTeeOracleService(
+  services: unknown,
+  teeOracleUrl: string,
+): unknown[] {
+  const list = Array.isArray(services) ? [...services] : [];
+  const idx = list.findIndex(
+    (svc) =>
+      !!svc &&
+      typeof svc === "object" &&
+      (svc as { name?: unknown }).name === "teeOracle",
+  );
+  if (idx >= 0) {
+    const existing = list[idx];
+    list[idx] =
+      existing && typeof existing === "object"
+        ? { ...existing, name: "teeOracle", endpoint: teeOracleUrl }
+        : { name: "teeOracle", endpoint: teeOracleUrl };
+  } else {
+    list.push({ name: "teeOracle", endpoint: teeOracleUrl });
+  }
+  return list;
+}
+
+async function writeMetadataPreservingStorage(
+  config: AgentConfig,
+  originalUri: string,
+  metadata: Record<string, unknown>,
+  label: string,
+): Promise<string> {
+  if (originalUri.startsWith("data:")) {
+    return `data:application/json;base64,${Buffer.from(
+      JSON.stringify(metadata),
+    ).toString("base64")}`;
+  }
+  if (originalUri.startsWith("ipfs://")) {
+    if (!config.pinataJwt) {
+      throw new Error("PINATA_JWT is required to update IPFS metadata.");
+    }
+    const upload = await uploadJSONToIPFS(metadata, label, {
+      jwt: config.pinataJwt,
+    });
+    return upload.url;
+  }
+  return uploadMetadata(config, metadata, label);
+}
 
 export async function prepareUpdateServices(
   config: AgentConfig,
@@ -136,11 +273,56 @@ export async function prepareRegisterErc8004(
   };
 }
 
+export async function prepareImportedErc8004TeeOracle(
+  config: AgentConfig,
+  params: PrepareImportedErc8004TeeOracleParams,
+): Promise<PrepareImportedErc8004TeeOracleResult> {
+  const { erc8004AgentId, teeOracleUrl } = params;
+
+  if (!erc8004AgentId.trim()) throw new Error("ERC-8004 token ID is required.");
+  if (!config.identityRegistryAddress) {
+    throw new Error("identityRegistryAddress is not configured.");
+  }
+
+  const oracle = await verifyTeeOracleEndpoint(teeOracleUrl);
+  const identityRegistry = new IdentityRegistry({
+    address: config.identityRegistryAddress,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    }),
+  });
+  const tokenId = BigInt(erc8004AgentId.trim());
+  const currentUri = await identityRegistry.tokenURI(tokenId);
+  if (!currentUri) {
+    throw new Error(`ERC-8004 agent #${erc8004AgentId} has no metadata URI.`);
+  }
+
+  const existingMetadata = await readJsonFromUri<AgentMetadataJson>(currentUri);
+  const updatedMetadata = {
+    ...existingMetadata,
+    services: upsertTeeOracleService(existingMetadata.services, oracle.url),
+  };
+  const tokenUri = await writeMetadataPreservingStorage(
+    config,
+    currentUri,
+    updatedMetadata,
+    `erc8004-${erc8004AgentId}-tee-oracle`,
+  );
+
+  return {
+    erc8004RegistryAddress: config.identityRegistryAddress,
+    erc8004AgentId,
+    tokenUri,
+    teeOracleUrl: oracle.url,
+  };
+}
+
 export async function fetchAgentServices(
   config: AgentConfig,
   params: FetchAgentServicesParams,
 ): Promise<FetchAgentServicesResult> {
-  const { tokenId } = params;
+  const { tokenId, expectedOwner } = params;
 
   if (!tokenId.trim()) throw new Error("Token ID is required.");
   if (!config.identityRegistryAddress) {
@@ -157,6 +339,15 @@ export async function fetchAgentServices(
 
   const numericId = BigInt(tokenId.trim());
 
+  if (expectedOwner) {
+    const owner = await identityRegistry.ownerOf(numericId);
+    if (owner.toLowerCase() !== expectedOwner.toLowerCase()) {
+      throw new Error(
+        `You do not own ERC-8004 agent #${tokenId}. Owner is ${owner}.`,
+      );
+    }
+  }
+
   const metadataUri = await identityRegistry.tokenURI(numericId);
 
   if (!metadataUri) {
@@ -165,17 +356,16 @@ export async function fetchAgentServices(
 
   const metadata = await readJsonFromUri<{
     name?: string;
-    services?: AgentService[];
+    services?: unknown;
   }>(metadataUri);
+  const services = servicesFromMetadata(metadata);
+  const teeOracle = services.find((service) => service.name === "teeOracle");
 
   return {
-    services: (metadata.services ?? []).map((s) => ({
-      name: s.name,
-      endpoint: s.endpoint,
-      ...(s.version !== undefined ? { version: s.version } : {}),
-      ...(s.skills && s.skills.length > 0 ? { skills: [...s.skills] } : {}),
-      ...(s.domains && s.domains.length > 0 ? { domains: [...s.domains] } : {}),
-    })) as AgentService[],
+    services,
     agentName: metadata.name ?? `Agent #${tokenId}`,
+    metadataUri,
+    ...(teeOracle ? { teeOracleUrl: teeOracle.endpoint } : {}),
+    metadataStorage: metadataStorage(metadataUri),
   };
 }

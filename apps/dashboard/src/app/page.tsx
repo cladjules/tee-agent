@@ -63,6 +63,9 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Deployed Contracts */}
+      <ContractAddresses />
+
       {/* Feature strip */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {FEATURES.map((f) => (
@@ -75,9 +78,6 @@ export default function HomePage() {
           </div>
         ))}
       </div>
-
-      {/* Deployed Contracts */}
-      <ContractAddresses />
 
       {/* Registered Agents */}
       <div className="space-y-5">

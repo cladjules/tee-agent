@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { keccak256, toBytes } from "viem";
+import { keccak256, toBytes, type Address } from "viem";
 import type { AgentService } from "@tee-agent/agent/types";
 import {
   AGENT_REGISTRY_ABI,
@@ -21,9 +21,9 @@ import {
   prepareTransferAgent,
   prepareUpdateAgentServices,
   recordOracleRun,
-  fetchPendingValidationsForAgent,
 } from "@/lib/actions/agents";
 import { prepareFeedback } from "@/lib/actions/registry";
+import type { TransferRecipientAgent } from "@/lib/actions/registry";
 import type { CachedOracleRun } from "@/lib/agent-cache";
 import type { PendingValidation } from "@/lib/actions/agents";
 import {
@@ -31,7 +31,23 @@ import {
   type ServiceEditorEntry,
 } from "@/components/ServiceEditorPanel";
 import { ErrorBox } from "@/components/ErrorBox";
-import { clientCfg } from "@/lib/client-config";
+
+const VERIFIER_TEE_VERIFIER_ABI = [
+  {
+    name: "teeVerifier",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
+type ActionClientConfig = {
+  registryAddress?: Address;
+  identityRegistryAddress?: Address;
+  reputationRegistryAddress?: Address;
+  validationRegistryAddress?: Address;
+};
 
 interface Props {
   agentId: string;
@@ -41,6 +57,8 @@ interface Props {
   initialServices: readonly AgentService[];
   initialRuns?: CachedOracleRun[];
   initialPendingValidations?: PendingValidation[];
+  recipientAgents?: TransferRecipientAgent[];
+  clientCfg: ActionClientConfig;
 }
 
 export default function AgentDetailActions({
@@ -50,6 +68,8 @@ export default function AgentDetailActions({
   initialServices,
   initialRuns,
   initialPendingValidations,
+  recipientAgents,
+  clientCfg,
 }: Props) {
   const { address } = useWallet();
   const isOwner = !!address && address.toLowerCase() === owner.toLowerCase();
@@ -62,7 +82,15 @@ export default function AgentDetailActions({
   }
   function markValidationComplete(
     requestHash: string,
-    response: { score?: number; txHash?: string } | null,
+    response: {
+      score?: number;
+      txHash?: string;
+      responseURI?: string;
+      responseHash?: string;
+      tag?: string;
+      reasoning?: string;
+      evidence?: Record<string, unknown>;
+    } | null,
   ) {
     if (!response) return;
     setPending((prev) =>
@@ -74,6 +102,11 @@ export default function AgentDetailActions({
                 score: response.score ?? 0,
                 txHash: response.txHash,
                 timestamp: Math.floor(Date.now() / 1000),
+                responseURI: response.responseURI,
+                responseHash: response.responseHash,
+                tag: response.tag,
+                reasoning: response.reasoning,
+                evidence: response.evidence,
               },
             }
           : j,
@@ -98,6 +131,7 @@ export default function AgentDetailActions({
             agentId={agentId}
             erc8004AgentId={erc8004AgentId}
             teeOracleUrl={teeOracleUrl}
+            clientCfg={clientCfg}
           />
           {runs.length > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-800" />
@@ -106,6 +140,7 @@ export default function AgentDetailActions({
             agentId={agentId}
             teeOracleUrl={teeOracleUrl}
             onNewRun={addRun}
+            clientCfg={clientCfg}
           />
         </CollapsibleSection>
 
@@ -121,6 +156,7 @@ export default function AgentDetailActions({
             pending={pending}
             teeOracleUrl={teeOracleUrl}
             onComplete={markValidationComplete}
+            clientCfg={clientCfg}
           />
         </CollapsibleSection>
 
@@ -135,7 +171,13 @@ export default function AgentDetailActions({
                 <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
                   Transfer
                 </h4>
-                <TransferForm tokenId={agentId} />
+                <TransferForm
+                  tokenId={agentId}
+                  erc8004AgentId={erc8004AgentId}
+                  teeOracleUrl={teeOracleUrl}
+                  recipientAgents={recipientAgents ?? []}
+                  clientCfg={clientCfg}
+                />
               </div>
 
               <div className="opacity-60">
@@ -188,7 +230,7 @@ export default function AgentDetailActions({
         title="Give Feedback"
         description="Submit ERC-8004 reputation feedback."
       >
-        <FeedbackForm agentId={agentId} />
+        <FeedbackForm erc8004AgentId={erc8004AgentId} clientCfg={clientCfg} />
       </CollapsibleSection>
     </div>
   );
@@ -327,7 +369,7 @@ function ResultBanner({
       {result.tokenId !== undefined
         ? `Token ID: #${result.tokenId.toString()}`
         : result.txHash
-          ? `Tx: ${result.txHash.slice(0, 18)}…`
+          ? `Tx: ${result.txHash}`
           : "Success"}
     </p>
   );
@@ -395,7 +437,13 @@ function validateJsonInput(input: string): string | null {
 
 // ─── Forms ────────────────────────────────────────────────────────────────────
 
-function FeedbackForm({ agentId }: { agentId: string }) {
+function FeedbackForm({
+  erc8004AgentId,
+  clientCfg,
+}: {
+  erc8004AgentId?: string;
+  clientCfg: ActionClientConfig;
+}) {
   const { isPending, result, run } = useActionState();
   const router = useRouter();
   const { chainId, getViemClients, switchChain } = useWallet();
@@ -413,6 +461,12 @@ function FeedbackForm({ agentId }: { agentId: string }) {
 
           if (!chainId)
             return { error: "Connect your wallet before submitting feedback." };
+          if (!erc8004AgentId || erc8004AgentId === "0") {
+            return {
+              error:
+                "This agent is not linked to an ERC-8004 identity, so reputation feedback is unavailable.",
+            };
+          }
 
           const form = e.currentTarget;
           const valueStr = (
@@ -428,7 +482,7 @@ function FeedbackForm({ agentId }: { agentId: string }) {
             (form.elements.namedItem("feedbackFile") as HTMLInputElement)
               ?.files?.[0] ?? null;
           const prepared = await prepareFeedback({
-            agentId,
+            agentId: erc8004AgentId,
             value: parseFloat(valueStr),
             tag1,
             tag2,
@@ -453,7 +507,7 @@ function FeedbackForm({ agentId }: { agentId: string }) {
             abi: REPUTATION_REGISTRY_ABI,
             functionName: "giveFeedback",
             args: [
-              BigInt(agentId),
+              BigInt(erc8004AgentId),
               BigInt(prepared.value),
               Number(prepared.valueDecimals),
               prepared.tag1 ?? "",
@@ -472,7 +526,15 @@ function FeedbackForm({ agentId }: { agentId: string }) {
       }}
       className="space-y-3"
     >
-      <input type="hidden" name="agentId" value={agentId} />
+      {erc8004AgentId && erc8004AgentId !== "0" ? (
+        <p className="text-xs text-gray-500 font-mono">
+          ERC-8004 agent #{erc8004AgentId}
+        </p>
+      ) : (
+        <p className="text-xs text-amber-400/80">
+          This agent is not linked to ERC-8004 reputation.
+        </p>
+      )}
       <div>
         <label className="block text-xs text-gray-400 mb-1">
           Value * <span className="text-gray-600">(-1.0 to 1.0)</span>
@@ -529,26 +591,133 @@ function FeedbackForm({ agentId }: { agentId: string }) {
   );
 }
 
-function TransferForm({ tokenId }: { tokenId: string }) {
+function TransferForm({
+  tokenId,
+  erc8004AgentId,
+  teeOracleUrl,
+  recipientAgents,
+  clientCfg,
+}: {
+  tokenId: string;
+  erc8004AgentId?: string;
+  teeOracleUrl: string;
+  recipientAgents: TransferRecipientAgent[];
+  clientCfg: ActionClientConfig;
+}) {
   const { isPending, result, run } = useActionState();
   const router = useRouter();
   const { getViemClients, switchChain } = useWallet();
+  const normalizedOracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
+  const [recipientSelection, setRecipientSelection] = useState(
+    recipientAgents[0]?.agentId ?? "",
+  );
+  const selectedRecipient = recipientAgents.find(
+    (agent) => agent.agentId === recipientSelection,
+  );
+  const selectedRecipientMissingOracle =
+    !!selectedRecipient && !selectedRecipient.teeOracleUrl;
+  const canTransferToSelectedAgent =
+    !!selectedRecipient && !!selectedRecipient.teeOracleUrl && !!erc8004AgentId;
+
+  if (!normalizedOracleUrl) {
+    return (
+      <p className="text-xs text-amber-400/80">
+        Add a <span className="font-mono">teeOracle</span> service URL before
+        transferring encrypted agents.
+      </p>
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         const rawFormData = new FormData(e.currentTarget);
         run(async () => {
+          const selectedRecipientId = String(
+            rawFormData.get("recipientAgentId") ?? "",
+          );
+          const formRecipient = recipientAgents.find(
+            (agent) => agent.agentId === selectedRecipientId,
+          );
+          if (!formRecipient) {
+            return { error: "Select a recipient agent." };
+          }
+          const recipientAddress = formRecipient.owner;
+          const recipientOracleUrl = (formRecipient.teeOracleUrl ?? "")
+            .trim()
+            .replace(/\/+$/, "");
+
+          if (!recipientOracleUrl) {
+            return { error: "Selected recipient agent has no teeOracle URL." };
+          }
+          if (!erc8004AgentId || erc8004AgentId === "0") {
+            return {
+              error: "This agent has no linked ERC-8004 identity to transfer.",
+            };
+          }
+
           await switchChain();
           const { publicClient, walletClient } = await getViemClients();
+          if (!clientCfg.registryAddress) {
+            return { error: "AgentRegistry is not configured." };
+          }
+          if (!clientCfg.identityRegistryAddress) {
+            return { error: "ERC-8004 IdentityRegistry is not configured." };
+          }
+          const erc8004TokenId = BigInt(erc8004AgentId);
+          const identityOwner = (await publicClient.readContract({
+            address: clientCfg.identityRegistryAddress,
+            abi: IDENTITY_REGISTRY_ABI,
+            functionName: "ownerOf",
+            args: [erc8004TokenId],
+          })) as `0x${string}`;
+          if (
+            identityOwner.toLowerCase() !==
+            walletClient.account!.address.toLowerCase()
+          ) {
+            return {
+              error:
+                "Connected wallet does not own the linked ERC-8004 identity.",
+            };
+          }
+          const [approvedAddress, approvedForAll] = await Promise.all([
+            publicClient.readContract({
+              address: clientCfg.identityRegistryAddress,
+              abi: IDENTITY_REGISTRY_ABI,
+              functionName: "getApproved",
+              args: [erc8004TokenId],
+            }) as Promise<`0x${string}`>,
+            publicClient.readContract({
+              address: clientCfg.identityRegistryAddress,
+              abi: IDENTITY_REGISTRY_ABI,
+              functionName: "isApprovedForAll",
+              args: [walletClient.account!.address, clientCfg.registryAddress],
+            }) as Promise<boolean>,
+          ]);
+          const hasIdentityApproval =
+            approvedForAll ||
+            approvedAddress.toLowerCase() ===
+              clientCfg.registryAddress.toLowerCase();
+          if (!hasIdentityApproval) {
+            const approvalHash = await walletClient.writeContract({
+              address: clientCfg.identityRegistryAddress,
+              abi: IDENTITY_REGISTRY_ABI,
+              functionName: "approve",
+              args: [clientCfg.registryAddress, erc8004TokenId],
+              chain: walletClient.chain,
+              account: walletClient.account!,
+            });
+            await publicClient.waitForTransactionReceipt({
+              hash: approvalHash,
+            });
+          }
 
           // 1. Fetch the oracle's address + public key for EIP-712 domain.
-          const oracleUrl =
-            process.env.NEXT_PUBLIC_ORACLE_URL ?? "http://localhost:3001";
-          const addrRes = await fetch(`${oracleUrl}/address`);
+          const addrRes = await fetch(`${normalizedOracleUrl}/address`);
           if (!addrRes.ok) {
             return {
-              error: `Could not reach oracle at ${oracleUrl}/address (${addrRes.status})`,
+              error: `Could not reach oracle at ${normalizedOracleUrl}/address (${addrRes.status})`,
             };
           }
           const { address: oracleAddress } = (await addrRes.json()) as {
@@ -564,7 +733,7 @@ function TransferForm({ tokenId }: { tokenId: string }) {
             chainId,
             tokenId: BigInt(tokenId),
             from: walletClient.account!.address,
-            to: (rawFormData.get("to") as string).trim() as `0x${string}`,
+            to: recipientAddress,
             deadline,
           });
           const oracleSignature = await walletClient.signTypedData({
@@ -575,10 +744,9 @@ function TransferForm({ tokenId }: { tokenId: string }) {
           // 3. Prepare transfer via server action (oracle call happens inside).
           const prepared = await prepareTransferAgent({
             tokenId,
-            to: (rawFormData.get("to") as string).trim() as `0x${string}`,
-            newOwnerPublicKey: (
-              rawFormData.get("newOwnerPublicKey") as string | null
-            )?.trim() as `0x${string}` | undefined,
+            to: recipientAddress,
+            oracleUrl: normalizedOracleUrl,
+            recipientOracleUrl,
             oracleSignature,
             oracleDeadline: String(deadline),
           });
@@ -606,7 +774,7 @@ function TransferForm({ tokenId }: { tokenId: string }) {
           const hash = await walletClient.writeContract({
             address: prepared.contractAddress!,
             abi: AGENT_REGISTRY_ABI,
-            functionName: "iTransferFrom",
+            functionName: "iTransferFromWithIdentity",
             args: [from, to, tId, proofs],
             chain: walletClient.chain,
             account: walletClient.account!,
@@ -619,14 +787,76 @@ function TransferForm({ tokenId }: { tokenId: string }) {
       className="space-y-3"
     >
       <input type="hidden" name="tokenId" value={tokenId} />
-      <Field label="Recipient Address *" name="to" placeholder="0x…" required />
-      <Field
-        label="Recipient Public Key *"
-        name="newOwnerPublicKey"
-        placeholder="0x02… (compressed secp256k1)"
-        required
+      <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-1">
+        <p className="text-xs font-semibold text-gray-300">
+          Transfer to registered agent
+        </p>
+      </div>
+      {recipientAgents.length > 0 && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">
+            Recipient Agent from Redis
+          </label>
+          <select
+            name="recipientAgentId"
+            value={recipientSelection}
+            onChange={(event) => setRecipientSelection(event.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-violet-600 text-sm"
+          >
+            {recipientAgents.map((agent) => (
+              <option key={agent.agentId} value={agent.agentId}>
+                {agent.name} #{agent.agentId}
+                {agent.teeOracleUrl ? "" : " - no teeOracle"}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {recipientAgents.length === 0 ? (
+        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+          <p className="text-xs text-amber-300/90">
+            No other cached agents found in Redis for this chain. Create or sync
+            another agent before transferring.
+          </p>
+        </div>
+      ) : selectedRecipient ? (
+        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-1.5">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-gray-500">Owner</span>
+            <span className="font-mono text-gray-300 truncate">
+              {selectedRecipient.owner}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-gray-500">teeOracle</span>
+            <span className="font-mono text-gray-300 truncate">
+              {selectedRecipient.teeOracleUrl ?? "-"}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+          <p className="text-xs text-amber-300/90">
+            Select a recipient agent from Redis.
+          </p>
+        </div>
+      )}
+      {!erc8004AgentId || erc8004AgentId === "0" ? (
+        <p className="text-xs text-amber-400/80">
+          This agent has no linked ERC-8004 identity, so combined transfer is
+          unavailable.
+        </p>
+      ) : null}
+      {selectedRecipientMissingOracle && (
+        <p className="text-xs text-amber-400/80">
+          Selected agent has no teeOracle service.
+        </p>
+      )}
+      <SubmitButton
+        isPending={isPending}
+        label="Transfer"
+        disabled={!canTransferToSelectedAgent}
       />
-      <SubmitButton isPending={isPending} label="Transfer" />
       <ResultBanner result={result} />
     </form>
   );
@@ -698,10 +928,12 @@ function RunOracleForm({
   agentId,
   teeOracleUrl,
   onNewRun,
+  clientCfg,
 }: {
   agentId: string;
   teeOracleUrl: string;
   onNewRun?: (run: CachedOracleRun) => void;
+  clientCfg: ActionClientConfig;
 }) {
   const { chainId, getViemClients, switchChain } = useWallet();
   const [payloadJson, setPayloadJson] = useState(
@@ -846,12 +1078,14 @@ function OracleRunCard({
   agentId,
   erc8004AgentId,
   teeOracleUrl,
+  clientCfg,
 }: {
   run: CachedOracleRun;
   agentId: string;
   /** ERC-8004 Identity Registry agent ID — used for the validationRequest contract call. */
   erc8004AgentId?: string;
   teeOracleUrl: string;
+  clientCfg: ActionClientConfig;
 }) {
   const { getViemClients, switchChain } = useWallet();
   const [open, setOpen] = useState(false);
@@ -939,10 +1173,10 @@ function OracleRunCard({
       const requestURI = `data:application/json;base64,${btoa(JSON.stringify(runMeta))}`;
       const requestHash = runRequestHash;
 
-      if (!clientCfg.teeVerifierAddress)
-        throw new Error(
-          "TEE_VERIFIER_ADDRESS is not configured. Cannot request validation.",
-        );
+      if (!clientCfg.registryAddress)
+        throw new Error("AgentRegistry is not configured.");
+      if (!clientCfg.validationRegistryAddress)
+        throw new Error("ValidationRegistry is not configured.");
 
       await switchChain();
       const { publicClient, walletClient } = await getViemClients();
@@ -950,12 +1184,24 @@ function OracleRunCard({
         throw new Error(
           "Agent is not registered with ERC-8004. Register it before requesting validation.",
         );
+
+      const verifierAddress = (await publicClient.readContract({
+        address: clientCfg.registryAddress,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "verifier",
+      })) as Address;
+      const teeVerifierAddress = await publicClient.readContract({
+        address: verifierAddress,
+        abi: VERIFIER_TEE_VERIFIER_ABI,
+        functionName: "teeVerifier",
+      });
+
       const txHash = await walletClient.writeContract({
-        address: clientCfg.validationRegistryAddress!,
+        address: clientCfg.validationRegistryAddress,
         abi: VALIDATION_REGISTRY_ABI,
         functionName: "validationRequest",
         args: [
-          clientCfg.teeVerifierAddress,
+          teeVerifierAddress,
           BigInt(erc8004AgentId),
           requestURI,
           requestHash,
@@ -1100,11 +1346,13 @@ function OracleRunHistory({
   agentId,
   erc8004AgentId,
   teeOracleUrl,
+  clientCfg,
 }: {
   runs: CachedOracleRun[];
   agentId: string;
   erc8004AgentId?: string;
   teeOracleUrl: string;
+  clientCfg: ActionClientConfig;
 }) {
   if (!runs.length) return null;
   return (
@@ -1116,6 +1364,7 @@ function OracleRunHistory({
           agentId={agentId}
           erc8004AgentId={erc8004AgentId}
           teeOracleUrl={teeOracleUrl}
+          clientCfg={clientCfg}
         />
       ))}
     </div>
@@ -1139,19 +1388,35 @@ function parsePayload(requestURI: string): Record<string, unknown> | null {
   return null;
 }
 
+function formatUnknown(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
 function ValidationJobRow({
   job,
   erc8004AgentId,
   oracleUrl,
   onComplete,
+  clientCfg,
 }: {
   job: PendingValidation;
   erc8004AgentId: string;
   oracleUrl: string;
   onComplete: (
     requestHash: string,
-    response: { score?: number; txHash?: string } | null,
+    response: {
+      score?: number;
+      txHash?: string;
+      responseURI?: string;
+      responseHash?: string;
+      tag?: string;
+      reasoning?: string;
+      evidence?: Record<string, unknown>;
+    } | null,
   ) => void;
+  clientCfg: ActionClientConfig;
 }) {
   const { chainId, getViemClients } = useWallet();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1206,15 +1471,31 @@ function ValidationJobRow({
         }),
       });
 
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        score?: number;
+        txHash?: string;
+        reasoning?: string;
+        responseURI?: string;
+        responseHash?: string;
+        tag?: string;
+      };
       if (!res.ok || data.error) {
         setError(data.error ?? `Oracle returned HTTP ${res.status}`);
         return;
       }
 
       onComplete(job.requestHash, {
-        score: data.score as number | undefined,
-        txHash: data.txHash as string | undefined,
+        score: data.score,
+        txHash: data.txHash,
+        responseURI: data.responseURI,
+        responseHash: data.responseHash,
+        tag: data.tag,
+        reasoning: data.reasoning,
+        evidence: {
+          score: data.score,
+          reasoning: data.reasoning,
+        },
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed.");
@@ -1254,6 +1535,7 @@ function PendingValidationsPanel({
   pending,
   teeOracleUrl,
   onComplete,
+  clientCfg,
 }: {
   agentId: string;
   erc8004AgentId?: string;
@@ -1261,10 +1543,19 @@ function PendingValidationsPanel({
   teeOracleUrl: string;
   onComplete: (
     requestHash: string,
-    response: { score?: number; txHash?: string } | null,
+    response: {
+      score?: number;
+      txHash?: string;
+      responseURI?: string;
+      responseHash?: string;
+      tag?: string;
+      reasoning?: string;
+      evidence?: Record<string, unknown>;
+    } | null,
   ) => void;
+  clientCfg: ActionClientConfig;
 }) {
-  const oracleUrl = (teeOracleUrl || clientCfg.oracleUrl) ?? "";
+  const oracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
   const pendingItems = pending.filter((j) => !j.response);
   const completedItems = pending.filter((j) => !!j.response);
 
@@ -1285,6 +1576,15 @@ function PendingValidationsPanel({
     );
   }
 
+  if (!oracleUrl) {
+    return (
+      <p className="text-xs text-amber-400/80">
+        Add a <span className="font-mono">teeOracle</span> service URL before
+        sending validation jobs to the oracle.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {pendingItems.length > 0 && (
@@ -1300,6 +1600,7 @@ function PendingValidationsPanel({
                 erc8004AgentId={erc8004AgentId}
                 oracleUrl={oracleUrl}
                 onComplete={onComplete}
+                clientCfg={clientCfg}
               />
             ))}
           </div>
@@ -1313,6 +1614,13 @@ function PendingValidationsPanel({
           </h4>
           <div className="space-y-2">
             {completedItems.map((job) => {
+              const payload = parsePayload(job.requestURI);
+              const llmOutcome = payload?.outcome;
+              const validationReasoning =
+                job.response!.reasoning ??
+                (typeof job.response!.evidence?.reasoning === "string"
+                  ? job.response!.evidence.reasoning
+                  : undefined);
               const scoreColor =
                 job.response!.score >= 70
                   ? "text-green-400"
@@ -1322,16 +1630,43 @@ function PendingValidationsPanel({
               return (
                 <div
                   key={job.requestHash}
-                  className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 flex items-center justify-between gap-3"
+                  className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2"
                 >
-                  <p className="text-xs font-mono text-gray-500 truncate">
-                    {job.requestHash.slice(0, 20)}…
-                  </p>
-                  <span
-                    className={`text-xs font-semibold shrink-0 ${scoreColor}`}
-                  >
-                    {job.response!.score}/100
-                  </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-mono text-gray-500 truncate">
+                      {job.requestHash.slice(0, 20)}…
+                    </p>
+                    <span
+                      className={`text-xs font-semibold shrink-0 ${scoreColor}`}
+                    >
+                      {job.response!.score}/100
+                    </span>
+                  </div>
+                  {llmOutcome !== undefined && (
+                    <div className="rounded bg-gray-900/60 p-2">
+                      <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                        LLM outcome
+                      </p>
+                      <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words overflow-x-auto max-h-32">
+                        {formatUnknown(llmOutcome)}
+                      </pre>
+                    </div>
+                  )}
+                  {validationReasoning && (
+                    <div className="rounded bg-gray-900/60 p-2">
+                      <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                        Validation reasoning
+                      </p>
+                      <p className="text-xs text-gray-300 whitespace-pre-wrap break-words">
+                        {validationReasoning}
+                      </p>
+                    </div>
+                  )}
+                  {job.response!.txHash && (
+                    <p className="text-[11px] font-mono text-gray-600 truncate">
+                      tx {job.response!.txHash}
+                    </p>
+                  )}
                 </div>
               );
             })}

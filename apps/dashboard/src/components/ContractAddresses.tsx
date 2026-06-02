@@ -1,109 +1,104 @@
-import { cfg } from "@/lib/config";
-const EXPLORER: Record<string, string> = {
-  base: "https://basescan.org/address",
-  baseSepolia: "https://sepolia.basescan.org/address",
-};
+import {
+  BASE_CHAIN_ID,
+  BASE_SEPOLIA_CHAIN_ID,
+  getDeploymentForChain,
+} from "@/lib/client-config";
+import { getNetworkConfigByChainId } from "@tee-agent/agent/config";
 
-function AddrRow({
+function ContractRow({
   label,
   address,
   explorer,
   tag,
-  isFirst,
 }: {
   label: string;
   address: string | undefined;
   explorer: string;
-  tag?: string;
-  isFirst?: boolean;
+  tag: string;
 }) {
   if (!address) return null;
   return (
-    <tr
-      className={`border-t border-violet-950/40 ${isFirst ? "border-t-0" : ""}`}
-    >
-      <td className="py-2.5 pr-6 text-sm text-slate-400 whitespace-nowrap align-top">
+    <div className="grid grid-cols-[minmax(8rem,1fr)_5.5rem] lg:grid-cols-[11rem_5.5rem_minmax(0,1fr)] gap-x-4 gap-y-2 py-3 border-t border-slate-800/80 first:border-t-0 items-center">
+      <span className="text-sm font-medium text-slate-300 whitespace-nowrap">
         {label}
-        {tag && (
-          <span className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-violet-950/40 text-violet-500 border border-violet-900/40">
-            {tag}
-          </span>
-        )}
-      </td>
-      <td className="py-2.5 text-sm font-mono text-slate-300 break-all">
-        <a
-          href={`${explorer}/${address}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-violet-400 transition-colors"
-        >
-          {address}
-        </a>
-      </td>
-    </tr>
+      </span>
+      <span className="justify-self-start text-[10px] font-mono px-2 py-0.5 rounded border border-violet-900/50 text-violet-400 bg-violet-950/20 whitespace-nowrap">
+        {tag}
+      </span>
+      <a
+        href={`${explorer}/address/${address}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="col-span-2 lg:col-span-1 block min-w-0 overflow-x-auto whitespace-nowrap rounded-md border border-slate-800/80 bg-slate-950/50 px-3 py-2 text-xs font-mono text-slate-300 hover:text-violet-300 transition-colors"
+      >
+        {address}
+      </a>
+    </div>
   );
 }
 
-const EXPLORER_ROOT: Record<string, string> = {
-  base: "https://basescan.org",
-  baseSepolia: "https://sepolia.basescan.org",
-};
-
 export default function ContractAddresses() {
-  const isBase = cfg.chain.id === 8453;
-  const explorer = isBase ? EXPLORER.base : EXPLORER.baseSepolia;
-  const explorerRoot = isBase ? EXPLORER_ROOT.base : EXPLORER_ROOT.baseSepolia;
-  const networkLabel = isBase ? "Base" : "Base Sepolia";
+  const deployedChains = [BASE_SEPOLIA_CHAIN_ID, BASE_CHAIN_ID]
+    .map((chainId) => {
+      const deployment = getDeploymentForChain(chainId);
+      return {
+        chainId,
+        deployment,
+        network: getNetworkConfigByChainId(chainId),
+      };
+    })
+    .filter(
+      ({ deployment }) =>
+        deployment.agentRegistry || deployment.validationRegistry,
+    );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-xl font-semibold text-slate-100">
           Deployed Contracts
         </h2>
-        <a
-          href={explorerRoot}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-violet-950/30 border-violet-900/50 text-violet-400 hover:text-violet-300 hover:border-violet-700 transition-colors"
-        >
-          {networkLabel} · {cfg.chain.id} ↗
-        </a>
       </div>
-      <div className="glass-card rounded-xl px-5 py-1">
-        <table className="w-full">
-          <tbody>
-            <AddrRow
-              isFirst
+      {deployedChains.map(({ chainId, deployment, network }) => (
+        <div key={chainId} className="glass-card rounded-xl px-5 py-4">
+          <div className="pb-3">
+            <a
+              href={network.explorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-violet-950/30 border-violet-900/50 text-violet-400 hover:text-violet-300 hover:border-violet-700 transition-colors"
+            >
+              {network.isTestnet ? "Base Sepolia" : "Base"} · {chainId} ↗
+            </a>
+          </div>
+          <div>
+            <ContractRow
               label="AgentRegistry"
-              address={cfg.registryAddress}
-              explorer={explorer}
+              address={deployment.agentRegistry}
+              explorer={network.explorerUrl}
+              tag="ERC-7857"
             />
-            <AddrRow
-              label="TeeVerifier"
-              address={cfg.teeVerifierAddress}
-              explorer={explorer}
-            />
-            <AddrRow
+            <ContractRow
               label="ValidationRegistry"
-              address={cfg.validationRegistryAddress}
-              explorer={explorer}
+              address={deployment.validationRegistry}
+              explorer={network.explorerUrl}
+              tag="ERC-8004"
             />
-            <AddrRow
+            <ContractRow
               label="Identity Registry"
-              address={cfg.identityRegistryAddress}
-              explorer={explorer}
+              address={network.identityRegistryAddress}
+              explorer={network.explorerUrl}
               tag="ERC-8004"
             />
-            <AddrRow
+            <ContractRow
               label="Reputation Registry"
-              address={cfg.reputationRegistryAddress}
-              explorer={explorer}
+              address={network.reputationRegistryAddress}
+              explorer={network.explorerUrl}
               tag="ERC-8004"
             />
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }

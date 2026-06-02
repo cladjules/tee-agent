@@ -72,6 +72,7 @@ export function ServiceEditorPanel({
   const [teeOracleUrl, setTeeOracleUrl] = useState(
     find("teeOracle")?.endpoint ?? "",
   );
+  const [teeOracleTouched, setTeeOracleTouched] = useState(false);
   const [x402Support, setX402Support] = useState(initialX402);
   const [customServices, setCustomServices] = useState<CustomService[]>(
     initialServices
@@ -148,6 +149,7 @@ export function ServiceEditorPanel({
   ]);
 
   const getError = useCallback((): string | null => {
+    if (!teeOracleUrl.trim()) return "teeOracle endpoint is required.";
     if (mcpEnabled && !mcpUrl.trim())
       return "MCP is enabled but has no endpoint URL.";
     if (a2aEnabled && !a2aUrl.trim())
@@ -168,6 +170,7 @@ export function ServiceEditorPanel({
     a2aUrl,
     oasfEnabled,
     oasfUrl,
+    teeOracleUrl,
     customServices,
   ]);
 
@@ -182,6 +185,10 @@ export function ServiceEditorPanel({
   }
 
   const errorMsg = getError();
+  const visibleErrorMsg =
+    errorMsg === "teeOracle endpoint is required." && !teeOracleTouched
+      ? null
+      : errorMsg;
 
   return (
     <div className="space-y-3">
@@ -192,13 +199,17 @@ export function ServiceEditorPanel({
             teeOracle
           </span>
           <span className="text-xs text-violet-300">
-            Phala Cloud / TDX TEE oracle endpoint
+            Phala Cloud / TDX TEE oracle endpoint *
           </span>
         </div>
         <input
           type="url"
           value={teeOracleUrl}
-          onChange={(e) => setTeeOracleUrl(e.target.value)}
+          onChange={(e) => {
+            setTeeOracleTouched(true);
+            setTeeOracleUrl(e.target.value);
+          }}
+          onBlur={() => setTeeOracleTouched(true)}
           placeholder="https://your-cvm.phala.network"
           className={INPUT}
         />
@@ -434,8 +445,6 @@ export function ServiceEditorPanel({
             + Add custom service
           </button>
 
-          {errorMsg && <ErrorBox message={errorMsg} />}
-
           {/* x402 */}
           <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-700 bg-gray-800/40 px-4 py-3">
             <div>
@@ -460,6 +469,7 @@ export function ServiceEditorPanel({
           </div>
         </>
       )}
+      {visibleErrorMsg && <ErrorBox message={visibleErrorMsg} />}
     </div>
   );
 }

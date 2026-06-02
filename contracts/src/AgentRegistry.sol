@@ -16,9 +16,8 @@ import "./interfaces/IERC7857.sol";
  * Extends the ERC7857 base with:
  *   - Standard ERC-721 tokenURI backed by a per-token custom URI (_customURIs).
  *     Points to standard NFT metadata JSON (name/description/image/attributes).
- *   - Separate ERC-8004 agent metadata URI (_metadataUri) registered with the
- *     official ERC-8004 Identity Registry singleton (optional — pass address(0) to skip).
- *     Points to ERC-8004 registration JSON (services, capabilities, etc.).
+ *   - Optional co-registration with the official ERC-8004 Identity Registry.
+ *     The ERC-8004 tokenURI points to registration JSON (services, capabilities, etc.).
  *   - Role-based admin/pause via OpenZeppelin AccessControl.
  *
  * Secure transfer is handled by the inherited iTransferFrom() function which
@@ -26,7 +25,7 @@ import "./interfaces/IERC7857.sol";
  *
  * URI layout:
  *   tokenURI(id)       → _customURIs[id]  (ERC-721 standard NFT metadata)
- *   getMetadataUri(id) → _metadataUri[id] (ERC-8004 agent registration JSON)
+ *   getMetadataUri(id) → ERC-8004 tokenURI, or empty when co-registration is disabled
  */
 contract AgentRegistry is
     IAgentRegistry,
@@ -204,6 +203,28 @@ contract AgentRegistry is
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         _customURIs[tokenId] = newURI;
         emit TokenURIUpdated(tokenId, newURI);
+    }
+
+    // --- Combined ERC-7857 + ERC-8004 transfer -------------------------------
+
+    /// @notice Transfer both this ERC-7857 agent NFT and its linked ERC-8004 identity.
+    /// @dev The caller must own the ERC-7857 token and must have approved this
+    ///      contract to move the linked ERC-8004 identity token.
+    function iTransferFromWithIdentity(
+        address from,
+        address to,
+        uint256 tokenId,
+        TransferValidityProof[] calldata proofs
+    ) external override nonReentrant whenNotPaused {
+        uint256 erc8004Id = _erc8004AgentId[tokenId];
+        require(
+            address(_erc8004Registry) != address(0),
+            "No ERC-8004 registry"
+        );
+        require(erc8004Id != 0, "No linked ERC-8004 agent");
+
+        _erc8004Registry.transferFrom(from, to, erc8004Id);
+        iTransferFrom(from, to, tokenId, proofs);
     }
 
     // --- Creator --------------------------------------------------------------

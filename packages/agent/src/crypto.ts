@@ -28,7 +28,7 @@ import type {
 } from "./types.js";
 import type { Address, Hex } from "viem";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
-import { readZeroGBytes } from "../storage/zero-g.js";
+import { readZeroGBytes } from "./storage/zero-g.js";
 
 const ALGORITHM = "aes-256-gcm";
 const KEY_LEN = 32;
@@ -322,6 +322,7 @@ export function buildAccessPayloads(params: {
   to: Address;
   deadline: bigint;
   currentHashes: readonly Hex[];
+  targetPubkey?: Hex;
 }): TransferAccessPayload[] {
   const {
     chainId,
@@ -332,8 +333,11 @@ export function buildAccessPayloads(params: {
     to,
     deadline,
     currentHashes,
+    targetPubkey: requestedTargetPubkey,
   } = params;
-  const targetPubkey = encodeAbiParameters([{ type: "address" }], [to]) as Hex;
+  const targetPubkey =
+    requestedTargetPubkey ??
+    (encodeAbiParameters([{ type: "address" }], [to]) as Hex);
 
   return currentHashes.map((dataHash, index) => {
     const nonce = keccak256(
