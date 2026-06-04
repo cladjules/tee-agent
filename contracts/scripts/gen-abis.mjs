@@ -5,7 +5,6 @@
 // Writes:
 //   packages/agent/src/abis/AgentRegistry.json
 //   packages/agent/src/abis/TEEVerifier.json
-//   packages/agent/src/abis/Verifier.json
 //   packages/agent/src/abis/ValidationRegistry.json
 //
 // NOTE: packages/agent/src/abis/ReputationRegistry.json is NOT generated here.
@@ -37,10 +36,6 @@ const contracts = [
   {
     artifact: "verifiers/TeeVerifier.sol/TeeVerifier.json",
     out: "TEEVerifier.json",
-  },
-  {
-    artifact: "verifiers/Verifier.sol/Verifier.json",
-    out: "Verifier.json",
   },
   {
     artifact: "ValidationRegistry.sol/ValidationRegistry.json",

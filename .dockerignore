@@ -1,0 +1,16 @@
+.git
+.turbo
+node_modules
+**/node_modules
+**/.turbo
+**/.next
+**/dist
+**/cache
+**/artifacts
+**/artifacts-foundry
+**/ignition/deployments
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example

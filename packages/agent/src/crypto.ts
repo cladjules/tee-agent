@@ -12,8 +12,7 @@
  * this module handles the client-side decryption after the TEE verifier
  * confirms the transfer on-chain.
  *
- * Note: Web Crypto SubtleCrypto is used when available (browser / modern Node).
- * The Node.js `node:crypto` module is used as a fallback.
+ * Uses Node.js `node:crypto` for AES-GCM and ECIES for key wrapping.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -24,11 +23,11 @@ import type {
   EncryptedBlob,
   ParsedServicesResult,
   ParseServicesOptions,
-  TransferAccessPayload,
 } from "./types.js";
-import type { Address, Hex } from "viem";
-import { encodeAbiParameters, keccak256, stringToHex } from "viem";
+import { keccak256, stringToHex } from "viem";
 import { readZeroGBytes } from "./storage/zero-g.js";
+
+export { buildAccessPayloads } from "./proofs.js";
 
 const ALGORITHM = "aes-256-gcm";
 const KEY_LEN = 32;
@@ -171,7 +170,7 @@ export async function hashEncryptedBlob(
 }
 
 export function parseAgentServicesJson(
-  json: any,
+  json: unknown,
   options?: ParseServicesOptions,
 ): ParsedServicesResult {
   try {
@@ -233,11 +232,18 @@ export function parseAgentServicesJson(
 
 export async function readJsonFromUri<T>(uri: string): Promise<T> {
   if (uri.startsWith("data:")) {
-    const base64 = uri.split(",")[1] ?? "";
+    const [, base64] = uri.split(",");
+    if (!base64) {
+      throw new Error("data URI is missing a base64 payload.");
+    }
     return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
   }
   if (uri.startsWith("zerog://")) {
-    const bytes = await readZeroGBytes(uri, process.env.ZERO_G_INDEXER_URL!);
+    const indexerUrl = process.env.ZERO_G_INDEXER_URL?.trim();
+    if (!indexerUrl) {
+      throw new Error("ZERO_G_INDEXER_URL is required to read zerog:// URIs.");
+    }
+    const bytes = await readZeroGBytes(uri, indexerUrl);
     return JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
   // Translate ipfs:// to a public HTTP gateway
@@ -249,120 +255,4 @@ export async function readJsonFromUri<T>(uri: string): Promise<T> {
     throw new Error(`Failed to fetch JSON from ${uri}: ${response.status}`);
   }
   return (await response.json()) as T;
-}
-
-// ---------------------------------------------------------------------------
-// Domain-bound proof helpers — match Verifier.sol signing scheme exactly.
-//
-// innerHash = keccak256(abi.encode(
-//   chainId, verifierAddr, registryAddr,  // chain + contract domain (F-001)
-//   tokenId, from, to, deadline,          // transfer context
-//   dataHash, [sealedKey,] targetPubkey, nonce  // proof-specific fields
-// ))
-// messageHash = keccak256("\x19Ethereum Signed Message:\n66" + toHexString(innerHash, 32))
-//
-// abi.encode + bytes32 nonce prevents hash collisions (F-002).
-// ---------------------------------------------------------------------------
-
-function _computeAccessInnerHash(
-  chainId: bigint,
-  verifierAddress: Address,
-  registryAddress: Address,
-  tokenId: bigint,
-  from: Address,
-  to: Address,
-  deadline: bigint,
-  dataHash: Hex,
-  targetPubkey: Hex,
-  nonce: Hex,
-): Hex {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: "uint256" },
-        { type: "address" },
-        { type: "address" },
-        { type: "uint256" },
-        { type: "address" },
-        { type: "address" },
-        { type: "uint256" },
-        { type: "bytes32" },
-        { type: "bytes" },
-        { type: "bytes32" },
-      ],
-      [
-        chainId,
-        verifierAddress,
-        registryAddress,
-        tokenId,
-        from,
-        to,
-        deadline,
-        dataHash,
-        targetPubkey,
-        nonce,
-      ],
-    ),
-  );
-}
-
-/**
- * Build unsigned access payloads for the oracle path.
- *
- * The oracle has already generated ownership proofs. This function computes
- * the access proof digests that the recipient wallet must sign before
- * assembling the TransferValidityProof[] structs.
- */
-export function buildAccessPayloads(params: {
-  chainId: number;
-  verifierAddress: Address;
-  registryAddress: Address;
-  tokenId: bigint;
-  from: Address;
-  to: Address;
-  deadline: bigint;
-  currentHashes: readonly Hex[];
-  targetPubkey?: Hex;
-}): TransferAccessPayload[] {
-  const {
-    chainId,
-    verifierAddress,
-    registryAddress,
-    tokenId,
-    from,
-    to,
-    deadline,
-    currentHashes,
-    targetPubkey: requestedTargetPubkey,
-  } = params;
-  const targetPubkey =
-    requestedTargetPubkey ??
-    (encodeAbiParameters([{ type: "address" }], [to]) as Hex);
-
-  return currentHashes.map((dataHash, index) => {
-    const nonce = keccak256(
-      encodeAbiParameters(
-        [{ type: "uint256" }, { type: "uint256" }, { type: "string" }],
-        [tokenId, BigInt(index), "access"],
-      ),
-    );
-    const innerHash = _computeAccessInnerHash(
-      BigInt(chainId),
-      verifierAddress,
-      registryAddress,
-      tokenId,
-      from,
-      to,
-      deadline,
-      dataHash as Hex,
-      targetPubkey,
-      nonce,
-    );
-    return {
-      dataHash: dataHash as Hex,
-      targetPubkey,
-      nonce,
-      digest: innerHash,
-    };
-  });
 }

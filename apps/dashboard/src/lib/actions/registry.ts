@@ -9,18 +9,15 @@ import { AgentRegistry } from "@tee-agent/agent/registry";
 import { REPUTATION_REGISTRY_ABI } from "@tee-agent/agent/abis";
 import { createPublicClient, http } from "viem";
 import { prepareFeedback as sdkPrepareFeedback } from "@tee-agent/agent/feedback";
-import { prepareValidation as sdkPrepareValidation } from "@tee-agent/agent/validate";
 import type {
   RegisteredAgent,
   ResolvedAgentProofData,
   PrepareFeedbackParams,
   PrepareFeedbackResult,
-  PrepareValidationParams,
-  PrepareValidationResult,
 } from "@tee-agent/agent/types";
 import {
   getOracleRunHistory,
-  fetchPendingValidationsForAgent,
+  fetchValidationResponsesForAgent,
 } from "@/lib/actions/agents";
 
 // ─── Dashboard-local types ────────────────────────────────────────────────────
@@ -45,21 +42,7 @@ export type AgentFeedbackOverview = {
   feedbacks: AgentFeedbackView[];
 };
 
-export type TransferRecipientAgent = {
-  agentId: string;
-  name: string;
-  owner: Address;
-  teeOracleUrl?: string;
-};
-
 type PreparedFeedbackResult = PrepareFeedbackResult | { error: string };
-type PreparedValidationResult = PrepareValidationResult | { error: string };
-
-function teeOracleUrlFromServices(
-  services: readonly { name: string; endpoint: string }[] | undefined,
-): string | undefined {
-  return services?.find((service) => service.name === "teeOracle")?.endpoint;
-}
 
 function normalizeScaledValue(value: bigint, decimals: number): number {
   return Number(value) / Math.pow(10, decimals);
@@ -109,15 +92,7 @@ async function fetchFeedbackOverview(
       }),
     ])) as [
       [bigint, bigint, number],
-      [
-        Address[],
-        bigint[],
-        bigint[],
-        number[],
-        string[],
-        string[],
-        boolean[],
-      ],
+      [Address[], bigint[], bigint[], number[], string[], string[], boolean[]],
     ];
     const [
       feedbackClients,
@@ -217,38 +192,21 @@ export async function getAgentPageData(id: string, chainId?: number) {
       ? intelligentDataInfo.erc8004AgentId
       : null;
 
-  const [
-    oracleRunsResult,
-    pendingValidations,
-    registeredAgents,
-    feedbackOverview,
-  ] = await Promise.all([
-    getOracleRunHistory(id, cid),
-    erc8004Id
-      ? fetchPendingValidationsForAgent(erc8004Id, cid)
-      : Promise.resolve([]),
-    getRegisteredAgents(cid),
-    fetchFeedbackOverview(cfg, erc8004Id),
-  ]);
-  const recipientAgents: TransferRecipientAgent[] = registeredAgents
-    .filter((item) => item.agentId.toString() !== id)
-    .map((item) => {
-      const teeOracleUrl = teeOracleUrlFromServices(item.metadata.services);
-      return {
-        agentId: item.agentId.toString(),
-        name: item.metadata.name,
-        owner: item.owner,
-        ...(teeOracleUrl ? { teeOracleUrl } : {}),
-      };
-    });
+  const [oracleRunsResult, validationResponses, feedbackOverview] =
+    await Promise.all([
+      getOracleRunHistory(id, cid),
+      erc8004Id
+        ? fetchValidationResponsesForAgent(erc8004Id, cid)
+        : Promise.resolve([]),
+      fetchFeedbackOverview(cfg, erc8004Id),
+    ]);
 
   return {
     agent,
     intelligentDataInfo,
     feedbackOverview,
     oracleRunsResult,
-    pendingValidations,
-    recipientAgents,
+    validationResponses,
   };
 }
 
@@ -272,26 +230,6 @@ export async function prepareFeedback(
     return {
       error:
         err instanceof Error ? err.message : "Feedback preparation failed.",
-    };
-  }
-}
-
-export async function prepareValidation(
-  params: PrepareValidationParams,
-): Promise<PreparedValidationResult> {
-  if (!params.agentId) return { error: "Agent ID is required." };
-  if (!params.validatorAddress)
-    return { error: "Validator address is required." };
-
-  try {
-    return sdkPrepareValidation(
-      getServerConfigForChain(await getActiveChainId()),
-      params,
-    );
-  } catch (err) {
-    return {
-      error:
-        err instanceof Error ? err.message : "Validation preparation failed.",
     };
   }
 }

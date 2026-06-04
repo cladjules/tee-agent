@@ -15,8 +15,8 @@ import type {
   FetchAgentServicesParams,
   FetchAgentServicesResult,
   PrepareRegisterErc8004Params,
-  PrepareImportedErc8004TeeOracleParams,
-  PrepareImportedErc8004TeeOracleResult,
+  PrepareTeeOracleServiceUpdateParams,
+  PrepareTeeOracleServiceUpdateResult,
   VerifyTeeOracleResult,
 } from "../types.js";
 import { createPublicClient, http } from "viem";
@@ -156,6 +156,26 @@ async function writeMetadataPreservingStorage(
   return uploadMetadata(config, metadata, label);
 }
 
+async function prepareMetadataUpdatePreservingStorage(
+  config: AgentConfig,
+  params: {
+    currentUri: string;
+    label: string;
+    update: (metadata: AgentMetadataJson) => Record<string, unknown>;
+  },
+): Promise<string> {
+  const existingMetadata = await readJsonFromUri<AgentMetadataJson>(
+    params.currentUri,
+  );
+  const metadata = params.update(existingMetadata);
+  return writeMetadataPreservingStorage(
+    config,
+    params.currentUri,
+    metadata,
+    params.label,
+  );
+}
+
 export async function prepareUpdateServices(
   config: AgentConfig,
   params: UpdateServicesParams,
@@ -182,9 +202,6 @@ export async function prepareUpdateServices(
     registry.getERC8004AgentId(numericTokenId),
   ]);
 
-  const existingMetadata =
-    await readJsonFromUri<Record<string, unknown>>(currentMetadataUri);
-
   const agentRegistryRef = `eip155:${config.chain.id}:${config.registryAddress}`;
   const identityRegistryRef = config.identityRegistryAddress
     ? `eip155:${config.chain.id}:${config.identityRegistryAddress}`
@@ -202,17 +219,15 @@ export async function prepareUpdateServices(
       : []),
   ];
 
-  const updatedMetadata = {
-    ...existingMetadata,
-    services,
-    registrations,
-  };
-
-  const tokenUri = await uploadMetadata(
-    config,
-    updatedMetadata,
-    `agent-${tokenId}-services-update`,
-  );
+  const tokenUri = await prepareMetadataUpdatePreservingStorage(config, {
+    currentUri: currentMetadataUri,
+    label: `agent-${tokenId}-services-update`,
+    update: (metadata) => ({
+      ...metadata,
+      services,
+      registrations,
+    }),
+  });
 
   return {
     erc8004RegistryAddress: config.identityRegistryAddress,
@@ -223,7 +238,7 @@ export async function prepareUpdateServices(
 
 /**
  * Patches the agent metadata URI with the correct ERC-8004 IdentityRegistry
- * registration entry. Call post-mint using the `ERC8004Registered` event data.
+ * registration entry. Call post-mint after reading `getERC8004AgentId(tokenId)`.
  * Returns an `UpdateServicesResult` ready for `buildUpdateServicesTxArgs`.
  */
 export async function prepareRegisterErc8004(
@@ -273,10 +288,10 @@ export async function prepareRegisterErc8004(
   };
 }
 
-export async function prepareImportedErc8004TeeOracle(
+export async function prepareTeeOracleServiceUpdate(
   config: AgentConfig,
-  params: PrepareImportedErc8004TeeOracleParams,
-): Promise<PrepareImportedErc8004TeeOracleResult> {
+  params: PrepareTeeOracleServiceUpdateParams,
+): Promise<PrepareTeeOracleServiceUpdateResult> {
   const { erc8004AgentId, teeOracleUrl } = params;
 
   if (!erc8004AgentId.trim()) throw new Error("ERC-8004 token ID is required.");
@@ -298,17 +313,14 @@ export async function prepareImportedErc8004TeeOracle(
     throw new Error(`ERC-8004 agent #${erc8004AgentId} has no metadata URI.`);
   }
 
-  const existingMetadata = await readJsonFromUri<AgentMetadataJson>(currentUri);
-  const updatedMetadata = {
-    ...existingMetadata,
-    services: upsertTeeOracleService(existingMetadata.services, oracle.url),
-  };
-  const tokenUri = await writeMetadataPreservingStorage(
-    config,
+  const tokenUri = await prepareMetadataUpdatePreservingStorage(config, {
     currentUri,
-    updatedMetadata,
-    `erc8004-${erc8004AgentId}-tee-oracle`,
-  );
+    label: `erc8004-${erc8004AgentId}-tee-oracle`,
+    update: (metadata) => ({
+      ...metadata,
+      services: upsertTeeOracleService(metadata.services, oracle.url),
+    }),
+  });
 
   return {
     erc8004RegistryAddress: config.identityRegistryAddress,

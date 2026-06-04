@@ -38,12 +38,14 @@ export function ServiceEditorPanel({
   initialX402 = false,
   onX402Change,
   hideServices = false,
+  lockTeeOracle = false,
 }: {
   initialServices: readonly AgentService[];
   onChange: (services: ServiceEditorEntry[]) => void;
   initialX402?: boolean;
   onX402Change?: (enabled: boolean) => void;
   hideServices?: boolean;
+  lockTeeOracle?: boolean;
 }) {
   const find = (name: string) => initialServices.find((s) => s.name === name);
 
@@ -205,18 +207,25 @@ export function ServiceEditorPanel({
         <input
           type="url"
           value={teeOracleUrl}
+          disabled={lockTeeOracle}
           onChange={(e) => {
             setTeeOracleTouched(true);
             setTeeOracleUrl(e.target.value);
           }}
           onBlur={() => setTeeOracleTouched(true)}
           placeholder="https://your-cvm.phala.network"
-          className={INPUT}
+          className={`${INPUT} disabled:opacity-60 disabled:cursor-not-allowed`}
         />
-        <p className="text-xs text-gray-500">
-          Required for oracle runs, ERC-7857 encrypted transfers, and on-chain
-          validation.
-        </p>
+        {lockTeeOracle ? (
+          <p className="text-xs text-amber-300/90">
+            Changing this oracle requires encrypted key rotation.
+          </p>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Required for oracle runs, ERC-7857 encrypted transfers, and
+            on-chain validation.
+          </p>
+        )}
       </div>
 
       {!hideServices && (

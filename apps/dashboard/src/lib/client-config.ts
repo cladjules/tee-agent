@@ -6,21 +6,20 @@
  * Public deployment addresses come from the root deployments.json so both
  * networks are available simultaneously for chain switching.
  *
- * ERC-8004 identity/reputation registries are always the official on-chain singletons
- * defined in NETWORK_CONFIG — never overridden by env vars.
+ * ERC-8004 identity/reputation registries are always the official on-chain
+ * singletons — never overridden by env vars.
  */
 
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
 import type { AgentConfig } from "@tee-agent/agent/types";
 import type { Address } from "viem";
-import { base, baseSepolia } from "viem/chains";
+import { base, baseSepolia } from "./chains";
 
 type RawDeployments = Record<
   string,
   {
     contracts?: {
       agentRegistry?: string;
-      verifier?: string;
       teeVerifier?: string;
       validationRegistry?: string;
     };
@@ -32,8 +31,8 @@ const deployments = deploymentsJson as RawDeployments;
 
 export type { AgentConfig };
 
-const BASE_CHAIN_ID = base.id;
-const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
+export const BASE_CHAIN_ID = base.id;
+export const BASE_SEPOLIA_CHAIN_ID = baseSepolia.id;
 
 const IDENTITY_REGISTRY = {
   base: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" as const,
@@ -45,9 +44,50 @@ const REPUTATION_REGISTRY = {
   baseSepolia: "0x8004B663056A597Dffe9eCcC1965A193B7388713" as const,
 };
 
+export type DashboardNetworkMeta = {
+  chainId: number;
+  label: string;
+  isTestnet: boolean;
+  identityRegistryAddress: Address;
+  reputationRegistryAddress: Address;
+  explorerUrl: string;
+  erc8004ScanUrl: string;
+  erc8004ChainSlug: string;
+  openseaUrl: string;
+};
+
+export function getNetworkMetaForChain(chainId: number): DashboardNetworkMeta {
+  if (chainId === BASE_CHAIN_ID) {
+    return {
+      chainId,
+      label: "Base",
+      isTestnet: false,
+      identityRegistryAddress: IDENTITY_REGISTRY.base,
+      reputationRegistryAddress: REPUTATION_REGISTRY.base,
+      explorerUrl: "https://basescan.org",
+      erc8004ScanUrl: "https://8004scan.io",
+      erc8004ChainSlug: "base",
+      openseaUrl: "https://opensea.io/assets/base",
+    };
+  }
+  if (chainId === BASE_SEPOLIA_CHAIN_ID) {
+    return {
+      chainId,
+      label: "Base Sepolia",
+      isTestnet: true,
+      identityRegistryAddress: IDENTITY_REGISTRY.baseSepolia,
+      reputationRegistryAddress: REPUTATION_REGISTRY.baseSepolia,
+      explorerUrl: "https://sepolia.basescan.org",
+      erc8004ScanUrl: "https://testnet.8004scan.io",
+      erc8004ChainSlug: "base-sepolia",
+      openseaUrl: "https://testnets.opensea.io/assets/base-sepolia",
+    };
+  }
+  throw new Error(`Unsupported chain ID: ${chainId}.`);
+}
+
 export function getDeploymentForChain(chainId: number): {
   agentRegistry?: Address;
-  verifier?: Address;
   teeVerifier?: Address;
   validationRegistry?: Address;
   fromBlock: bigint;
@@ -55,7 +95,6 @@ export function getDeploymentForChain(chainId: number): {
   const raw = deployments[String(chainId)];
   return {
     agentRegistry: raw?.contracts?.agentRegistry as Address | undefined,
-    verifier: raw?.contracts?.verifier as Address | undefined,
     teeVerifier: raw?.contracts?.teeVerifier as Address | undefined,
     validationRegistry: raw?.contracts?.validationRegistry as
       | Address
@@ -95,8 +134,6 @@ export function getClientConfigForChain(chainId: number): AgentConfig {
 
   return config;
 }
-
-export { BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID };
 
 // Default chain; active chain is set per-request via cookie.
 export const clientCfg: AgentConfig = getClientConfigForChain(

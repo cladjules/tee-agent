@@ -123,14 +123,14 @@ export type ParseServicesOptions = {
 export type TransferAccessPayload = {
   /** dataHash covered by this proof (matches the stored IntelligentData.dataHash). */
   dataHash: Hex;
-  /** Recipient's public key (ECIES-compressed) or ABI-encoded address for dev. */
+  /** Recipient oracle public key used for ECIES key wrapping. */
   targetPubkey: Hex;
   /** bytes32 nonce — fixed-size prevents abi.encodePacked collisions (F-002). */
   nonce: Hex;
   /**
    * innerHash the recipient passes to signMessage({ message: digest }) to produce
    * AccessProof.proof.  signMessage adds the EIP-191 prefix, which matches
-   * Verifier.sol's Strings.toHexString / abi.encodePacked computation.
+   * TeeVerifier.sol's Strings.toHexString / abi.encodePacked computation.
    */
   digest: Hex;
 };
@@ -238,34 +238,45 @@ export type TransferParams = {
   tokenId: string;
   to: Address;
   oracleUrl: string;
-  recipientOracleUrl?: string;
-  newOwnerPublicKey?: Hex;
-  oracleSignature?: string;
-  oracleDeadline?: string;
+  recipientPublicKey: Hex;
+  oracleSignature: string;
+  oracleDeadline: string;
 };
 
-export type TransferResult = {
+export type TransferOffer = {
+  schema: "tee-agent.transfer.offer";
+  version: 1;
+  chainId: number;
+  verifierAddress: Address;
+  registryAddress: Address;
   contractAddress: Address;
   tokenId: string;
-  from?: Address;
+  from: Address;
   to: Address;
-  deadline?: bigint;
-  newDataHashes: Hex[];
-  sealedKey: Hex;
-  accessPayloads: Array<{
+  deadline: string;
+  accessPayloads: TransferAccessPayload[];
+  ownershipProofs: TransferOwnershipProof[];
+};
+
+export type TransferProofJson = {
+  accessProof: {
     dataHash: Hex;
-    targetPubkey: Hex;
-    nonce: Hex;
-    digest: Hex;
-  }>;
-  ownershipProofs: Array<{
-    oracleType: number;
-    dataHash: Hex;
-    sealedKey: Hex;
     targetPubkey: Hex;
     nonce: Hex;
     proof: Hex;
-  }>;
+  };
+  ownershipProof: TransferOwnershipProof;
+  from: Address;
+  to: Address;
+  tokenId: string;
+  deadline: string;
+};
+
+export type TransferAcceptance = {
+  schema: "tee-agent.transfer.acceptance";
+  version: 1;
+  offer: TransferOffer;
+  proofs: TransferProofJson[];
 };
 
 // ─── Services ─────────────────────────────────────────────────────────────────
@@ -282,8 +293,8 @@ export type UpdateServicesResult = {
 };
 
 /**
- * Params for `prepareRegisterErc8004` — call post-mint with the values from
- * the `ERC8004Registered` event emitted by `AgentRegistry.mint()`.
+ * Params for `prepareRegisterErc8004` — call post-mint with the value from
+ * `getERC8004AgentId(tokenId)`.
  */
 export type PrepareRegisterErc8004Params = {
   /** ERC-8004 agent ID assigned by the IdentityRegistry during mint. */
@@ -311,17 +322,23 @@ export type VerifyTeeOracleResult = {
   publicKey: Hex;
 };
 
-export type PrepareImportedErc8004TeeOracleParams = {
+export type PrepareTeeOracleServiceUpdateParams = {
   erc8004AgentId: string;
   teeOracleUrl: string;
 };
 
-export type PrepareImportedErc8004TeeOracleResult = {
+export type PrepareTeeOracleServiceUpdateResult = {
   erc8004RegistryAddress: Address;
   erc8004AgentId: string;
   tokenUri: string;
   teeOracleUrl: string;
 };
+
+export type PrepareImportedErc8004TeeOracleParams =
+  PrepareTeeOracleServiceUpdateParams;
+
+export type PrepareImportedErc8004TeeOracleResult =
+  PrepareTeeOracleServiceUpdateResult;
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
@@ -382,7 +399,8 @@ export type PrepareValidationResult = {
 
 /**
  * On-chain struct passed as each element of the `proofs[]` array to `iTransferFrom`.
- * Build these with `sdk.signAccessPayloads(...)` after the oracle re-encrypts.
+ * SDK callers should usually pass a `TransferAcceptance` to `buildTransferTxArgs(...)`
+ * instead of constructing these structs manually.
  */
 export type TransferValidityProof = {
   accessProof: {
@@ -392,15 +410,7 @@ export type TransferValidityProof = {
     /** Signed by the recipient wallet over `TransferAccessPayload.digest`. */
     proof: Hex;
   };
-  ownershipProof: {
-    oracleType: number;
-    dataHash: Hex;
-    sealedKey: Hex;
-    targetPubkey: Hex;
-    nonce: Hex;
-    /** Signed by the TEE oracle. */
-    proof: Hex;
-  };
+  ownershipProof: TransferOwnershipProof;
   from: Address;
   to: Address;
   tokenId: bigint;

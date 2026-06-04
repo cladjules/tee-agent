@@ -1,21 +1,23 @@
 # TEE Oracle — Phala Cloud Deployment
 #
-# Deploy (prediction-market): npm run deploy:prediction-market
-# Deploy (web-fetcher):        npm run deploy:web-fetcher
+# Deploy any oracle entry:
+#   npm run deploy -- src/examples/prediction-market.ts
+#   npm run deploy -- src/examples/web-data-oracle.ts
 #
 # First deploy: run `phala link` afterwards to record app_id in phala.toml.
 # On startup, the oracle self-registers in TeeVerifier via initValidator + TDX quote.
 #
-# ORACLE_ENTRY selects the entry point compiled into dist/ (required):
-#   examples/prediction-market.js   — prediction-verifier skill
-#   examples/web-data-oracle.js     — web-fetcher skill
+# ORACLE_ENTRY is set by scripts/deploy-cvm.mjs and selects the entry point
+# compiled into apps/oracle/dist/ inside the CVM image.
 #
 # Attestation verification (trustless):
 #   curl -s http://localhost:3001/attestation | curl -d @- http://localhost:8080/verify | jq
 
 services:
   oracle:
-    build: .
+    build:
+      context: ../..
+      dockerfile: apps/oracle/Dockerfile
     image: tee-agent-oracle:latest
     ports:
       - "3001:3001"
@@ -31,6 +33,7 @@ services:
       - LLM_API_KEY
       - LLM_API_BASE
       - LLM_VALIDATION_MODEL
+      - DSTACK_VERIFIER_URL
       # 0G Storage
       - ZERO_G_RPC_URL
       - ZERO_G_INDEXER_URL

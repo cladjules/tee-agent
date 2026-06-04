@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "./ERC7857.sol";
-import "./interfaces/IERC7857.sol";
+import "./interfaces/IAgentRegistry.sol";
 
 /**
  * @title AgentRegistry
@@ -21,7 +21,7 @@ import "./interfaces/IERC7857.sol";
  *   - Role-based admin/pause via OpenZeppelin AccessControl.
  *
  * Secure transfer is handled by the inherited iTransferFrom() function which
- * verifies TEE-attested TransferValidityProof[] via the configured Verifier.
+ * verifies TEE-attested TransferValidityProof[] via the configured TeeVerifier.
  *
  * URI layout:
  *   tokenURI(id)       → _customURIs[id]  (ERC-721 standard NFT metadata)
@@ -121,7 +121,6 @@ contract AgentRegistry is
             uint256 erc8004Id = _erc8004Registry.register(metadataUri);
             _erc8004Registry.transferFrom(address(this), to, erc8004Id);
             _erc8004AgentId[tokenId] = erc8004Id;
-            emit ERC8004Registered(tokenId, erc8004Id);
         }
 
         emit Registered(tokenId, metadataUri, to);
@@ -147,7 +146,6 @@ contract AgentRegistry is
         tokenId = _mintBase(to, publicMetadataUri, newDatas);
 
         _erc8004AgentId[tokenId] = erc8004AgentId;
-        emit ERC8004Registered(tokenId, erc8004AgentId);
         emit Registered(tokenId, "", to);
     }
 

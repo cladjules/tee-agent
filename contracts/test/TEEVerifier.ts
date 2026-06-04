@@ -17,7 +17,7 @@ import { network } from "hardhat";
 const { viem, networkHelpers } = await network.create();
 
 // ---------------------------------------------------------------------------
-// Proof-building helpers — must match Verifier.sol's signing scheme exactly.
+// Proof-building helpers — must match TeeVerifier.sol's signing scheme exactly.
 //
 // Signing format (domain-bound to prevent cross-chain/cross-token replay, F-001):
 //   innerHash = keccak256(abi.encode(
@@ -76,7 +76,7 @@ async function buildAccessProofSignature(
   );
   // innerHash is "0x" + 64 hex = 66 chars.
   // signMessage({ message: string }) signs keccak256("\x19Ethereum Signed Message:\n66" + innerHash)
-  // which matches Verifier.sol's Strings.toHexString encoding.
+  // which matches TeeVerifier.sol's Strings.toHexString encoding.
   return signer.signMessage({ message: innerHash, account: signer.account! });
 }
 
@@ -121,7 +121,7 @@ async function buildOwnershipProofSignature(
 
 // ---------------------------------------------------------------------------
 
-describe("TeeVerifier + Verifier", function () {
+describe("TeeVerifier", function () {
   function fakeDcapQuoteFor(address: Address): `0x${string}` {
     const reportData = Buffer.concat([
       Buffer.from(address.slice(2), "hex"),
@@ -147,22 +147,15 @@ describe("TeeVerifier + Verifier", function () {
       dcap.address,
     ]);
 
-    // Verifier: admin=owner, teeVerifier address
-    const verifier = await viem.deployContract("Verifier", [
-      owner.account.address,
-      teeVerifier.address,
-    ]);
-
-    // AgentRegistry: uses verifier
     const registry = await viem.deployContract("AgentRegistry", [
       "AgentRegistry",
       "AGENT",
       owner.account.address,
-      verifier.address,
+      teeVerifier.address,
       zeroAddress, // identityRegistry disabled in tests
     ]);
 
-    return { teeVerifier, verifier, registry, owner, oracle, alice, bob };
+    return { teeVerifier, registry, owner, oracle, alice, bob };
   }
 
   // ── TeeVerifier basic tests ──────────────────────────────────────────────
@@ -336,7 +329,7 @@ describe("TeeVerifier + Verifier", function () {
   // ── Full ERC-7857 iTransferFrom path ─────────────────────────────────────
 
   it("iTransferFrom: fails internally for an unregistered oracle signer", async function () {
-    const { registry, verifier, alice, bob, oracle } =
+    const { registry, teeVerifier, alice, bob, oracle } =
       await networkHelpers.loadFixture(deployFixture);
 
     const dataHash = keccak256(toHex("encrypted-agent-payload"));
@@ -355,7 +348,7 @@ describe("TeeVerifier + Verifier", function () {
     const deadline = BigInt(Math.floor(Date.now() / 1000)) + 3600n;
     const ctx: ProofContext = {
       chainId: BigInt(await publicClient.getChainId()),
-      verifierAddress: verifier.address,
+      verifierAddress: teeVerifier.address,
       registryAddress: registry.address,
       tokenId,
       from: alice.account.address,
@@ -416,7 +409,7 @@ describe("TeeVerifier + Verifier", function () {
   });
 
   it("iTransferFrom: transfers token with valid TEE proof", async function () {
-    const { teeVerifier, registry, verifier, alice, bob, oracle } =
+    const { teeVerifier, registry, alice, bob, oracle } =
       await networkHelpers.loadFixture(deployFixture);
 
     // Mint a token to alice with one IntelligentData item
@@ -448,7 +441,7 @@ describe("TeeVerifier + Verifier", function () {
     const deadline = BigInt(Math.floor(Date.now() / 1000)) + 3600n; // 1 hour from now
     const ctx: ProofContext = {
       chainId,
-      verifierAddress: verifier.address,
+      verifierAddress: teeVerifier.address,
       registryAddress: registry.address,
       tokenId,
       from: alice.account.address,

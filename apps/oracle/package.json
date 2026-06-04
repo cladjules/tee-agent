@@ -7,8 +7,7 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc --build",
-    "deploy:prediction-market": "phala deploy -e .env -e ORACLE_ENTRY=examples/prediction-market.js --wait",
-    "deploy:web-fetcher": "phala deploy -e .env -e ORACLE_ENTRY=examples/web-data-oracle.js --wait",
+    "deploy": "node scripts/deploy-cvm.mjs",
     "dev:up": "docker compose -f docker-compose.dev.yml up -d",
     "dev:down": "docker compose -f docker-compose.dev.yml down",
     "dev:prediction-market": "npm run dev:up && tsx src/examples/prediction-market.ts",

@@ -1,154 +1,378 @@
 /**
- * prepareTransfer — orchestrates a secure NFT ownership transfer.
+ * Two-party ERC-7857 transfer helpers.
  *
- * Calls the TEE oracle's /reencrypt endpoint to get new ownership proofs,
- * then builds the client-side access payloads that the recipient wallet must sign.
+ * These helpers do not store pending transfers. Applications can persist the
+ * returned JSON-safe `TransferOffer` / `TransferAcceptance` objects in Redis,
+ * a database, local files, QR codes, IPFS, or any other message layer.
+ *
+ * Flow:
+ *  1. Sender signs `ReencryptRequest` for the sender oracle.
+ *  2. Sender calls `createTransferOffer(...)`.
+ *  3. Recipient receives the offer and calls `acceptTransferOffer(...)`.
+ *  4. Sender receives the acceptance and submits `buildTransferTxArgs(...)`.
  */
 
-import { buildAccessPayloads } from "../crypto.js";
-import type { AgentConfig, TransferParams, TransferResult } from "../types.js";
-import { AgentRegistry } from "../registry/agent.js";
-import { createPublicClient, http } from "viem";
-import { verifyTeeOracleEndpoint } from "./services.js";
+import { AGENT_REGISTRY_ABI } from "../abis.js";
+import { buildAccessPayloads } from "../proofs.js";
+import type {
+  AgentConfig,
+  TransferAcceptance,
+  TransferOffer,
+  TransferOwnershipProof,
+  TransferParams,
+  TransferProofJson,
+  TransferValidityProof,
+} from "../types.js";
+import {
+  createPublicClient,
+  decodeEventLog,
+  http,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from "viem";
 
-export async function prepareTransfer(
+function asBigInt(value: string, label: string): bigint {
+  if (!value) throw new Error(`${label} is required.`);
+  return BigInt(value);
+}
+
+function normalizeOracleUrl(url: string): string {
+  const normalized = url.trim().replace(/\/+$/, "");
+  if (!normalized) throw new Error("oracleUrl is required.");
+  return normalized;
+}
+
+const MAX_LOG_BLOCK_RANGE = 1_900n;
+
+function assertOffer(offer: TransferOffer): void {
+  if (offer.schema !== "tee-agent.transfer.offer") {
+    throw new Error("Invalid transfer offer schema.");
+  }
+  if (offer.version !== 1) throw new Error("Unsupported transfer offer version.");
+  if (!offer.registryAddress) throw new Error("Offer registryAddress is required.");
+  if (!offer.verifierAddress) throw new Error("Offer verifierAddress is required.");
+  if (!offer.contractAddress) throw new Error("Offer contractAddress is required.");
+  if (!offer.tokenId) throw new Error("Offer tokenId is required.");
+  if (!offer.from) throw new Error("Offer from is required.");
+  if (!offer.to) throw new Error("Offer to is required.");
+  if (!offer.deadline) throw new Error("Offer deadline is required.");
+  if (offer.accessPayloads.length !== offer.ownershipProofs.length) {
+    throw new Error("Offer proof count mismatch.");
+  }
+}
+
+function serializeProof(proof: TransferValidityProof): TransferProofJson {
+  return {
+    accessProof: proof.accessProof,
+    ownershipProof: proof.ownershipProof,
+    from: proof.from,
+    to: proof.to,
+    tokenId: proof.tokenId.toString(),
+    deadline: proof.deadline.toString(),
+  };
+}
+
+function deserializeProof(proof: TransferProofJson): TransferValidityProof {
+  return {
+    accessProof: proof.accessProof,
+    ownershipProof: proof.ownershipProof,
+    from: proof.from,
+    to: proof.to,
+    tokenId: BigInt(proof.tokenId),
+    deadline: BigInt(proof.deadline),
+  };
+}
+
+/**
+ * Sender-side helper. Creates a JSON-safe transfer offer after the sender oracle
+ * has re-wrapped each encrypted content key for `recipientPublicKey`.
+ *
+ * The caller must first sign `buildReencryptTypedData(...)` with the current
+ * owner wallet and pass that signature as `oracleSignature`.
+ */
+export async function createTransferOffer(
   config: AgentConfig,
   params: TransferParams,
-): Promise<TransferResult> {
+): Promise<TransferOffer> {
   const { tokenId, to, oracleSignature, oracleDeadline } = params;
 
   if (!tokenId) throw new Error("Token ID is required.");
   if (!to) throw new Error("Recipient address is required.");
+  if (!params.recipientPublicKey) {
+    throw new Error("recipientPublicKey is required.");
+  }
+  if (!config.registryAddress) throw new Error("registryAddress is required.");
+  if (!config.rpcUrl) throw new Error("rpcUrl is required.");
+  if (!oracleSignature) {
+    throw new Error(
+      "oracleSignature is required. Sign ReencryptRequest with the owner wallet.",
+    );
+  }
+  if (!oracleDeadline) throw new Error("oracleDeadline is required.");
 
-  const registry = new AgentRegistry({
-    address: config.registryAddress!,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+  const publicClient = createPublicClient({
+    chain: config.chain,
+    transport: http(config.rpcUrl),
   });
   const numericTokenId = BigInt(tokenId);
-
-  const intelligentDatas = await registry.intelligentDatasOf(numericTokenId);
-
-  const currentHashes = intelligentDatas.map(
-    (item: { dataHash: `0x${string}` }) => item.dataHash,
-  );
-
-  type AccessPayload = {
-    dataHash: `0x${string}`;
-    targetPubkey: `0x${string}`;
-    nonce: `0x${string}`;
-    digest: `0x${string}`;
-  };
-  type OwnershipProof = {
-    oracleType: number;
-    dataHash: `0x${string}`;
-    sealedKey: `0x${string}`;
-    targetPubkey: `0x${string}`;
-    nonce: `0x${string}`;
-    proof: `0x${string}`;
-  };
-
-  let accessPayloads: AccessPayload[] = [];
-  let ownershipProofs: OwnershipProof[] = [];
-  let newDataHashes: `0x${string}`[] = [...currentHashes];
-  let sealedKey = "0x" as `0x${string}`;
-  let from = "0x" as `0x${string}`;
-
-  if (currentHashes.length > 0) {
-    const [verifierAddress, ownerAddress] = await Promise.all([
-      registry.verifier(),
-      registry.ownerOf(numericTokenId),
-    ]);
-    from = ownerAddress;
-
-    const oracleUrl = params.oracleUrl.trim().replace(/\/+$/, "");
-    if (!oracleUrl) {
-      throw new Error("teeOracle URL is required for secure agent transfers.");
-    }
-    const targetEncryptionPublicKey =
-      params.newOwnerPublicKey ??
-      (params.recipientOracleUrl
-        ? (await verifyTeeOracleEndpoint(params.recipientOracleUrl)).publicKey
-        : undefined);
-    if (!targetEncryptionPublicKey) {
-      throw new Error(
-        "recipientOracleUrl or newOwnerPublicKey is required for encrypted transfers.",
-      );
-    }
-    if (!oracleSignature) {
-      throw new Error(
-        "oracleSignature is required — sign the ReencryptRequest with the owner wallet.",
-      );
-    }
-    if (!oracleDeadline) {
-      throw new Error("oracleDeadline is required.");
-    }
-
-    const blobUris = intelligentDatas.map(
-      (d: { dataDescription: string }) => d.dataDescription,
-    );
-
-    const oracleResponse = await fetch(`${oracleUrl}/reencrypt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tokenId,
-        from,
-        to,
-        chainId: config.chain.id,
-        verifierAddress,
-        registryAddress: config.registryAddress!,
-        deadline: Number(oracleDeadline),
-        intelligentDataHashes: currentHashes,
-        blobUris,
-        targetPubkey: targetEncryptionPublicKey,
-        signature: oracleSignature,
-      }),
-    });
-
-    if (!oracleResponse.ok) {
-      const text = await oracleResponse.text().catch(() => "");
-      throw new Error(
-        `Oracle re-encryption failed: ${oracleResponse.status} ${text}`,
-      );
-    }
-
-    const oracleResult = (await oracleResponse.json()) as {
-      newDataHashes: `0x${string}`[];
-      sealedKey: `0x${string}`;
-      ownershipProofs: typeof ownershipProofs;
-    };
-
-    newDataHashes = oracleResult.newDataHashes;
-    sealedKey = oracleResult.sealedKey;
-    ownershipProofs = oracleResult.ownershipProofs ?? [];
-    const deadlineBig = BigInt(oracleDeadline);
-    accessPayloads = buildAccessPayloads({
-      chainId: config.chain.id,
-      verifierAddress,
-      registryAddress: config.registryAddress!,
-      tokenId: numericTokenId,
-      from,
-      to,
-      deadline: deadlineBig,
-      currentHashes,
-      targetPubkey: targetEncryptionPublicKey,
-    });
+  const intelligentDatas = (await publicClient.readContract({
+    address: config.registryAddress,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "intelligentDatasOf",
+    args: [numericTokenId],
+  })) as ReadonlyArray<{ dataDescription: string; dataHash: Hex }>;
+  const currentHashes = intelligentDatas.map((item) => item.dataHash);
+  if (currentHashes.length === 0) {
+    throw new Error("Agent has no encrypted intelligent data to transfer.");
   }
 
-  return {
-    contractAddress: config.registryAddress!,
-    tokenId,
-    ...(from !== "0x" ? { from: from as `0x${string}` } : {}),
-    to,
-    ...(currentHashes.length > 0 && oracleDeadline
-      ? { deadline: BigInt(oracleDeadline) }
-      : {}),
-    newDataHashes,
-    sealedKey,
-    accessPayloads,
-    ownershipProofs,
+  const [verifierAddress, from] = await Promise.all([
+    publicClient.readContract({
+      address: config.registryAddress,
+      abi: AGENT_REGISTRY_ABI,
+      functionName: "verifier",
+      args: [],
+    }) as Promise<Address>,
+    publicClient.readContract({
+      address: config.registryAddress,
+      abi: AGENT_REGISTRY_ABI,
+      functionName: "ownerOf",
+      args: [numericTokenId],
+    }) as Promise<Address>,
+  ]);
+  const oracleUrl = normalizeOracleUrl(params.oracleUrl);
+  const deadline = asBigInt(oracleDeadline, "oracleDeadline");
+  const blobUris = intelligentDatas.map((d) => d.dataDescription);
+
+  const oracleResponse = await fetch(`${oracleUrl}/reencrypt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tokenId,
+      from,
+      to,
+      chainId: config.chain.id,
+      verifierAddress,
+      registryAddress: config.registryAddress,
+      deadline: Number(deadline),
+      intelligentDataHashes: currentHashes,
+      blobUris,
+      targetPubkey: params.recipientPublicKey,
+      signature: oracleSignature,
+    }),
+  });
+
+  if (!oracleResponse.ok) {
+    const text = await oracleResponse.text().catch(() => "");
+    throw new Error(
+      `Oracle re-encryption failed: ${oracleResponse.status} ${text}`,
+    );
+  }
+
+  const oracleResult = (await oracleResponse.json()) as {
+    ownershipProofs?: TransferOwnershipProof[];
   };
+  if (!oracleResult.ownershipProofs) {
+    throw new Error("Oracle response missing ownershipProofs.");
+  }
+  if (oracleResult.ownershipProofs.length !== currentHashes.length) {
+    throw new Error("Oracle response proof count mismatch.");
+  }
+
+  const accessPayloads = buildAccessPayloads({
+    chainId: config.chain.id,
+    verifierAddress,
+    registryAddress: config.registryAddress,
+    tokenId: numericTokenId,
+    from,
+    to,
+    deadline,
+    currentHashes,
+    targetPubkey: params.recipientPublicKey,
+  });
+
+  return {
+    schema: "tee-agent.transfer.offer",
+    version: 1,
+    chainId: config.chain.id,
+    verifierAddress,
+    registryAddress: config.registryAddress,
+    contractAddress: config.registryAddress,
+    tokenId,
+    from,
+    to,
+    deadline: deadline.toString(),
+    accessPayloads,
+    ownershipProofs: oracleResult.ownershipProofs,
+  };
+}
+
+/**
+ * Recipient-side helper. Signs the offer access payloads with the recipient
+ * wallet and returns a JSON-safe acceptance object.
+ */
+export async function acceptTransferOffer(
+  offer: TransferOffer,
+  signFn: (digest: Hex) => Promise<Hex>,
+): Promise<TransferAcceptance> {
+  assertOffer(offer);
+  const proofs = await Promise.all(
+    offer.accessPayloads.map(async (payload, i) => {
+      const ownershipProof = offer.ownershipProofs[i];
+      if (!ownershipProof) {
+        throw new Error(`Missing ownership proof for access payload ${i}.`);
+      }
+      const proof: TransferValidityProof = {
+        accessProof: {
+          dataHash: payload.dataHash,
+          targetPubkey: payload.targetPubkey,
+          nonce: payload.nonce,
+          proof: await signFn(payload.digest),
+        },
+        ownershipProof,
+        from: offer.from,
+        to: offer.to,
+        tokenId: BigInt(offer.tokenId),
+        deadline: BigInt(offer.deadline),
+      };
+      return serializeProof(proof);
+    }),
+  );
+
+  return {
+    schema: "tee-agent.transfer.acceptance",
+    version: 1,
+    offer,
+    proofs,
+  };
+}
+
+/**
+ * Lower-level helper retained for callers that already manage access payloads.
+ */
+export async function signAccessPayloads(
+  signFn: (digest: Hex) => Promise<Hex>,
+  accessPayloads: TransferOffer["accessPayloads"],
+  ownershipProofs: TransferOwnershipProof[],
+  opts: { from: Address; to: Address; tokenId: bigint; deadline: bigint },
+): Promise<TransferValidityProof[]> {
+  return Promise.all(
+    accessPayloads.map(async (payload, i) => {
+      const ownershipProof = ownershipProofs[i];
+      if (!ownershipProof) {
+        throw new Error(`Missing ownership proof for access payload ${i}.`);
+      }
+      return {
+        accessProof: {
+          dataHash: payload.dataHash,
+          targetPubkey: payload.targetPubkey,
+          nonce: payload.nonce,
+          proof: await signFn(payload.digest),
+        },
+        ownershipProof,
+        from: opts.from,
+        to: opts.to,
+        tokenId: opts.tokenId,
+        deadline: opts.deadline,
+      };
+    }),
+  );
+}
+
+/**
+ * Sender-side finalization helper. Use the returned args with viem/ethers to
+ * submit `AgentRegistry.iTransferFromWithIdentity`.
+ */
+export function buildTransferTxArgs(acceptance: TransferAcceptance): {
+  address: Address;
+  abi: typeof AGENT_REGISTRY_ABI;
+  functionName: "iTransferFromWithIdentity";
+  args: [Address, Address, bigint, TransferValidityProof[]];
+} {
+  if (acceptance.schema !== "tee-agent.transfer.acceptance") {
+    throw new Error("Invalid transfer acceptance schema.");
+  }
+  if (acceptance.version !== 1) {
+    throw new Error("Unsupported transfer acceptance version.");
+  }
+  assertOffer(acceptance.offer);
+  if (acceptance.proofs.length !== acceptance.offer.ownershipProofs.length) {
+    throw new Error("Acceptance proof count mismatch.");
+  }
+  const proofs = acceptance.proofs.map(deserializeProof);
+  return {
+    address: acceptance.offer.contractAddress,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "iTransferFromWithIdentity",
+    args: [
+      acceptance.offer.from,
+      acceptance.offer.to,
+      BigInt(acceptance.offer.tokenId),
+      proofs,
+    ],
+  };
+}
+
+/**
+ * Reads the latest `PublishedSealedKey` event for a transferred token.
+ *
+ * Consumers that keep their own index can skip this and load the sealed keys
+ * from that index. Consumers without an index should pass the deployment
+ * `fromBlock` so the SDK can query the exact registry event range.
+ */
+export async function getPublishedSealedKeys(params: {
+  publicClient: PublicClient;
+  registryAddress: Address;
+  tokenId: bigint;
+  to: Address;
+  fromBlock: bigint;
+  toBlock: bigint | "latest";
+}): Promise<Hex[]> {
+  const finalBlock =
+    params.toBlock === "latest"
+      ? await params.publicClient.getBlockNumber()
+      : params.toBlock;
+  const logs = [];
+  for (
+    let fromBlock = params.fromBlock;
+    fromBlock <= finalBlock;
+    fromBlock += MAX_LOG_BLOCK_RANGE + 1n
+  ) {
+    const toBlock =
+      fromBlock + MAX_LOG_BLOCK_RANGE > finalBlock
+        ? finalBlock
+        : fromBlock + MAX_LOG_BLOCK_RANGE;
+    const chunkLogs = await params.publicClient.getContractEvents({
+      address: params.registryAddress,
+      abi: AGENT_REGISTRY_ABI,
+      eventName: "PublishedSealedKey",
+      args: {
+        to: params.to,
+        tokenId: params.tokenId,
+      },
+      fromBlock,
+      toBlock,
+    });
+    logs.push(...chunkLogs);
+  }
+  if (logs.length === 0) {
+    throw new Error(
+      `No PublishedSealedKey event found for token ${params.tokenId.toString()} and recipient ${params.to}.`,
+    );
+  }
+  const latest = logs[logs.length - 1];
+  if (!latest) throw new Error("Latest PublishedSealedKey log is missing.");
+  const decoded = decodeEventLog({
+    abi: AGENT_REGISTRY_ABI,
+    eventName: "PublishedSealedKey",
+    data: latest.data,
+    topics: latest.topics,
+  });
+  const sealedKeys = (decoded.args as { sealedKeys?: readonly Hex[] })
+    .sealedKeys;
+  if (!sealedKeys || sealedKeys.length === 0) {
+    throw new Error("PublishedSealedKey event has no sealedKeys.");
+  }
+  return [...sealedKeys] as Hex[];
 }

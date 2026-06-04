@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { getAgentPageData } from "@/lib/actions/registry";
-import { getClientConfigForChain } from "@/lib/client-config";
+import {
+  getClientConfigForChain,
+  getNetworkMetaForChain,
+} from "@/lib/client-config";
 import AgentDetailActions from "./AgentDetailActions";
-import { getNetworkConfigByChainId } from "@tee-agent/agent/config";
 import { getActiveChainId } from "@/lib/active-chain";
 import type {
   AgentIntelligentDataEntry,
@@ -61,15 +63,14 @@ export async function generateMetadata({ params }: Props) {
 export default async function AgentDetailPage({ params }: Props) {
   const { id } = await params;
   const chainId = await getActiveChainId();
-  const nc = getNetworkConfigByChainId(chainId);
+  const nc = getNetworkMetaForChain(chainId);
   const clientCfg = getClientConfigForChain(chainId);
   const {
     agent,
     intelligentDataInfo,
     feedbackOverview,
     oracleRunsResult,
-    pendingValidations,
-    recipientAgents,
+    validationResponses,
   } = await getAgentPageData(id, chainId);
 
   if (!agent) notFound();
@@ -165,33 +166,21 @@ export default async function AgentDetailPage({ params }: Props) {
             On-chain
           </h2>
           {clientCfg.registryAddress && (
-            <>
-              <DetailRow
-                label="ERC-721"
-                value={`#${agent.agentId.toString()}`}
-                mono
-                href={explorerNft(
-                  clientCfg.registryAddress,
-                  agent.agentId,
-                  nc.explorerUrl,
-                )}
-              />
-              <DetailRow
-                label="OpenSea"
-                value={`#${agent.agentId.toString()}`}
-                mono
-                href={openseaNft(
-                  clientCfg.registryAddress,
-                  agent.agentId,
-                  nc.openseaUrl,
-                )}
-              />
-            </>
+            <DetailRow
+              label="ERC-7857 Agent"
+              value={`#${agent.agentId.toString()}`}
+              mono
+              href={explorerNft(
+                clientCfg.registryAddress,
+                agent.agentId,
+                nc.explorerUrl,
+              )}
+            />
           )}
           {intelligentDataInfo.erc8004AgentId &&
             intelligentDataInfo.erc8004AgentId !== "0" && (
               <DetailRow
-                label="ERC-8004"
+                label="ERC-8004 Agent"
                 value={`#${intelligentDataInfo.erc8004AgentId}`}
                 mono
                 href={erc8004ScanUrl(
@@ -201,6 +190,19 @@ export default async function AgentDetailPage({ params }: Props) {
                 )}
               />
             )}
+          {clientCfg.registryAddress && (
+            <DetailRow
+              label="ERC-721 Opensea"
+              value={`#${agent.agentId.toString()}`}
+              mono
+              mt
+              href={openseaNft(
+                clientCfg.registryAddress,
+                agent.agentId,
+                nc.openseaUrl,
+              )}
+            />
+          )}
           {agent.publicMetadataUri && (
             <DetailRow
               label="ERC-721 URI"
@@ -229,8 +231,7 @@ export default async function AgentDetailPage({ params }: Props) {
         owner={agent.owner}
         initialServices={agent.metadata.services ?? []}
         initialRuns={oracleRuns}
-        initialPendingValidations={pendingValidations}
-        recipientAgents={recipientAgents}
+        initialValidationResponses={validationResponses}
         clientCfg={actionClientCfg}
       />
 
@@ -385,17 +386,21 @@ function DetailRow({
   value,
   mono,
   truncate,
+  mt,
   href,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   truncate?: boolean;
+  mt?: boolean;
   href?: string;
 }) {
   const cls = `text-right break-all ${mono ? "font-mono" : ""} ${truncate ? "truncate max-w-[200px]" : ""}`;
   return (
-    <div className="flex items-start justify-between gap-4 text-sm">
+    <div
+      className={`flex items-start justify-between gap-4 text-sm ${mt ? "mt-4" : ""}`}
+    >
       <span className="text-gray-500 flex-shrink-0">{label}</span>
       {href ? (
         <a

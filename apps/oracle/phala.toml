@@ -1,7 +1,8 @@
 # Phala Cloud project config for the oracle CVM.
 # Run `phala login` once to authenticate (browser device-flow, stores key in ~/.phala-cloud/).
-# First deploy:  npm run deploy          — creates a new CVM, then run `phala link` to record app_id here.
-# Re-deploy:     npm run deploy          — updates the existing CVM when app_id is set.
+# First deploy:  npm run deploy -- src/examples/prediction-market.ts
+# Re-deploy:     same command updates the existing CVM when app_id is set.
+# Link:          run `phala link` after first deploy to record app_id here.
 # Env vars:      copy .env.example → .env and fill in values; phala deploy uploads them encrypted.
 
 compose_file = "docker-compose.yml"

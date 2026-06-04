@@ -2,10 +2,10 @@
 pragma solidity ^0.8.35;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "../interfaces/IERC7857.sol";
+import "../interfaces/IAgentDataVerifier.sol";
 
 /// @dev Always-pass ERC-7857 verifier for AgentRegistry tests.
-contract AlwaysPassVerifier is IERC7857DataVerifier {
+contract AlwaysPassVerifier is IAgentDataVerifier {
     function verifyTransferValidity(
         TransferValidityProof[] calldata proofs
     )
@@ -26,6 +26,15 @@ contract AlwaysPassVerifier is IERC7857DataVerifier {
                 ownershipProofNonce: proofs[i].ownershipProof.nonce
             });
         }
+    }
+
+    function verifyValidation(
+        uint256,
+        bytes32,
+        uint8,
+        bytes calldata
+    ) external payable override returns (bool) {
+        return true;
     }
 }
 

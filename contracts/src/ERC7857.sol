@@ -24,7 +24,7 @@ abstract contract ERC7857 is IERC7857, ERC721 {
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
-    IERC7857DataVerifier private _verifier;
+    IAgentDataVerifier private _verifier;
     uint256 internal _nextTokenId;
 
     /// @dev tokenId → intelligent data items
@@ -44,18 +44,18 @@ abstract contract ERC7857 is IERC7857, ERC721 {
         address verifier_
     ) ERC721(name_, symbol_) {
         if (verifier_ != address(0)) {
-            _verifier = IERC7857DataVerifier(verifier_);
+            _verifier = IAgentDataVerifier(verifier_);
         }
     }
 
     // ─── Verifier ─────────────────────────────────────────────────────────────
 
-    function verifier() public view override returns (IERC7857DataVerifier) {
+    function verifier() public view override returns (IAgentDataVerifier) {
         return _verifier;
     }
 
     function _setVerifier(address verifier_) internal {
-        _verifier = IERC7857DataVerifier(verifier_);
+        _verifier = IAgentDataVerifier(verifier_);
     }
 
     // ─── Token ID counter ─────────────────────────────────────────────────────

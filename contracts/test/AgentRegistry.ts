@@ -40,15 +40,11 @@ describe("AgentRegistry", function () {
       alice.account.address,
       dcap.address,
     ]);
-    const verifier = await viem.deployContract("Verifier", [
-      alice.account.address,
-      teeVerifier.address,
-    ]);
     const registry = await viem.deployContract("AgentRegistry", [
       "AgentRegistry",
       "AGENT",
       alice.account.address,
-      verifier.address,
+      teeVerifier.address,
       zeroAddress,
     ]);
     return { registry, teeVerifier, alice, oracle };

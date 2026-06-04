@@ -22,30 +22,9 @@ const chainNames = {
 // Map Ignition module keys → shared deployment contract keys
 const KEY_MAP = {
   "TeeAgent#AgentRegistry": "agentRegistry",
-  "TeeAgent#Verifier": "verifier",
   "TeeAgent#TeeVerifier": "teeVerifier",
   "TeeAgent#ValidationRegistry": "validationRegistry",
 };
-const DEPLOYMENT_CONTRACT_KEYS = new Set(Object.values(KEY_MAP));
-
-function pickDeploymentContracts(contracts) {
-  const picked = {};
-  for (const key of DEPLOYMENT_CONTRACT_KEYS) {
-    if (typeof contracts[key] === "string") {
-      picked[key] = contracts[key];
-    }
-  }
-  return picked;
-}
-
-function sameAddress(a, b) {
-  return (
-    typeof a === "string" &&
-    typeof b === "string" &&
-    a.toLowerCase() === b.toLowerCase()
-  );
-}
-
 function readDeployment(chainId) {
   const deployedPath = join(
     ROOT,
@@ -61,13 +40,12 @@ function readDeployment(chainId) {
   const raw = JSON.parse(readFileSync(deployedPath, "utf8"));
   const resolvedContracts = {};
   for (const [ignitionKey, contractKey] of Object.entries(KEY_MAP)) {
-    if (raw[ignitionKey]) {
-      resolvedContracts[contractKey] = raw[ignitionKey];
+    if (typeof raw[ignitionKey] !== "string") {
+      throw new Error(
+        `Missing required Ignition deployment key ${ignitionKey} for chain ${chainId}`,
+      );
     }
-  }
-
-  if (Object.keys(resolvedContracts).length === 0) {
-    return null;
+    resolvedContracts[contractKey] = raw[ignitionKey];
   }
 
   const journalPath = join(
@@ -110,38 +88,17 @@ const deploymentsPath = join(ROOT, "deployments.json");
 const deployments = existsSync(deploymentsPath)
   ? JSON.parse(readFileSync(deploymentsPath, "utf8"))
   : {};
-const preservedActiveTeeVerifiers = [];
-
 for (const {
   chainId,
   resolvedContracts,
   deploymentBlock,
 } of foundDeployments) {
   const existingDeployment = deployments[chainId] ?? {};
-  const existingContracts = pickDeploymentContracts(
-    existingDeployment.contracts ?? {},
-  );
-  const preserveActiveTeeVerifier =
-    sameAddress(existingContracts.verifier, resolvedContracts.verifier) &&
-    typeof existingContracts.teeVerifier === "string" &&
-    typeof resolvedContracts.teeVerifier === "string" &&
-    !sameAddress(existingContracts.teeVerifier, resolvedContracts.teeVerifier);
   const nextDeployment = {
     ...existingDeployment,
     name: chainNames[chainId] ?? existingDeployment.name,
-    contracts: {
-      ...existingContracts,
-      ...resolvedContracts,
-    },
+    contracts: resolvedContracts,
   };
-  if (preserveActiveTeeVerifier) {
-    nextDeployment.contracts.teeVerifier = existingContracts.teeVerifier;
-    preservedActiveTeeVerifiers.push({
-      chainId,
-      teeVerifier: existingContracts.teeVerifier,
-      ignitionTeeVerifier: resolvedContracts.teeVerifier,
-    });
-  }
   if (deploymentBlock !== null) {
     nextDeployment.fromBlock = String(deploymentBlock);
   }
@@ -168,15 +125,5 @@ for (const {
   if (deploymentBlock !== null) {
     console.log(`    fromBlock=${deploymentBlock}`);
   }
-}
-for (const {
-  chainId,
-  teeVerifier,
-  ignitionTeeVerifier,
-} of preservedActiveTeeVerifiers) {
-  console.log(
-    `  preserved active teeVerifier for ${chainNames[chainId] ?? chainId}: ${teeVerifier}`,
-  );
-  console.log(`    ignitionTeeVerifier=${ignitionTeeVerifier}`);
 }
 console.log();

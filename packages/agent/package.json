@@ -4,99 +4,23 @@
   "type": "module",
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
-    "./types": {
-      "types": "./src/types.ts",
-      "import": "./dist/types.js"
-    },
-    "./config": {
-      "types": "./src/config.ts",
-      "import": "./dist/config.js"
-    },
-    "./encryption": {
-      "types": "./src/crypto.ts",
-      "import": "./dist/crypto.js"
-    },
-    "./abis": {
-      "types": "./dist/abis.d.ts",
-      "import": "./dist/abis.js"
-    },
-    "./registry": {
-      "types": "./src/registry/agent.ts",
-      "import": "./dist/registry/agent.js"
-    },
-    "./zero-g": {
-      "types": "./src/storage/zero-g.ts",
-      "import": "./dist/storage/zero-g.js"
-    },
-    "./mint": {
-      "types": "./src/ops/mint.ts",
-      "import": "./dist/ops/mint.js"
-    },
-    "./transfer": {
-      "types": "./src/ops/transfer.ts",
-      "import": "./dist/ops/transfer.js"
-    },
-    "./services": {
-      "types": "./src/ops/services.ts",
-      "import": "./dist/ops/services.js"
-    },
-    "./feedback": {
-      "types": "./src/ops/feedback.ts",
-      "import": "./dist/ops/feedback.js"
-    },
-    "./validate": {
-      "types": "./src/ops/validate.ts",
-      "import": "./dist/ops/validate.js"
-    },
-    "./typed-data": {
-      "types": "./src/typed-data.ts",
-      "import": "./dist/typed-data.js"
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "types": [
-        "./src/types.ts"
-      ],
-      "config": [
-        "./src/config.ts"
-      ],
-      "encryption": [
-        "./src/crypto.ts"
-      ],
-      "abis": [
-        "./dist/abis.d.ts"
-      ],
-      "registry": [
-        "./src/registry/agent.ts"
-      ],
-      "zero-g": [
-        "./src/storage/zero-g.ts"
-      ],
-      "mint": [
-        "./src/ops/mint.ts"
-      ],
-      "transfer": [
-        "./src/ops/transfer.ts"
-      ],
-      "services": [
-        "./src/ops/services.ts"
-      ],
-      "feedback": [
-        "./src/ops/feedback.ts"
-      ],
-      "validate": [
-        "./src/ops/validate.ts"
-      ],
-      "typed-data": [
-        "./src/typed-data.ts"
-      ]
-    }
+    "./types": "./dist/types.js",
+    "./config": "./dist/config.js",
+    "./encryption": "./dist/crypto.js",
+    "./abis": "./dist/abis.js",
+    "./registry": "./dist/registry/agent.js",
+    "./zero-g": "./dist/storage/zero-g.js",
+    "./mint": "./dist/ops/mint.js",
+    "./transfer": "./dist/ops/transfer.js",
+    "./services": "./dist/ops/services.js",
+    "./feedback": "./dist/ops/feedback.js",
+    "./validate": "./dist/ops/validate.js",
+    "./typed-data": "./dist/typed-data.js"
   },
   "scripts": {
     "build": "tsc --build",
     "dev": "tsc --build --watch",
-    "clean": "rm -rf dist .turbo",
+    "clean": "rm -rf dist .turbo tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts"
   },

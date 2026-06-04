@@ -1,12 +1,12 @@
 "use server";
 
 import { prepareMint } from "@tee-agent/agent/mint";
-import { prepareTransfer } from "@tee-agent/agent/transfer";
+import { createTransferOffer } from "@tee-agent/agent/transfer";
 import {
   prepareUpdateServices,
   fetchAgentServices as sdkFetchAgentServices,
   prepareRegisterErc8004 as sdkPrepareRegisterErc8004,
-  prepareImportedErc8004TeeOracle as sdkPrepareImportedErc8004TeeOracle,
+  prepareTeeOracleServiceUpdate as sdkPrepareTeeOracleServiceUpdate,
 } from "@tee-agent/agent/services";
 import type {
   FetchAgentServicesResult,
@@ -15,8 +15,8 @@ import type {
   TransferParams,
   UpdateServicesParams,
   PrepareRegisterErc8004Params,
-  PrepareImportedErc8004TeeOracleParams,
-  PrepareImportedErc8004TeeOracleResult,
+  PrepareTeeOracleServiceUpdateParams,
+  PrepareTeeOracleServiceUpdateResult,
 } from "@tee-agent/agent/types";
 import {
   getMutationConfigForChain,
@@ -27,28 +27,21 @@ import { getActiveChainId } from "@/lib/active-chain";
 import {
   addCachedOracleRun,
   getCachedOracleRuns,
-  getCachedValidations,
+  getCachedValidationResponses,
+  type IndexedValidationResponse,
   type CachedOracleRun,
 } from "@/lib/agent-cache";
+import {
+  oracleAddressResponseSchema,
+  oracleErrorResponseSchema,
+  oracleRunResponseSchema,
+  oracleUrlSchema,
+  recordOracleRunParamsSchema,
+  type RecordOracleRunParams,
+  zodErrorMessage,
+} from "./schemas";
 
-export type PendingValidation = {
-  requestHash: string;
-  /** data:application/json;base64,… encoding the run payload */
-  requestURI: string;
-  agentId: string;
-  validatorAddress: string;
-  /** Present once the on-chain ValidationResponse has been indexed. */
-  response?: {
-    score: number;
-    txHash?: string;
-    timestamp: number;
-    responseURI?: string;
-    responseHash?: string;
-    tag?: string;
-    reasoning?: string;
-    evidence?: Record<string, unknown>;
-  };
-};
+export type ValidationResponse = IndexedValidationResponse;
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
@@ -64,7 +57,7 @@ export async function prepareCreateAgent(params: MintParams, chainId?: number) {
   }
 }
 
-export async function prepareTransferAgent(
+export async function prepareTransferOfferAgent(
   params: TransferParams,
   chainId?: number,
 ) {
@@ -73,11 +66,13 @@ export async function prepareTransferAgent(
   if (!isConfigured) return { error: "Contracts not configured." };
   const cid = chainId ?? (await getActiveChainId());
   try {
-    return await prepareTransfer(getMutationConfigForChain(cid), params);
+    return await createTransferOffer(getMutationConfigForChain(cid), params);
   } catch (err) {
     return {
       error:
-        err instanceof Error ? err.message : "Transfer preparation failed.",
+        err instanceof Error
+          ? err.message
+          : "Transfer offer preparation failed.",
     };
   }
 }
@@ -100,7 +95,7 @@ export async function prepareUpdateAgentServices(
 
 /**
  * Post-mint: patch the agent metadata with the correct ERC-8004 IdentityRegistry
- * registration entry. Call with data from the `ERC8004Registered` event.
+ * registration entry after reading `getERC8004AgentId(tokenId)`.
  * Returns an `UpdateServicesResult` ready for `buildUpdateServicesTxArgs`.
  */
 export async function preparePostMintRegistration(
@@ -125,10 +120,10 @@ export async function preparePostMintRegistration(
   }
 }
 
-export async function prepareImportedErc8004TeeOracle(
-  params: PrepareImportedErc8004TeeOracleParams,
+export async function prepareTeeOracleServiceUpdate(
+  params: PrepareTeeOracleServiceUpdateParams,
   chainId?: number,
-): Promise<PrepareImportedErc8004TeeOracleResult | { error: string }> {
+): Promise<PrepareTeeOracleServiceUpdateResult | { error: string }> {
   if (!params.erc8004AgentId.trim())
     return { error: "ERC-8004 token ID is required." };
   if (!params.teeOracleUrl.trim())
@@ -136,7 +131,7 @@ export async function prepareImportedErc8004TeeOracle(
   if (!isConfigured) return { error: "Contracts not configured." };
   const cid = chainId ?? (await getActiveChainId());
   try {
-    return await sdkPrepareImportedErc8004TeeOracle(
+    return await sdkPrepareTeeOracleServiceUpdate(
       getMutationConfigForChain(cid),
       params,
     );
@@ -145,7 +140,7 @@ export async function prepareImportedErc8004TeeOracle(
       error:
         err instanceof Error
           ? err.message
-          : "Preparing ERC-8004 metadata update failed.",
+          : "Preparing teeOracle metadata update failed.",
     };
   }
 }
@@ -172,41 +167,104 @@ export async function fetchAgentServices(
 // ─── Oracle run persistence (Redis — stays in dashboard) ─────────────────────
 
 export async function recordOracleRun(
-  run: Omit<CachedOracleRun, never>,
+  params: RecordOracleRunParams,
   chainId?: number,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: true; run: CachedOracleRun } | { ok: false; error: string }> {
   const cid = chainId ?? (await getActiveChainId());
   const { registryAddress } = getServerConfigForChain(cid);
+  if (!registryAddress) {
+    return { ok: false, error: "AgentRegistry is not configured." };
+  }
   try {
-    await addCachedOracleRun(cid, registryAddress, BigInt(run.agentId), run);
-    return { ok: true };
+    const parsedParams = recordOracleRunParamsSchema.parse(params);
+
+    const oracleUrl = parsedParams.teeOracleUrl;
+    const services = await sdkFetchAgentServices(getServerConfigForChain(cid), {
+      tokenId: parsedParams.erc8004AgentId,
+    });
+    const registeredOracleUrl = services.teeOracleUrl
+      ? oracleUrlSchema.parse(services.teeOracleUrl)
+      : "";
+    if (oracleUrl !== registeredOracleUrl) {
+      throw new Error(
+        "teeOracleUrl does not match the registered agent service.",
+      );
+    }
+
+    const addressRes = await fetch(`${oracleUrl}/address`, {
+      cache: "no-store",
+    });
+    if (!addressRes.ok) {
+      throw new Error(`GET /address failed: ${addressRes.status}`);
+    }
+    const oracleInfo = oracleAddressResponseSchema.parse(
+      await addressRes.json(),
+    );
+
+    const runRes = await fetch(`${oracleUrl}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        agentId: parsedParams.agentId,
+        payload: parsedParams.payload,
+        signature: parsedParams.signature,
+        deadline: parsedParams.deadline,
+        registryAddress,
+      }),
+    });
+    const raw = await runRes.text();
+    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    if (!runRes.ok) {
+      const errorBody = oracleErrorResponseSchema.safeParse(parsed);
+      throw new Error(
+        errorBody.success
+          ? errorBody.data.error
+          : `Oracle error ${runRes.status}`,
+      );
+    }
+    const runResponse = oracleRunResponseSchema.parse(parsed);
+    if (runResponse.agentId !== parsedParams.agentId) {
+      throw new Error("Oracle response agentId mismatch.");
+    }
+
+    const run: CachedOracleRun = {
+      agentId: parsedParams.agentId,
+      result: runResponse.result as CachedOracleRun["result"],
+      timestamp: runResponse.timestamp,
+      quote: runResponse.quote,
+      event_log: runResponse.event_log,
+      oracleAddress: oracleInfo.address,
+      payload: parsedParams.payload,
+    };
+    await addCachedOracleRun(
+      cid,
+      registryAddress,
+      BigInt(parsedParams.agentId),
+      run,
+    );
+    return { ok: true, run };
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Failed to record run.",
+      error: zodErrorMessage(err, "Failed to record run."),
     };
   }
 }
 
-export async function fetchPendingValidationsForAgent(
+export async function fetchValidationResponsesForAgent(
   agentId: string,
   chainId?: number,
-): Promise<PendingValidation[]> {
+): Promise<ValidationResponse[]> {
   const cid = chainId ?? (await getActiveChainId());
-  const { registryAddress } = getServerConfigForChain(cid);
+  const cfg = getServerConfigForChain(cid);
   try {
-    const items = await getCachedValidations(
+    if (!cfg.validationRegistryAddress) return [];
+    return await getCachedValidationResponses(
       cid,
-      registryAddress,
+      cfg.validationRegistryAddress,
       BigInt(agentId),
     );
-    return items.map((item) => ({
-      requestHash: item.requestHash,
-      requestURI: item.requestURI,
-      agentId: item.agentId,
-      validatorAddress: item.validatorAddress,
-      response: item.response,
-    }));
   } catch {
     return [];
   }

@@ -45,7 +45,6 @@ export interface NetworkConfig {
 
 export type ContractDeployments = {
   agentRegistry?: Address;
-  verifier?: Address;
   teeVerifier?: Address;
   validationRegistry?: Address;
 };
@@ -110,18 +109,20 @@ export const NETWORK_CONFIG = {
 
 /**
  * Returns the `NetworkConfig` for the given network name string.
- * Falls back to `baseSepolia` when the value is missing or unknown.
  *
  * Pass the env var directly — used in oracle/server only:
  *   `getNetworkConfig(process.env.NETWORK)`
  */
 export function getNetworkConfig(network?: string): NetworkConfig {
-  return NETWORK_CONFIG[network as NetworkName] ?? NETWORK_CONFIG.baseSepolia;
+  const entry = NETWORK_CONFIG[network as NetworkName];
+  if (!entry) {
+    throw new Error("NETWORK must be base or baseSepolia.");
+  }
+  return entry;
 }
 
 /**
  * Returns the `NetworkConfig` for the given EVM chain ID (number).
- * Falls back to `baseSepolia` when the chain ID is unrecognised.
  *
  *   const nc = getNetworkConfigByChainId(useChainId()); // client component
  *   const nc = getNetworkConfigByChainId(8453);         // Base mainnet
@@ -130,7 +131,10 @@ export function getNetworkConfigByChainId(chainId: number): NetworkConfig {
   const entry = Object.values(NETWORK_CONFIG).find(
     (n) => Number(n.chainId) === chainId,
   );
-  return entry ?? NETWORK_CONFIG.baseSepolia;
+  if (!entry) {
+    throw new Error(`Unsupported chain ID: ${chainId}.`);
+  }
+  return entry;
 }
 
 /**
@@ -146,11 +150,9 @@ export function getNetworkDeploymentByChainId(
   const addr = (v: string | undefined): Address | undefined =>
     v ? (v as Address) : undefined;
   const agentRegistry = addr(raw?.contracts?.agentRegistry);
-  const verifier = addr(raw?.contracts?.verifier);
   const teeVerifier = addr(raw?.contracts?.teeVerifier);
   const validationRegistry = addr(raw?.contracts?.validationRegistry);
   if (agentRegistry) contracts.agentRegistry = agentRegistry;
-  if (verifier) contracts.verifier = verifier;
   if (teeVerifier) contracts.teeVerifier = teeVerifier;
   if (validationRegistry) contracts.validationRegistry = validationRegistry;
   const deployment: NetworkDeployment = { contracts };
@@ -165,10 +167,10 @@ export function defaultIdentityRegistry(chain: Chain): Address {
   const entry = Object.values(NETWORK_CONFIG).find(
     (n) => n.chain.id === chain.id,
   );
-  return (
-    entry?.identityRegistryAddress ??
-    NETWORK_CONFIG.baseSepolia.identityRegistryAddress
-  );
+  if (!entry) {
+    throw new Error(`Unsupported chain ID: ${chain.id}.`);
+  }
+  return entry.identityRegistryAddress;
 }
 
 /** Returns the official ERC-8004 Reputation Registry address for a viem Chain. */
@@ -176,10 +178,10 @@ export function defaultReputationRegistry(chain: Chain): Address {
   const entry = Object.values(NETWORK_CONFIG).find(
     (n) => n.chain.id === chain.id,
   );
-  return (
-    entry?.reputationRegistryAddress ??
-    NETWORK_CONFIG.baseSepolia.reputationRegistryAddress
-  );
+  if (!entry) {
+    throw new Error(`Unsupported chain ID: ${chain.id}.`);
+  }
+  return entry.reputationRegistryAddress;
 }
 
 /**
@@ -192,7 +194,7 @@ export function createConfig(
   overrides: Partial<AgentConfig> & { chain?: Chain },
   deployments: RawDeployments = {},
 ): AgentConfig {
-  const nc = NETWORK_CONFIG[network] ?? NETWORK_CONFIG.baseSepolia;
+  const nc = getNetworkConfig(network);
   const chain = overrides.chain ?? nc.chain;
   const deployment = getNetworkDeploymentByChainId(nc.chainId, deployments);
   const registryAddress =

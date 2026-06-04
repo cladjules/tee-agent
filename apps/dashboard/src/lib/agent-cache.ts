@@ -1,9 +1,11 @@
 /**
  * Redis-backed agent index cache.
  *
- * Stores two keys per (chainId, registryAddress) pair:
+ * Stores these keys per (chainId, registryAddress) pair:
  *   agents:{chainId}:{registryAddress}          — JSON array of RegisteredAgent (oldest-first)
  *   lastBlock:{chainId}:{registryAddress}        — last block number scanned (string)
+ *   oracleRuns:{chainId}:{registryAddress}:{id}  — off-chain oracle run history (newest-first)
+ *   validationResponses:{chainId}:{registry}:{id} — ValidationResponse events (newest-first)
  *
  * Requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN env vars.
  * Falls back to null (no-op) when those vars are absent.
@@ -11,6 +13,20 @@
 
 import { Redis } from "@upstash/redis";
 import type { RegisteredAgent } from "@tee-agent/agent/types";
+
+export type IndexedValidationResponse = {
+  requestHash: `0x${string}`;
+  agentId: string;
+  validatorAddress: `0x${string}`;
+  score: number;
+  txHash?: `0x${string}`;
+  timestamp: number;
+  responseURI?: string;
+  responseHash?: `0x${string}`;
+  tag?: string;
+  reasoning?: string;
+  evidence?: Record<string, unknown>;
+};
 
 // RegisteredAgent serialised for Redis (agentId as string — JSON can't hold bigint).
 type StoredAgent = Omit<RegisteredAgent, "agentId"> & { agentId: string };
@@ -129,8 +145,6 @@ export type CachedOracleRun = {
   event_log?: string;
   /** Unix timestamp in seconds (from oracle response). */
   timestamp: number;
-  /** On-chain tx hash. */
-  txHash?: string;
   /** Oracle's TEE-derived signing address. */
   oracleAddress?: string;
   /** Original input payload sent to /run — stored so the owner can target validation at a specific run. */
@@ -138,6 +152,7 @@ export type CachedOracleRun = {
 };
 
 const MAX_RUNS_PER_AGENT = 100;
+const MAX_VALIDATION_RESPONSES_PER_AGENT = 100;
 
 function oracleRunsKey(
   chainId: number,
@@ -192,73 +207,74 @@ export async function addCachedOracleRun(
   }
 }
 
-// ─── Validation request cache ─────────────────────────────────────────────────
+// ─── Validation response history ─────────────────────────────────────────────
 
-/** Persisted pending (or completed) ValidationRequest event. */
-export type CachedValidation = {
-  requestHash: string;
-  requestURI: string;
-  agentId: string;
-  validatorAddress: string;
-  /** Present once the on-chain ValidationResponse event has been indexed. */
-  response?: {
-    score: number;
-    txHash?: string;
-    timestamp: number;
-    responseURI?: string;
-    responseHash?: string;
-    tag?: string;
-    reasoning?: string;
-    evidence?: Record<string, unknown>;
-  };
-};
-
-function validationRequestsKey(
+function validationResponsesKey(
   chainId: number,
-  registryAddress: `0x${string}` | undefined,
+  validationRegistryAddress: `0x${string}` | undefined,
   agentId: bigint,
 ) {
-  return `validationRequests:${chainId}:${registryAddress ?? "none"}:${agentId.toString()}`;
+  return `validationResponses:${chainId}:${validationRegistryAddress ?? "none"}:${agentId.toString()}`;
 }
 
-/** Returns pending validation requests for an agent (no on-chain response yet). */
-export async function getCachedValidations(
+export async function getCachedValidationResponses(
   chainId: number,
-  registryAddress: `0x${string}` | undefined,
+  validationRegistryAddress: `0x${string}` | undefined,
   agentId: bigint,
-): Promise<CachedValidation[]> {
+): Promise<IndexedValidationResponse[]> {
   const redis = getRedis();
   if (!redis) return [];
   try {
     return (
-      (await redis.get<CachedValidation[]>(
-        validationRequestsKey(chainId, registryAddress, agentId),
+      (await redis.get<IndexedValidationResponse[]>(
+        validationResponsesKey(chainId, validationRegistryAddress, agentId),
       )) ?? []
     );
   } catch (err) {
-    console.error("[agent-cache] validation requests read failed:", err);
+    console.error("[agent-cache] validation response read failed:", err);
     return [];
   }
 }
 
-/**
- * Atomically replaces the pending validation request list for an agent.
- * Call with the complete current pending set (indexer owns this).
- */
-export async function setCachedValidations(
+export async function addCachedValidationResponses(
   chainId: number,
-  registryAddress: `0x${string}` | undefined,
-  agentId: bigint,
-  items: CachedValidation[],
+  validationRegistryAddress: `0x${string}` | undefined,
+  responses: IndexedValidationResponse[],
 ): Promise<void> {
   const redis = getRedis();
-  if (!redis) return;
+  if (!redis || responses.length === 0) return;
+
+  const byAgent = new Map<string, IndexedValidationResponse[]>();
+  for (const response of responses) {
+    const current = byAgent.get(response.agentId);
+    if (current) current.push(response);
+    else byAgent.set(response.agentId, [response]);
+  }
+
   try {
-    await redis.set(
-      validationRequestsKey(chainId, registryAddress, agentId),
-      items,
+    await Promise.all(
+      [...byAgent.entries()].map(async ([agentId, agentResponses]) => {
+        const key = validationResponsesKey(
+          chainId,
+          validationRegistryAddress,
+          BigInt(agentId),
+        );
+        const existing =
+          (await redis.get<IndexedValidationResponse[]>(key)) ?? [];
+        const merged = new Map<string, IndexedValidationResponse>();
+        for (const item of existing) {
+          merged.set(item.requestHash.toLowerCase(), item);
+        }
+        for (const item of agentResponses) {
+          merged.set(item.requestHash.toLowerCase(), item);
+        }
+        const ordered = [...merged.values()]
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, MAX_VALIDATION_RESPONSES_PER_AGENT);
+        await redis.set(key, ordered);
+      }),
     );
   } catch (err) {
-    console.error("[agent-cache] validation requests write failed:", err);
+    console.error("[agent-cache] validation response write failed:", err);
   }
 }

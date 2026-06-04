@@ -16,7 +16,8 @@
  *   npm run dev:prediction-market     # from apps/oracle/
  *
  * Deploy to Phala Cloud:
- *   npm run deploy:prediction-market   # from apps/oracle/
+ *   npm run deploy -- src/examples/prediction-market.ts  # from apps/oracle/
+ *   npm run deploy:oracle -- src/examples/prediction-market.ts  # from repo root
  */
 
 import "dotenv/config";

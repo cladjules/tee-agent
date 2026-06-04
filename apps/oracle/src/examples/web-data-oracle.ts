@@ -18,7 +18,8 @@
  *   npm run dev:web-fetcher            # from apps/oracle/
  *
  * Deploy to Phala Cloud:
- *   npm run deploy:web-fetcher         # from apps/oracle/
+ *   npm run deploy -- src/examples/web-data-oracle.ts  # from apps/oracle/
+ *   npm run deploy:oracle -- src/examples/web-data-oracle.ts  # from repo root
  */
 
 import "dotenv/config";

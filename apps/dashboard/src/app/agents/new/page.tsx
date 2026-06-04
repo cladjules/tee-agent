@@ -8,7 +8,7 @@ import {
   prepareCreateAgent,
   fetchAgentServices,
   preparePostMintRegistration,
-  prepareImportedErc8004TeeOracle,
+  prepareTeeOracleServiceUpdate,
 } from "@/lib/actions/agents";
 import { ErrorBox } from "@/components/ErrorBox";
 import {
@@ -247,7 +247,7 @@ export default function NewAgentPage() {
             setResult({ error: "teeOracle URL is required." });
             return;
           }
-          const preparedImport = await prepareImportedErc8004TeeOracle({
+          const preparedImport = await prepareTeeOracleServiceUpdate({
             erc8004AgentId: importTokenId.trim(),
             teeOracleUrl,
           });
@@ -339,7 +339,12 @@ export default function NewAgentPage() {
           strict: false,
         }) as Array<{ args?: { agentId?: bigint } }>;
 
-        setResult({ tokenId: log?.args?.agentId, txHash: mintHash });
+        const mintedTokenId = log?.args?.agentId;
+
+        setResult({
+          tokenId: mintedTokenId,
+          txHash: mintHash,
+        });
       } catch (err) {
         setResult({
           error: err instanceof Error ? err.message : "Mint failed.",

@@ -2,7 +2,7 @@
  * prepareValidation — builds parameters for submitting a validation request.
  */
 
-import { keccak256, toHex } from "viem";
+import { keccak256, toBytes } from "viem";
 import type {
   AgentConfig,
   PrepareValidationParams,
@@ -21,9 +21,7 @@ export function prepareValidation(
     throw new Error("validationRegistryAddress is not configured.");
   }
 
-  const requestHash = keccak256(
-    toHex(`${agentId}:${validatorAddress}:${requestURI}:${Date.now()}`),
-  );
+  const requestHash = keccak256(toBytes(requestURI));
 
   return {
     contractAddress: config.validationRegistryAddress,

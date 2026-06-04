@@ -18,14 +18,6 @@ import {
   BASE_SEPOLIA_CHAIN_ID,
 } from "./client-config";
 
-export {
-  getClientConfigForChain,
-  clientCfg,
-  BASE_CHAIN_ID,
-  BASE_SEPOLIA_CHAIN_ID,
-};
-export type { AgentConfig };
-
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -34,7 +26,7 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-// Chain IDs are imported from client-config which derives them from NETWORK_CONFIG.
+// Chain IDs are public Base/Base Sepolia constants from client-config.
 const RPC_URL_MAP: Record<number, string | undefined> = {
   [BASE_CHAIN_ID]: process.env.RPC_URL_BASE,
   [BASE_SEPOLIA_CHAIN_ID]: process.env.RPC_URL_BASE_SEPOLIA,
@@ -77,6 +69,5 @@ export const chainId = clientCfg.chain.id;
 
 /** True when the minimum required env vars are present for the default chain. */
 export const isConfigured = !!(
-  clientCfg.registryAddress &&
-  RPC_URL_MAP[BASE_SEPOLIA_CHAIN_ID]
+  clientCfg.registryAddress && RPC_URL_MAP[BASE_SEPOLIA_CHAIN_ID]
 );

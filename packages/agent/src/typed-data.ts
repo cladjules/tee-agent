@@ -13,11 +13,6 @@
 
 import { keccak256 } from "viem";
 import type { Address, Hex } from "viem";
-import type {
-  TransferAccessPayload,
-  TransferOwnershipProof,
-  TransferValidityProof,
-} from "./types.js";
 
 // ─── EIP-712 type schemas ─────────────────────────────────────────────────────
 // Exported as plain mutable objects so they are compatible with both
@@ -185,55 +180,4 @@ export function buildValidateTypedData(params: ValidateTypedDataParams) {
       deadline: BigInt(params.deadline),
     },
   };
-}
-
-// ─── Access payload signing ───────────────────────────────────────────────────
-
-/**
- * Sign access payloads returned by `prepareTransfer` and assemble the
- * `TransferValidityProof[]` array expected by `iTransferFrom`.
- *
- * The `signFn` should be the **new owner's** wallet sign function.
- * Pass `payload.digest` directly — the digest is the domain-bound innerHash
- * that includes the EIP-191 prefix when signed with signMessage.
- *
- * @example
- * ```ts
- * const proofs = await signAccessPayloads(
- *   (digest) => walletClient.signMessage({ account, message: digest }),
- *   transfer.accessPayloads,
- *   transfer.ownershipProofs,
- *   { from: transfer.from!, to: transfer.to, tokenId: BigInt(transfer.tokenId), deadline: transfer.deadline! },
- * );
- * await walletClient.writeContract(buildTransferTxArgs(transfer, transfer.from!, proofs));
- * ```
- */
-export async function signAccessPayloads(
-  signFn: (digest: Hex) => Promise<Hex>,
-  accessPayloads: TransferAccessPayload[],
-  ownershipProofs: TransferOwnershipProof[],
-  opts: { from: Address; to: Address; tokenId: bigint; deadline: bigint },
-): Promise<TransferValidityProof[]> {
-  return Promise.all(
-    accessPayloads.map(async (payload, i) => ({
-      accessProof: {
-        dataHash: payload.dataHash,
-        targetPubkey: payload.targetPubkey,
-        nonce: payload.nonce,
-        proof: await signFn(payload.digest),
-      },
-      ownershipProof: ownershipProofs[i] ?? {
-        oracleType: 0,
-        dataHash: payload.dataHash,
-        sealedKey: "0x" as Hex,
-        targetPubkey: payload.targetPubkey,
-        nonce: payload.nonce,
-        proof: "0x" as Hex,
-      },
-      from: opts.from,
-      to: opts.to,
-      tokenId: opts.tokenId,
-      deadline: opts.deadline,
-    })),
-  );
 }

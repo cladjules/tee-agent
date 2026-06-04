@@ -2,8 +2,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
  * Deploys tee-agent contracts:
- *   - TeeVerifier         (validates TEE oracle proofs)
- *   - Verifier            (validates ERC-7857 transfer proofs)
+ *   - TeeVerifier         (validates ERC-7857 transfer proofs + ERC-8004 validations)
  *   - AgentRegistry       (ERC-7857 agent NFT with encrypted data)
  *   - ValidationRegistry  (ERC-8004 validation requests and responses)
  *
@@ -15,7 +14,8 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *
  * Parameters (set via --parameters flag for live networks):
  *   identityRegistryAddress  — official ERC-8004 Identity Registry passed to the AgentRegistry
- *                              constructor; zero disables co-registration (default for local)
+ *                              constructor; zero disables co-registration only when explicitly passed
+ *   dcapAttestationAddress   — Automata DCAP attestation contract, or explicit mock address
  *
  * Run:
  *   npm run deploy:baseSepolia
@@ -24,27 +24,19 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 export default buildModule("TeeAgent", (m) => {
   const deployer = m.getAccount(0);
 
-  const identityRegistryAddress = m.getParameter(
-    "identityRegistryAddress",
-    "0x0000000000000000000000000000000000000000",
-  );
+  const identityRegistryAddress = m.getParameter("identityRegistryAddress");
 
-  const dcapAttestationAddress = m.getParameter(
-    "dcapAttestationAddress",
-    "0xaDdeC7e85c2182202b66E331f2a4A0bBB2cEEa1F",
-  );
+  const dcapAttestationAddress = m.getParameter("dcapAttestationAddress");
   const teeVerifier = m.contract("TeeVerifier", [
     deployer,
     dcapAttestationAddress,
   ]);
 
-  const verifier = m.contract("Verifier", [deployer, teeVerifier]);
-
   const agentRegistry = m.contract("AgentRegistry", [
     "Tee Agent",
     "OAT",
     deployer,
-    verifier,
+    teeVerifier,
     identityRegistryAddress,
   ]);
 
@@ -52,7 +44,6 @@ export default buildModule("TeeAgent", (m) => {
 
   return {
     agentRegistry,
-    verifier,
     teeVerifier,
     validationRegistry,
   };

@@ -13,7 +13,7 @@ const FEATURES = [
   {
     badge: "ERC-7857 · TEE",
     title: "Private Encrypted Data",
-    body: "System prompts and keys are AES-256-GCM encrypted. A Phala Cloud TDX oracle re-encrypts on transfer — plaintext never leaves the enclave.",
+    body: "System prompts and keys are AES-256-GCM encrypted. A Phala Cloud TDX oracle re-wraps keys on transfer - plaintext never leaves the enclave.",
   },
   {
     badge: "ERC-8004",

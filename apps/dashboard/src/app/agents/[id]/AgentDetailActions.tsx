@@ -1,44 +1,38 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { keccak256, toBytes, type Address } from "viem";
+import { keccak256, toBytes } from "viem";
 import type { AgentService } from "@tee-agent/agent/types";
 import {
-  AGENT_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
   REPUTATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
-import {
-  signAccessPayloads,
-  buildReencryptTypedData,
-  buildRunTypedData,
-  buildValidateTypedData,
-} from "@tee-agent/agent/typed-data";
+import { buildRunTypedData } from "@tee-agent/agent/typed-data";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import {
-  prepareTransferAgent,
   prepareUpdateAgentServices,
   recordOracleRun,
 } from "@/lib/actions/agents";
 import { prepareFeedback } from "@/lib/actions/registry";
-import type { TransferRecipientAgent } from "@/lib/actions/registry";
 import type { CachedOracleRun } from "@/lib/agent-cache";
-import type { PendingValidation } from "@/lib/actions/agents";
+import type { ValidationResponse } from "@/lib/actions/agents";
 import {
   ServiceEditorPanel,
   type ServiceEditorEntry,
 } from "@/components/ServiceEditorPanel";
 import { ErrorBox } from "@/components/ErrorBox";
-
-type ActionClientConfig = {
-  registryAddress?: Address;
-  teeVerifierAddress?: Address;
-  identityRegistryAddress?: Address;
-  reputationRegistryAddress?: Address;
-  validationRegistryAddress?: Address;
-};
+import { TransferForm } from "./TransferForm";
+import {
+  BackgroundActionModal,
+  Field,
+  ResultBanner,
+  SubmitButton,
+  useActionState,
+  validateJsonInput,
+} from "./action-ui";
+import type { ActionClientConfig } from "./action-types";
 
 interface Props {
   agentId: string;
@@ -47,8 +41,7 @@ interface Props {
   owner: string;
   initialServices: readonly AgentService[];
   initialRuns?: CachedOracleRun[];
-  initialPendingValidations?: PendingValidation[];
-  recipientAgents?: TransferRecipientAgent[];
+  initialValidationResponses?: ValidationResponse[];
   clientCfg: ActionClientConfig;
 }
 
@@ -58,99 +51,144 @@ export default function AgentDetailActions({
   owner,
   initialServices,
   initialRuns,
-  initialPendingValidations,
-  recipientAgents,
+  initialValidationResponses,
   clientCfg,
 }: Props) {
   const { address } = useWallet();
   const isOwner = !!address && address.toLowerCase() === owner.toLowerCase();
   const [runs, setRuns] = useState<CachedOracleRun[]>(initialRuns ?? []);
-  const [pending, setPending] = useState<PendingValidation[]>(
-    initialPendingValidations ?? [],
-  );
+  const validationResponses = initialValidationResponses ?? [];
+  const [feedbackDraftValidation, setFeedbackDraftValidation] =
+    useState<CompletedValidationSummary>();
   function addRun(run: CachedOracleRun) {
     setRuns((prev) => [run, ...prev]);
   }
-  function markValidationComplete(
-    requestHash: string,
-    response: {
-      score?: number;
-      txHash?: string;
-      responseURI?: string;
-      responseHash?: string;
-      tag?: string;
-      reasoning?: string;
-      evidence?: Record<string, unknown>;
-    } | null,
-  ) {
-    if (!response) return;
-    setPending((prev) =>
-      prev.map((j) =>
-        j.requestHash === requestHash
-          ? {
-              ...j,
-              response: {
-                score: response.score ?? 0,
-                txHash: response.txHash,
-                timestamp: Math.floor(Date.now() / 1000),
-                responseURI: response.responseURI,
-                responseHash: response.responseHash,
-                tag: response.tag,
-                reasoning: response.reasoning,
-                evidence: response.evidence,
-              },
-            }
-          : j,
-      ),
-    );
-  }
-
   const teeOracleUrl =
     initialServices.find((s) => s.name === "teeOracle")?.endpoint ?? "";
+  const completedValidationCount = validationResponses.length;
+  const runDisabledReason = !address
+    ? "Connect the owner wallet to run this oracle."
+    : !isOwner
+      ? "Only the current agent owner can run this oracle."
+      : undefined;
+  const feedbackDisabledReason = !address
+    ? "Connect a non-owner wallet to give feedback."
+    : isOwner
+      ? "Owners cannot give feedback to their own agent."
+      : undefined;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <CollapsibleSection
-          title="Oracle Runs"
-          description="Run the oracle and request on-chain validation against specific runs."
-          className="md:col-span-2"
-          defaultOpen
+      <section className="rounded-xl border border-gray-800 bg-gray-900/50 p-5 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-100">
+            Run, Validate, Feedback
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Run the oracle, verify the TEE proof when needed, request validation
+            on a specific run, then submit ERC-8004 feedback.
+          </p>
+        </div>
+
+        <ProcessActionStep
+          step="1"
+          title="Run your oracle with a claim"
+          accessLabel="Owner only"
+          status={
+            isOwner
+              ? runs.length > 0
+                ? `${runs.length} run${runs.length === 1 ? "" : "s"}`
+                : "ready"
+              : address
+                ? "owner only"
+                : "connect owner"
+          }
         >
-          <OracleRunHistory
-            runs={runs}
-            agentId={agentId}
-            erc8004AgentId={erc8004AgentId}
-            teeOracleUrl={teeOracleUrl}
-            clientCfg={clientCfg}
-          />
-          {runs.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-gray-800" />
-          )}
           <RunOracleForm
             agentId={agentId}
-            teeOracleUrl={teeOracleUrl}
-            onNewRun={addRun}
-            clientCfg={clientCfg}
-          />
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Validations"
-          description="Sign and send queued validation requests to the oracle."
-          className="md:col-span-2"
-          defaultOpen
-        >
-          <PendingValidationsPanel
-            agentId={agentId}
             erc8004AgentId={erc8004AgentId}
-            pending={pending}
             teeOracleUrl={teeOracleUrl}
-            onComplete={markValidationComplete}
-            clientCfg={clientCfg}
+            canRun={isOwner}
+            runDisabledReason={runDisabledReason}
+            onNewRun={addRun}
           />
-        </CollapsibleSection>
+        </ProcessActionStep>
 
+        <ProcessActionStep
+          step="2"
+          title="Pick a run to validate"
+          accessLabel="Any wallet"
+          status={runs.length > 0 ? "available" : "after run"}
+        >
+          {runs.length > 0 ? (
+            <OracleRunHistory
+              runs={runs}
+              erc8004AgentId={erc8004AgentId}
+              teeOracleUrl={teeOracleUrl}
+              clientCfg={clientCfg}
+              validationResponses={validationResponses}
+            />
+          ) : (
+            <p className="text-xs text-gray-500">
+              Run the oracle first. Each run will show its proof and validation
+              controls here.
+            </p>
+          )}
+        </ProcessActionStep>
+
+        <ProcessActionStep
+          step="3"
+          title="Validation results"
+          accessLabel="Oracle"
+          status={
+            completedValidationCount > 0
+              ? `${completedValidationCount} complete`
+              : "after validation"
+          }
+        >
+          <p className="text-xs text-gray-500">
+            Completed ValidationResponse events appear here with the matching
+            run output when we still have that run locally.
+          </p>
+          <ValidationResponsesPanel
+            responses={validationResponses}
+            runs={runs}
+            erc8004AgentId={erc8004AgentId}
+            onUseForFeedback={(response) =>
+              setFeedbackDraftValidation(
+                completedValidationFromResponse(response),
+              )
+            }
+            canUseForFeedback={!feedbackDisabledReason}
+            feedbackDisabledReason={feedbackDisabledReason}
+          />
+        </ProcessActionStep>
+
+        <ProcessActionStep
+          step="4"
+          title="Give feedback from the validation"
+          accessLabel="Wallet"
+          status={
+            isOwner
+              ? "self-review disabled"
+              : !address
+                ? "connect wallet"
+                : feedbackDraftValidation
+                  ? `${feedbackDraftValidation.score}/100`
+                  : "after validation"
+          }
+        >
+          <FeedbackForm
+            erc8004AgentId={erc8004AgentId}
+            clientCfg={clientCfg}
+            prefillValidation={feedbackDraftValidation}
+            canSubmitFeedback={!feedbackDisabledReason}
+            feedbackDisabledReason={feedbackDisabledReason}
+          />
+        </ProcessActionStep>
+      </section>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isOwner ? (
           <CollapsibleSection
             title="NFT Actions"
@@ -166,9 +204,34 @@ export default function AgentDetailActions({
                   tokenId={agentId}
                   erc8004AgentId={erc8004AgentId}
                   teeOracleUrl={teeOracleUrl}
-                  recipientAgents={recipientAgents ?? []}
                   clientCfg={clientCfg}
                 />
+              </div>
+
+              <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                      Oracle Key
+                    </h4>
+                    <p
+                      className="text-xs text-gray-500 font-mono truncate"
+                      title={teeOracleUrl}
+                    >
+                      {teeOracleUrl || "No teeOracle service"}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-semibold tracking-wide uppercase px-1.5 py-0.5 rounded bg-gray-700 text-gray-400 shrink-0">
+                    Coming soon
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled
+                  className="px-4 py-2 rounded-lg bg-gray-800 text-gray-500 text-sm font-semibold cursor-not-allowed"
+                >
+                  Rotate Oracle
+                </button>
               </div>
 
               <div className="opacity-60">
@@ -216,18 +279,79 @@ export default function AgentDetailActions({
           />
         </CollapsibleSection>
       )}
-
-      <CollapsibleSection
-        title="Give Feedback"
-        description="Submit ERC-8004 reputation feedback."
-      >
-        <FeedbackForm erc8004AgentId={erc8004AgentId} clientCfg={clientCfg} />
-      </CollapsibleSection>
     </div>
   );
 }
 
 // ─── Layout helpers ───────────────────────────────────────────────────────────
+
+type CompletedValidationSummary = {
+  requestHash: string;
+  score: number;
+  txHash?: string;
+  responseURI?: string;
+  responseHash?: string;
+  tag?: string;
+  reasoning?: string;
+  evidence?: Record<string, unknown>;
+};
+
+function completedValidationFromResponse(
+  response: ValidationResponse,
+): CompletedValidationSummary {
+  return {
+    requestHash: response.requestHash,
+    score: response.score,
+    txHash: response.txHash,
+    responseURI: response.responseURI,
+    responseHash: response.responseHash,
+    tag: response.tag,
+    reasoning:
+      response.reasoning ??
+      (typeof response.evidence?.reasoning === "string"
+        ? response.evidence.reasoning
+        : undefined),
+    evidence: response.evidence,
+  };
+}
+
+function ProcessActionStep({
+  step,
+  title,
+  accessLabel,
+  status,
+  children,
+}: {
+  step: string;
+  title: string;
+  accessLabel: string;
+  status: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/40 overflow-hidden">
+      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-gray-800 bg-gray-900/40">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-400">
+            Step {step}
+          </p>
+          <h3 className="text-sm font-semibold text-gray-100 mt-0.5">
+            {title}
+          </h3>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
+          <span className="text-[10px] font-mono rounded border border-gray-700 bg-gray-950 px-1.5 py-0.5 text-gray-500">
+            {accessLabel}
+          </span>
+          <span className="text-[10px] font-mono rounded border border-gray-700 bg-gray-950 px-1.5 py-0.5 text-gray-500">
+            {status}
+          </span>
+        </div>
+      </div>
+      <div className="p-4 space-y-3">{children}</div>
+    </div>
+  );
+}
 
 function CollapsibleSection({
   title,
@@ -279,174 +403,66 @@ function CollapsibleSection({
   );
 }
 
-function ActionCard({
-  title,
-  description,
-  className,
-  comingSoon,
-  children,
-}: {
-  title: string;
-  description: string;
-  className?: string;
-  comingSoon?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`p-5 rounded-xl border border-gray-800 bg-gray-900/50 space-y-4 ${comingSoon ? "opacity-60" : ""} ${className ?? ""}`}
-    >
-      <div>
-        <h3 className="font-semibold flex items-center gap-2">
-          {title}
-          {comingSoon && (
-            <span className="text-[10px] font-semibold tracking-wide uppercase px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">
-              Coming soon
-            </span>
-          )}
-        </h3>
-        <p className="text-gray-500 text-sm">{description}</p>
-      </div>
-      {!comingSoon && children}
-    </div>
-  );
-}
-
-function SmallActionCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="p-4 rounded-lg border border-gray-800 bg-gray-900/30 space-y-3">
-      <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
-      {children}
-    </div>
-  );
-}
-
-// ─── Shared helpers ───────────────────────────────────────────────────────────
-
-function useActionState() {
-  const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<{
-    txHash?: string;
-    tokenId?: bigint;
-    error?: string;
-  } | null>(null);
-
-  function run(
-    fn: () => Promise<{ txHash?: string; tokenId?: bigint; error?: string }>,
-  ) {
-    setResult(null);
-    startTransition(async () => setResult(await fn()));
-  }
-
-  return { isPending, result, run };
-}
-
-function ResultBanner({
-  result,
-}: {
-  result: { txHash?: string; tokenId?: bigint; error?: string } | null;
-}) {
-  if (!result) return null;
-  if (result.error) return <ErrorBox message={result.error} />;
-  return (
-    <p className="text-xs text-green-400 bg-green-950/40 px-3 py-2 rounded-lg">
-      ✓{" "}
-      {result.tokenId !== undefined
-        ? `Token ID: #${result.tokenId.toString()}`
-        : result.txHash
-          ? `Tx: ${result.txHash}`
-          : "Success"}
-    </p>
-  );
-}
-
-function Field({
-  label,
-  name,
-  placeholder,
-  required,
-  defaultValue,
-  type = "text",
-}: {
-  label: string;
-  name: string;
-  placeholder?: string;
-  required?: boolean;
-  defaultValue?: string;
-  type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs text-gray-400 mb-1">{label}</label>
-      <input
-        name={name}
-        type={type}
-        placeholder={placeholder}
-        required={required}
-        defaultValue={defaultValue}
-        className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
-      />
-    </div>
-  );
-}
-
-function SubmitButton({
-  isPending,
-  label,
-  disabled,
-}: {
-  isPending: boolean;
-  label: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={isPending || !!disabled}
-      className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors disabled:opacity-50"
-    >
-      {isPending ? "Submitting…" : label}
-    </button>
-  );
-}
-
-function validateJsonInput(input: string): string | null {
-  if (!input.trim()) return null;
-  try {
-    JSON.parse(input);
-    return null;
-  } catch {
-    return "Invalid JSON.";
-  }
-}
-
 // ─── Forms ────────────────────────────────────────────────────────────────────
 
 function FeedbackForm({
   erc8004AgentId,
   clientCfg,
+  prefillValidation,
+  canSubmitFeedback,
+  feedbackDisabledReason,
 }: {
   erc8004AgentId?: string;
   clientCfg: ActionClientConfig;
+  prefillValidation?: CompletedValidationSummary;
+  canSubmitFeedback: boolean;
+  feedbackDisabledReason?: string;
 }) {
   const { isPending, result, run } = useActionState();
   const router = useRouter();
   const { chainId, getViemClients, switchChain } = useWallet();
+  const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
+  const [feedbackValue, setFeedbackValue] = useState("");
   const [feedbackJson, setFeedbackJson] = useState(
     '{\n  "summary": "Great response quality",\n  "details": { "latencyMs": 820 }\n}',
   );
+
+  useEffect(() => {
+    if (!prefillValidation) return;
+    setFeedbackValue(
+      Math.max(0, Math.min(1, prefillValidation.score / 100)).toFixed(2),
+    );
+    setFeedbackJson(
+      JSON.stringify(
+        {
+          summary: `Validation score ${prefillValidation.score}/100`,
+          validation: {
+            requestHash: prefillValidation.requestHash,
+            responseHash: prefillValidation.responseHash,
+            score: prefillValidation.score,
+            reasoning: prefillValidation.reasoning,
+            txHash: prefillValidation.txHash,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+  }, [prefillValidation]);
+
   const feedbackJsonError = validateJsonInput(feedbackJson);
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         run(async () => {
+          if (!canSubmitFeedback) {
+            return {
+              error:
+                feedbackDisabledReason ??
+                "Feedback is unavailable for this wallet.",
+            };
+          }
           if (!clientCfg.reputationRegistryAddress)
             return { error: "Reputation registry is not configured." };
 
@@ -490,6 +506,7 @@ function FeedbackForm({
             return { error: "Feedback preparation failed." };
           }
 
+          setShowBackgroundNotice(true);
           await switchChain();
 
           const { publicClient, walletClient } = await getViemClients();
@@ -517,6 +534,10 @@ function FeedbackForm({
       }}
       className="space-y-3"
     >
+      <BackgroundActionModal
+        open={showBackgroundNotice}
+        onClose={() => setShowBackgroundNotice(false)}
+      />
       {erc8004AgentId && erc8004AgentId !== "0" ? (
         <p className="text-xs text-gray-500 font-mono">
           ERC-8004 agent #{erc8004AgentId}
@@ -526,329 +547,82 @@ function FeedbackForm({
           This agent is not linked to ERC-8004 reputation.
         </p>
       )}
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">
-          Value * <span className="text-gray-600">(-1.0 to 1.0)</span>
-        </label>
-        <input
-          name="value"
-          type="number"
-          min="-1"
-          max="1"
-          step="0.01"
-          placeholder="0.8"
-          required
-          className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Tag 1" name="tag1" placeholder="helpful" />
-        <Field label="Tag 2" name="tag2" placeholder="fast" />
-      </div>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">
-          Feedback JSON
-        </label>
-        <textarea
-          name="feedbackJson"
-          value={feedbackJson}
-          onChange={(e) => setFeedbackJson(e.target.value)}
-          rows={5}
-          className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 font-mono placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
-        />
-        {feedbackJsonError ? (
-          <p className="text-xs text-red-400 mt-1">{feedbackJsonError}</p>
-        ) : (
-          <p className="text-xs text-green-400 mt-1">Valid JSON.</p>
-        )}
-      </div>
-      <div>
-        <label className="block text-xs text-gray-400 mb-1">
-          Or Upload JSON File
-        </label>
-        <input
-          name="feedbackFile"
-          type="file"
-          accept="application/json,.json"
-          className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 file:mr-3 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-violet-600 file:text-white file:text-xs"
-        />
-      </div>
-      <p className="text-xs text-gray-600">
-        We upload this JSON to 0G and submit the resulting URI on-chain.
-      </p>
-      <SubmitButton isPending={isPending} label="Submit Feedback" />
-      <ResultBanner result={result} />
-    </form>
-  );
-}
-
-function TransferForm({
-  tokenId,
-  erc8004AgentId,
-  teeOracleUrl,
-  recipientAgents,
-  clientCfg,
-}: {
-  tokenId: string;
-  erc8004AgentId?: string;
-  teeOracleUrl: string;
-  recipientAgents: TransferRecipientAgent[];
-  clientCfg: ActionClientConfig;
-}) {
-  const { isPending, result, run } = useActionState();
-  const router = useRouter();
-  const { getViemClients, switchChain } = useWallet();
-  const normalizedOracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
-  const [recipientSelection, setRecipientSelection] = useState(
-    recipientAgents[0]?.agentId ?? "",
-  );
-  const selectedRecipient = recipientAgents.find(
-    (agent) => agent.agentId === recipientSelection,
-  );
-  const selectedRecipientMissingOracle =
-    !!selectedRecipient && !selectedRecipient.teeOracleUrl;
-  const canTransferToSelectedAgent =
-    !!selectedRecipient && !!selectedRecipient.teeOracleUrl && !!erc8004AgentId;
-
-  if (!normalizedOracleUrl) {
-    return (
-      <p className="text-xs text-amber-400/80">
-        Add a <span className="font-mono">teeOracle</span> service URL before
-        transferring encrypted agents.
-      </p>
-    );
-  }
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const rawFormData = new FormData(e.currentTarget);
-        run(async () => {
-          const selectedRecipientId = String(
-            rawFormData.get("recipientAgentId") ?? "",
-          );
-          const formRecipient = recipientAgents.find(
-            (agent) => agent.agentId === selectedRecipientId,
-          );
-          if (!formRecipient) {
-            return { error: "Select a recipient agent." };
-          }
-          const recipientAddress = formRecipient.owner;
-          const recipientOracleUrl = (formRecipient.teeOracleUrl ?? "")
-            .trim()
-            .replace(/\/+$/, "");
-
-          if (!recipientOracleUrl) {
-            return { error: "Selected recipient agent has no teeOracle URL." };
-          }
-          if (!erc8004AgentId || erc8004AgentId === "0") {
-            return {
-              error: "This agent has no linked ERC-8004 identity to transfer.",
-            };
-          }
-
-          await switchChain();
-          const { publicClient, walletClient } = await getViemClients();
-          if (!clientCfg.registryAddress) {
-            return { error: "AgentRegistry is not configured." };
-          }
-          if (!clientCfg.identityRegistryAddress) {
-            return { error: "ERC-8004 IdentityRegistry is not configured." };
-          }
-          const erc8004TokenId = BigInt(erc8004AgentId);
-          const identityOwner = (await publicClient.readContract({
-            address: clientCfg.identityRegistryAddress,
-            abi: IDENTITY_REGISTRY_ABI,
-            functionName: "ownerOf",
-            args: [erc8004TokenId],
-          })) as `0x${string}`;
-          if (
-            identityOwner.toLowerCase() !==
-            walletClient.account!.address.toLowerCase()
-          ) {
-            return {
-              error:
-                "Connected wallet does not own the linked ERC-8004 identity.",
-            };
-          }
-          const [approvedAddress, approvedForAll] = await Promise.all([
-            publicClient.readContract({
-              address: clientCfg.identityRegistryAddress,
-              abi: IDENTITY_REGISTRY_ABI,
-              functionName: "getApproved",
-              args: [erc8004TokenId],
-            }) as Promise<`0x${string}`>,
-            publicClient.readContract({
-              address: clientCfg.identityRegistryAddress,
-              abi: IDENTITY_REGISTRY_ABI,
-              functionName: "isApprovedForAll",
-              args: [walletClient.account!.address, clientCfg.registryAddress],
-            }) as Promise<boolean>,
-          ]);
-          const hasIdentityApproval =
-            approvedForAll ||
-            approvedAddress.toLowerCase() ===
-              clientCfg.registryAddress.toLowerCase();
-          if (!hasIdentityApproval) {
-            const approvalHash = await walletClient.writeContract({
-              address: clientCfg.identityRegistryAddress,
-              abi: IDENTITY_REGISTRY_ABI,
-              functionName: "approve",
-              args: [clientCfg.registryAddress, erc8004TokenId],
-              chain: walletClient.chain,
-              account: walletClient.account!,
-            });
-            await publicClient.waitForTransactionReceipt({
-              hash: approvalHash,
-            });
-          }
-
-          // 1. Fetch the oracle's address + public key for EIP-712 domain.
-          const addrRes = await fetch(`${normalizedOracleUrl}/address`);
-          if (!addrRes.ok) {
-            return {
-              error: `Could not reach oracle at ${normalizedOracleUrl}/address (${addrRes.status})`,
-            };
-          }
-          const { address: oracleAddress } = (await addrRes.json()) as {
-            address: string;
-            publicKey?: string;
-          };
-
-          // 2. Sign the EIP-712 ReencryptRequest so the oracle can verify ownership.
-          const chainId = await publicClient.getChainId();
-          const deadline = Math.floor(Date.now() / 1000) + 3600;
-          const td = buildReencryptTypedData({
-            oracleAddress: oracleAddress as `0x${string}`,
-            chainId,
-            tokenId: BigInt(tokenId),
-            from: walletClient.account!.address,
-            to: recipientAddress,
-            deadline,
-          });
-          const oracleSignature = await walletClient.signTypedData({
-            account: walletClient.account!,
-            ...td,
-          });
-
-          // 3. Prepare transfer via server action (oracle call happens inside).
-          const prepared = await prepareTransferAgent({
-            tokenId,
-            to: recipientAddress,
-            oracleUrl: normalizedOracleUrl,
-            recipientOracleUrl,
-            oracleSignature,
-            oracleDeadline: String(deadline),
-          });
-          if ("error" in prepared) return { error: prepared.error };
-
-          const accessPayloads = prepared.accessPayloads ?? [];
-          const ownershipProofs = prepared.ownershipProofs ?? [];
-          const from = prepared.from!;
-          const to = prepared.to!;
-          const tId = BigInt(prepared.tokenId!);
-          const deadlineBig = prepared.deadline!;
-
-          // 4. Sign each access proof (recipient acknowledgement of blob hash).
-          const proofs = await signAccessPayloads(
-            (digest) =>
-              walletClient.signMessage({
-                account: walletClient.account!,
-                message: digest,
-              }),
-            accessPayloads,
-            ownershipProofs,
-            { from, to, tokenId: tId, deadline: deadlineBig },
-          );
-
-          const hash = await walletClient.writeContract({
-            address: prepared.contractAddress!,
-            abi: AGENT_REGISTRY_ABI,
-            functionName: "iTransferFromWithIdentity",
-            args: [from, to, tId, proofs],
-            chain: walletClient.chain,
-            account: walletClient.account!,
-          });
-          await publicClient.waitForTransactionReceipt({ hash });
-          router.refresh();
-          return { txHash: hash };
-        });
-      }}
-      className="space-y-3"
-    >
-      <input type="hidden" name="tokenId" value={tokenId} />
-      <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-1">
-        <p className="text-xs font-semibold text-gray-300">
-          Transfer to registered agent
-        </p>
-      </div>
-      {recipientAgents.length > 0 && (
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">
-            Recipient Agent from Redis
-          </label>
-          <select
-            name="recipientAgentId"
-            value={recipientSelection}
-            onChange={(event) => setRecipientSelection(event.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-violet-600 text-sm"
-          >
-            {recipientAgents.map((agent) => (
-              <option key={agent.agentId} value={agent.agentId}>
-                {agent.name} #{agent.agentId}
-                {agent.teeOracleUrl ? "" : " - no teeOracle"}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {recipientAgents.length === 0 ? (
-        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
-          <p className="text-xs text-amber-300/90">
-            No other cached agents found in Redis for this chain. Create or sync
-            another agent before transferring.
-          </p>
-        </div>
-      ) : selectedRecipient ? (
-        <div className="rounded-lg border border-gray-800 bg-gray-950/40 p-3 space-y-1.5">
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-gray-500">Owner</span>
-            <span className="font-mono text-gray-300 truncate">
-              {selectedRecipient.owner}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-gray-500">teeOracle</span>
-            <span className="font-mono text-gray-300 truncate">
-              {selectedRecipient.teeOracleUrl ?? "-"}
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
-          <p className="text-xs text-amber-300/90">
-            Select a recipient agent from Redis.
-          </p>
-        </div>
-      )}
-      {!erc8004AgentId || erc8004AgentId === "0" ? (
-        <p className="text-xs text-amber-400/80">
-          This agent has no linked ERC-8004 identity, so combined transfer is
-          unavailable.
+      {!canSubmitFeedback && feedbackDisabledReason ? (
+        <p className="rounded border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-300/80">
+          {feedbackDisabledReason}
         </p>
       ) : null}
-      {selectedRecipientMissingOracle && (
-        <p className="text-xs text-amber-400/80">
-          Selected agent has no teeOracle service.
-        </p>
+      {!canSubmitFeedback ? (
+        <ResultBanner result={result} />
+      ) : (
+        <>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">
+              Value * <span className="text-gray-600">(-1.0 to 1.0)</span>
+            </label>
+            <input
+              name="value"
+              type="number"
+              min="-1"
+              max="1"
+              step="0.01"
+              value={feedbackValue}
+              onChange={(event) => setFeedbackValue(event.target.value)}
+              placeholder="0.8"
+              required
+              className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
+            />
+            {prefillValidation && (
+              <p className="text-xs text-gray-500 mt-1">
+                Populated from validation{" "}
+                <span className="font-mono">
+                  {prefillValidation.requestHash.slice(0, 12)}…
+                </span>{" "}
+                at{" "}
+                <span className="font-mono">{prefillValidation.score}/100</span>
+                .
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Tag 1" name="tag1" placeholder="helpful" />
+            <Field label="Tag 2" name="tag2" placeholder="fast" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">
+              Feedback JSON
+            </label>
+            <textarea
+              name="feedbackJson"
+              value={feedbackJson}
+              onChange={(e) => setFeedbackJson(e.target.value)}
+              rows={5}
+              className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 font-mono placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
+            />
+            {feedbackJsonError ? (
+              <p className="text-xs text-red-400 mt-1">{feedbackJsonError}</p>
+            ) : (
+              <p className="text-xs text-green-400 mt-1">Valid JSON.</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">
+              Or Upload JSON File
+            </label>
+            <input
+              name="feedbackFile"
+              type="file"
+              accept="application/json,.json"
+              className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 file:mr-3 file:px-3 file:py-1.5 file:rounded file:border-0 file:bg-violet-600 file:text-white file:text-xs"
+            />
+          </div>
+          <p className="text-xs text-gray-600">
+            We upload this JSON to 0G and submit the resulting URI on-chain.
+          </p>
+          <SubmitButton isPending={isPending} label="Submit Feedback" />
+          <ResultBanner result={result} />
+        </>
       )}
-      <SubmitButton
-        isPending={isPending}
-        label="Transfer"
-        disabled={!canTransferToSelectedAgent}
-      />
-      <ResultBanner result={result} />
     </form>
   );
 }
@@ -864,12 +638,24 @@ function ServiceEditorForm({
   const router = useRouter();
   const { getViemClients, switchChain } = useWallet();
   const [builtServices, setBuiltServices] = useState<ServiceEditorEntry[]>([]);
+  const initialTeeOracleUrl =
+    initialServices.find((service) => service.name === "teeOracle")?.endpoint ??
+    "";
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         run(async () => {
+          const nextTeeOracleUrl =
+            builtServices.find((service) => service.name === "teeOracle")
+              ?.endpoint ?? "";
+          if (nextTeeOracleUrl !== initialTeeOracleUrl) {
+            return {
+              error:
+                "Changing teeOracle requires Oracle Rotation, not a services edit.",
+            };
+          }
           const prepared = await prepareUpdateAgentServices({
             tokenId: agentId,
             servicesJson: builtServices,
@@ -897,6 +683,7 @@ function ServiceEditorForm({
       <ServiceEditorPanel
         initialServices={initialServices}
         onChange={setBuiltServices}
+        lockTeeOracle
       />
 
       <SubmitButton isPending={isPending} label="Save Services" />
@@ -915,22 +702,45 @@ type OracleRunResult = {
   event_log: string;
 };
 
+function buildRunValidationPayload(
+  run: CachedOracleRun,
+  erc8004AgentId: string,
+) {
+  const payload = {
+    payload: run.payload,
+    outcome: run.result.outcome,
+    quote: run.quote,
+    timestamp: run.timestamp,
+    agentId: erc8004AgentId,
+  };
+  return {
+    payload,
+    requestURI: `data:application/json;base64,${btoa(JSON.stringify(payload))}`,
+    requestHash: keccak256(toBytes(JSON.stringify(payload))),
+  };
+}
+
 function RunOracleForm({
   agentId,
+  erc8004AgentId,
   teeOracleUrl,
+  canRun,
+  runDisabledReason,
   onNewRun,
-  clientCfg,
 }: {
   agentId: string;
+  erc8004AgentId?: string;
   teeOracleUrl: string;
+  canRun: boolean;
+  runDisabledReason?: string;
   onNewRun?: (run: CachedOracleRun) => void;
-  clientCfg: ActionClientConfig;
 }) {
-  const { chainId, getViemClients, switchChain } = useWallet();
+  const { getViemClients, switchChain } = useWallet();
   const [payloadJson, setPayloadJson] = useState(
     '{\n  "claim": "Was Ethereum above $2000 on January 1st, 2023?"\n}',
   );
   const [isPending, setIsPending] = useState(false);
+  const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
   const [runResult, setRunResult] = useState<{
     data?: OracleRunResult;
     error?: string;
@@ -948,13 +758,49 @@ function RunOracleForm({
     );
   }
 
+  if (!erc8004AgentId || erc8004AgentId === "0") {
+    return (
+      <p className="text-xs text-amber-400/80">
+        This agent has no linked ERC-8004 identity, so oracle runs are
+        unavailable.
+      </p>
+    );
+  }
+  const linkedErc8004AgentId = erc8004AgentId;
+
+  if (!canRun) {
+    return (
+      <div className="space-y-2">
+        <p
+          className="text-xs text-gray-500 font-mono truncate"
+          title={teeOracleUrl}
+        >
+          Oracle: {teeOracleUrl}
+        </p>
+        <p className="rounded border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-300/80">
+          {runDisabledReason ??
+            "Only the current agent owner can run this oracle."}
+        </p>
+      </div>
+    );
+  }
+
   async function handleRun(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!canRun) {
+      setRunResult({
+        error:
+          runDisabledReason ??
+          "Only the current agent owner can run this oracle.",
+      });
+      return;
+    }
     if (payloadError) return;
     setIsPending(true);
     setRunResult(null);
 
     try {
+      setShowBackgroundNotice(true);
       let payload: Record<string, unknown>;
       try {
         payload = JSON.parse(payloadJson) as Record<string, unknown>;
@@ -978,8 +824,8 @@ function RunOracleForm({
 
       // 3. Sign EIP-712 RunRequest
       await switchChain();
-      const { walletClient } = await getViemClients();
-      const actualChainId = walletClient.chain?.id ?? chainId ?? 0;
+      const { publicClient, walletClient } = await getViemClients();
+      const actualChainId = await publicClient.getChainId();
       const tdRun = buildRunTypedData({
         oracleAddress: oracleAddress as `0x${string}`,
         chainId: actualChainId,
@@ -992,35 +838,30 @@ function RunOracleForm({
         account: walletClient.account!,
       });
 
-      // 5. POST /run
-      const res = await fetch(`${trimmedUrl}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const recorded = await recordOracleRun(
+        {
           agentId,
+          erc8004AgentId: linkedErc8004AgentId,
+          teeOracleUrl: trimmedUrl,
           payload,
           signature,
           deadline,
-          registryAddress: clientCfg.registryAddress,
-        }),
-      });
-      const data = (await res.json()) as OracleRunResult & { error?: string };
-      if (!res.ok || data.error) {
-        setRunResult({
-          error:
-            (data as { error?: string }).error ?? `Oracle error ${res.status}`,
-        });
-      } else {
-        setRunResult({ data });
-        // Persist to Redis (best-effort — don't block on failure).
-        const cachedRun: CachedOracleRun = {
-          oracleAddress,
-          payload,
-          ...data,
-        };
-        void recordOracleRun(cachedRun);
-        onNewRun?.(cachedRun);
+        },
+        actualChainId,
+      );
+      if (!recorded.ok) {
+        setRunResult({ error: recorded.error });
+        return;
       }
+      const runData = {
+        agentId: recorded.run.agentId,
+        result: recorded.run.result,
+        timestamp: recorded.run.timestamp,
+        quote: recorded.run.quote ?? "",
+        event_log: recorded.run.event_log ?? "",
+      };
+      setRunResult({ data: runData });
+      onNewRun?.(recorded.run);
     } catch (err) {
       setRunResult({
         error: err instanceof Error ? err.message : "Unknown error",
@@ -1032,14 +873,23 @@ function RunOracleForm({
 
   return (
     <form onSubmit={(e) => void handleRun(e)} className="space-y-3">
+      <BackgroundActionModal
+        open={showBackgroundNotice}
+        onClose={() => setShowBackgroundNotice(false)}
+      />
       <p
         className="text-xs text-gray-500 font-mono truncate"
         title={teeOracleUrl}
       >
-        oracle: {teeOracleUrl}
+        Oracle: {teeOracleUrl}
       </p>
+      {runDisabledReason && (
+        <p className="rounded border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-300/80">
+          {runDisabledReason}
+        </p>
+      )}
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Payload JSON</label>
+        <label className="block text-xs text-gray-400 mb-1">Claim JSON</label>
         <textarea
           value={payloadJson}
           onChange={(e) => setPayloadJson(e.target.value)}
@@ -1052,9 +902,14 @@ function RunOracleForm({
       </div>
       <p className="text-xs text-gray-600">
         Your wallet signs an EIP-712 message proving ownership of agent #
-        {agentId}. The oracle verifies on-chain ownership before executing.
+        {agentId}. The oracle runs the claim and stores the run so you can
+        validate it on demand.
       </p>
-      <SubmitButton isPending={isPending} label="Sign & Run" />
+      <SubmitButton
+        isPending={isPending}
+        label="Sign & Run"
+        disabled={!canRun || !!payloadError}
+      />
       {runResult?.error && (
         <ErrorBox title="Oracle error" message={runResult.error} />
       )}
@@ -1066,46 +921,30 @@ function RunOracleForm({
 
 function OracleRunCard({
   run,
-  agentId,
   erc8004AgentId,
   teeOracleUrl,
   clientCfg,
+  knownResponse,
 }: {
   run: CachedOracleRun;
-  agentId: string;
-  /** ERC-8004 Identity Registry agent ID — used for the validationRequest contract call. */
   erc8004AgentId?: string;
   teeOracleUrl: string;
   clientCfg: ActionClientConfig;
+  knownResponse: ValidationResponse | undefined;
 }) {
-  const { getViemClients, switchChain } = useWallet();
+  const router = useRouter();
+  const { address, getViemClients, switchChain } = useWallet();
   const [open, setOpen] = useState(false);
-  const [isValidating, setIsValidating] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [valError, setValError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isRequestingValidation, setIsRequestingValidation] = useState(false);
+  const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [verifyResult, setVerifyResult] = useState<{
     is_valid?: boolean;
     unavailable?: boolean;
     error?: string;
   } | null>(null);
-
-  // Pre-compute the requestHash for this run so we can check if already requested.
-  const runMeta = {
-    payload: run.payload,
-    outcome: run.result.outcome,
-    quote: run.quote,
-    timestamp: run.timestamp,
-    agentId: erc8004AgentId ?? agentId,
-  };
-  const runRequestHash = runMeta
-    ? keccak256(toBytes(JSON.stringify(runMeta)))
-    : null;
-
-  const canRequestValidation =
-    !!clientCfg.validationRegistryAddress &&
-    !!clientCfg.teeVerifierAddress &&
-    !!teeOracleUrl;
+  const claim = claimFromRunPayload(run.payload);
 
   const summary = (() => {
     if (run.result.outcome?.verdict) return String(run.result.outcome.verdict);
@@ -1120,6 +959,27 @@ function OracleRunCard({
       : run.result.outcome?.verdict === "NO"
         ? "text-red-400"
         : "text-gray-400";
+  const canVerify = !!run.quote && !!run.event_log && !!teeOracleUrl;
+  const validationStatus = knownResponse
+    ? `Validated ${knownResponse.score}/100`
+    : "Not validated";
+  const validationStatusColor = knownResponse
+    ? "text-green-400"
+    : "text-gray-600";
+  const validationButtonLabel = knownResponse
+    ? "Validated"
+    : isRequestingValidation
+      ? "Requesting..."
+      : "Request validation";
+  const requestDisabledReason = knownResponse
+    ? "Already validated."
+    : !address
+      ? "Connect wallet."
+      : !erc8004AgentId || erc8004AgentId === "0"
+        ? "Missing ERC-8004 identity."
+        : !clientCfg.validationRegistryAddress || !clientCfg.teeVerifierAddress
+          ? "Validation contracts are not configured."
+          : undefined;
 
   async function handleVerify() {
     setIsVerifying(true);
@@ -1156,72 +1016,87 @@ function OracleRunCard({
     }
   }
 
-  async function handleRequestValidation(e: React.FormEvent) {
-    e.preventDefault();
-    if (!runMeta || !runRequestHash) return;
-    setIsValidating(true);
-    setValError(null);
+  async function handleRequestValidation() {
+    if (
+      requestDisabledReason ||
+      !erc8004AgentId ||
+      erc8004AgentId === "0" ||
+      !clientCfg.validationRegistryAddress ||
+      !clientCfg.teeVerifierAddress
+    ) {
+      return;
+    }
+
+    setIsRequestingValidation(true);
+    setValidationError(null);
+    setShowBackgroundNotice(true);
     try {
-      const requestURI = `data:application/json;base64,${btoa(JSON.stringify(runMeta))}`;
-      const requestHash = runRequestHash;
-
-      if (!clientCfg.registryAddress)
-        throw new Error("AgentRegistry is not configured.");
-      if (!clientCfg.validationRegistryAddress)
-        throw new Error("ValidationRegistry is not configured.");
-      if (!clientCfg.teeVerifierAddress)
-        throw new Error("TeeVerifier is not configured.");
-      if (!teeOracleUrl.trim())
-        throw new Error("Oracle URL is not configured.");
-
+      const linkedErc8004AgentId = erc8004AgentId;
+      const validationRegistryAddress = clientCfg.validationRegistryAddress;
+      const teeVerifierAddress = clientCfg.teeVerifierAddress;
+      const validation = buildRunValidationPayload(run, linkedErc8004AgentId);
       await switchChain();
       const { publicClient, walletClient } = await getViemClients();
-      if (!erc8004AgentId)
-        throw new Error(
-          "Agent is not registered with ERC-8004. Register it before requesting validation.",
-        );
-
-      const txHash = await walletClient.writeContract({
-        address: clientCfg.validationRegistryAddress,
+      const hash = await walletClient.writeContract({
+        address: validationRegistryAddress,
         abi: VALIDATION_REGISTRY_ABI,
         functionName: "validationRequest",
         args: [
-          clientCfg.teeVerifierAddress,
-          BigInt(erc8004AgentId),
-          requestURI,
-          requestHash,
+          teeVerifierAddress,
+          BigInt(linkedErc8004AgentId),
+          validation.requestURI,
+          validation.requestHash,
         ],
         chain: walletClient.chain,
         account: walletClient.account!,
       });
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
-      setSubmitted(true);
+      await publicClient.waitForTransactionReceipt({ hash });
+
+      router.refresh();
     } catch (err) {
-      setValError(err instanceof Error ? err.message : "Unknown error");
+      setValidationError(
+        err instanceof Error ? err.message : "Unknown validation request error",
+      );
     } finally {
-      setIsValidating(false);
+      setIsRequestingValidation(false);
     }
   }
 
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-950/40 overflow-hidden">
+      <BackgroundActionModal
+        open={showBackgroundNotice}
+        onClose={() => setShowBackgroundNotice(false)}
+      />
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex flex-col gap-1.5 px-3 py-2 hover:bg-gray-800/30 transition-colors text-left"
+        className="w-full flex flex-col gap-2 px-3 py-2 hover:bg-gray-800/30 transition-colors text-left"
       >
         <div className="flex items-center justify-between gap-3 w-full">
-          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <span className="text-xs font-mono text-violet-400 bg-violet-950/40 px-0.5 py-0.5 rounded shrink-0">
-              Outcome:
-            </span>
-            {summary && (
-              <span
-                className={`text-xs font-semibold shrink-0 ${summaryColor}`}
-              >
-                {summary}
-              </span>
+          <div className="min-w-0 space-y-1">
+            {claim ? (
+              <div className="flex gap-1.5 text-xs min-w-0">
+                <span className="font-mono text-violet-400 bg-violet-950/40 px-1 py-0.5 rounded shrink-0">
+                  Claim
+                </span>
+                <span className="text-gray-200 truncate">{claim}</span>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 font-mono">No claim</p>
             )}
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+              <span className="text-xs font-mono text-gray-500 shrink-0">
+                Outcome
+              </span>
+              {summary && (
+                <span
+                  className={`text-xs font-semibold shrink-0 ${summaryColor}`}
+                >
+                  {summary}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-gray-600">
@@ -1232,21 +1107,82 @@ function OracleRunCard({
             </span>
           </div>
         </div>
-        {run.payload && Object.keys(run.payload).length > 0 && (
-          <div className="w-full rounded bg-gray-900/80 px-2 py-1.5 space-y-0.5">
-            {Object.entries(run.payload).map(([k, v]) => (
-              <div key={k} className="flex gap-1.5 text-xs font-mono min-w-0">
-                <span className="text-violet-400 shrink-0">{k}:</span>
-                <span className="text-gray-300 truncate">
-                  {typeof v === "object" && v !== null
-                    ? JSON.stringify(v)
-                    : String(v)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        {run.payload &&
+          Object.entries(run.payload).some(([key]) => key !== "claim") && (
+            <div className="w-full rounded bg-gray-900/80 px-2 py-1.5 space-y-0.5">
+              {Object.entries(run.payload)
+                .filter(([key]) => key !== "claim")
+                .map(([k, v]) => (
+                  <div
+                    key={k}
+                    className="flex gap-1.5 text-xs font-mono min-w-0"
+                  >
+                    <span className="text-violet-400 shrink-0">{k}:</span>
+                    <span className="text-gray-300 truncate">
+                      {typeof v === "object" && v !== null
+                        ? JSON.stringify(v)
+                        : String(v)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
       </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-800 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+          <span className={validationStatusColor}>{validationStatus}</span>
+          {verifyResult && (
+            <span
+              className={`font-semibold ${
+                verifyResult.unavailable
+                  ? "text-gray-500"
+                  : verifyResult.error
+                    ? "text-red-400"
+                    : verifyResult.is_valid
+                      ? "text-green-400"
+                      : "text-yellow-400"
+              }`}
+            >
+              {verifyResult.unavailable
+                ? "verify unavailable"
+                : verifyResult.error
+                  ? verifyResult.error
+                  : verifyResult.is_valid
+                    ? "proof valid"
+                    : "proof invalid"}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            disabled={isRequestingValidation || !!requestDisabledReason}
+            onClick={() => void handleRequestValidation()}
+            title={requestDisabledReason}
+            className="rounded bg-violet-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-500"
+          >
+            {validationButtonLabel}
+          </button>
+          {canVerify && (
+            <button
+              type="button"
+              disabled={isVerifying}
+              onClick={() => void handleVerify()}
+              className="rounded bg-gray-700 px-2 py-1 text-[11px] font-medium text-gray-100 transition-colors hover:bg-gray-600 disabled:opacity-50"
+            >
+              {isVerifying ? "Verifying..." : "Verify proof (quote + log)"}
+            </button>
+          )}
+        </div>
+      </div>
+      {validationError && (
+        <div className="border-t border-gray-800 px-3 py-2">
+          <ErrorBox
+            title="Validation request error"
+            message={validationError}
+          />
+        </div>
+      )}
       {open && (
         <div className="px-3 pb-3 pt-2 border-t border-gray-800 space-y-2">
           {Object.keys(run.result).length > 0 && (
@@ -1254,72 +1190,15 @@ function OracleRunCard({
               {JSON.stringify(run.result, null, 2)}
             </pre>
           )}
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 font-mono">
-            {run.oracleAddress && <span>oracle {run.oracleAddress}</span>}
-            {run.txHash && <span>tx {run.txHash.slice(0, 18)}</span>}
+          <div>
+            <p className="text-xs text-gray-500 break-all font-mono">
+              Oracle: {run.oracleAddress}
+              <br />
+              Quote: {run.quote?.slice(0, 80)}…
+              <br />
+              Event: {run.event_log?.slice(0, 80)}…
+            </p>
           </div>
-          {run.quote && (
-            <div className="flex gap-2">
-              <p className="text-xs text-gray-500 break-all font-mono">
-                quote: {run.quote.slice(0, 50)}…
-              </p>
-              {run.event_log && teeOracleUrl && (
-                <>
-                  <button
-                    type="button"
-                    disabled={isVerifying}
-                    onClick={() => void handleVerify()}
-                    className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-[11px] font-medium transition-colors"
-                  >
-                    {isVerifying ? "…" : "verify"}
-                  </button>
-                  {verifyResult && (
-                    <span
-                      className={`shrink-0 text-xs font-semibold ${
-                        verifyResult.unavailable
-                          ? "text-gray-500"
-                          : verifyResult.error
-                            ? "text-red-400"
-                            : verifyResult.is_valid
-                              ? "text-green-400"
-                              : "text-yellow-400"
-                      }`}
-                    >
-                      {verifyResult.unavailable
-                        ? "n/a"
-                        : verifyResult.error
-                          ? verifyResult.error
-                          : verifyResult.is_valid
-                            ? "✓"
-                            : "✗"}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-          {submitted && (
-            <div className="pt-1 border-t border-gray-800">
-              <p className="text-xs text-amber-400/70 font-mono">
-                submitted — waiting for indexer…
-              </p>
-            </div>
-          )}
-          <form
-            onSubmit={(e) => void handleRequestValidation(e)}
-            className="space-y-2 pt-1"
-          >
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={isValidating || !canRequestValidation}
-                className="px-3 py-1.5 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
-              >
-                {isValidating ? "Submitting…" : "Validate On-chain"}
-              </button>
-            </div>
-            {valError && <ErrorBox message={valError} />}
-          </form>
         </div>
       )}
     </div>
@@ -1328,50 +1207,47 @@ function OracleRunCard({
 
 function OracleRunHistory({
   runs,
-  agentId,
   erc8004AgentId,
   teeOracleUrl,
   clientCfg,
+  validationResponses,
 }: {
   runs: CachedOracleRun[];
-  agentId: string;
   erc8004AgentId?: string;
   teeOracleUrl: string;
   clientCfg: ActionClientConfig;
+  validationResponses: ValidationResponse[];
 }) {
   if (!runs.length) return null;
   return (
     <div className="space-y-1.5">
-      {runs.map((run, idx) => (
-        <OracleRunCard
-          key={`${run.timestamp}-${idx}`}
-          run={run}
-          agentId={agentId}
-          erc8004AgentId={erc8004AgentId}
-          teeOracleUrl={teeOracleUrl}
-          clientCfg={clientCfg}
-        />
-      ))}
+      {runs.map((run, idx) => {
+        const validationPayload = erc8004AgentId
+          ? buildRunValidationPayload(run, erc8004AgentId)
+          : null;
+        const knownResponse = validationPayload
+          ? validationResponses.find(
+              (response) =>
+                response.requestHash.toLowerCase() ===
+                validationPayload.requestHash.toLowerCase(),
+            )
+          : undefined;
+        return (
+          <OracleRunCard
+            key={`${run.timestamp}-${idx}`}
+            run={run}
+            erc8004AgentId={erc8004AgentId}
+            teeOracleUrl={teeOracleUrl}
+            clientCfg={clientCfg}
+            knownResponse={knownResponse}
+          />
+        );
+      })}
     </div>
   );
 }
 
-// ─── Pending Validations Panel ────────────────────────────────────────────────
-
-function parsePayload(requestURI: string): Record<string, unknown> | null {
-  try {
-    const prefix = "data:application/json;base64,";
-    if (requestURI.startsWith(prefix)) {
-      return JSON.parse(atob(requestURI.slice(prefix.length))) as Record<
-        string,
-        unknown
-      >;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
+// ─── Validation responses panel ───────────────────────────────────────────────
 
 function formatUnknown(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -1379,294 +1255,176 @@ function formatUnknown(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function ValidationJobRow({
-  job,
-  erc8004AgentId,
-  oracleUrl,
-  onComplete,
-  clientCfg,
-}: {
-  job: PendingValidation;
-  erc8004AgentId: string;
-  oracleUrl: string;
-  onComplete: (
-    requestHash: string,
-    response: {
-      score?: number;
-      txHash?: string;
-      responseURI?: string;
-      responseHash?: string;
-      tag?: string;
-      reasoning?: string;
-      evidence?: Record<string, unknown>;
-    } | null,
-  ) => void;
-  clientCfg: ActionClientConfig;
-}) {
-  const { chainId, getViemClients } = useWallet();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const payload = parsePayload(job.requestURI);
-  const trimmedUrl = oracleUrl.trim().replace(/\/$/, "");
+function claimFromRunPayload(
+  payload: Record<string, unknown> | undefined,
+): string | null {
+  const claim = payload?.claim;
+  if (claim === undefined) return null;
+  return formatUnknown(claim);
+}
 
-  async function handleValidate() {
-    if (!payload) {
-      setError("Cannot decode payload from requestURI.");
-      return;
-    }
-    setIsProcessing(true);
-    setError(null);
-    try {
-      if (
-        clientCfg.teeVerifierAddress &&
-        job.validatorAddress.toLowerCase() !==
-          clientCfg.teeVerifierAddress.toLowerCase()
-      ) {
-        throw new Error(
-          "This validation request was created with an old validator address. Submit a new validation request.",
-        );
-      }
-      const { walletClient } = await getViemClients();
+function validationResponsePayload(
+  response: ValidationResponse,
+): Record<string, unknown> {
+  const evidence = response.evidence ?? {};
+  return {
+    score: response.score,
+    reasoning:
+      response.reasoning ??
+      (typeof evidence.reasoning === "string" ? evidence.reasoning : undefined),
+    tag: response.tag,
+    responseHash: response.responseHash,
+  };
+}
 
-      // Fetch the oracle's TEE-derived wallet address for EIP-712 domain.
-      // We cannot use job.validatorAddress here — it may be the TEEVerifier contract.
-      if (!trimmedUrl) throw new Error("Oracle URL is not configured.");
-      const addrRes = await fetch(`${trimmedUrl}/address`);
-      if (!addrRes.ok)
-        throw new Error(`GET /address failed: ${addrRes.status}`);
-      const { address: oracleWallet } = (await addrRes.json()) as {
-        address: string;
-      };
-
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
-      const tdValidate = buildValidateTypedData({
-        oracleAddress: oracleWallet as `0x${string}`,
-        chainId: chainId ?? 0,
-        erc8004AgentId: BigInt(erc8004AgentId),
-        requestHash: job.requestHash as `0x${string}`,
-        payload,
-        deadline,
-      });
-      const signature = await walletClient.signTypedData({
-        ...tdValidate,
-        account: walletClient.account!,
-      });
-
-      const res = await fetch(`${trimmedUrl}/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          erc8004AgentId,
-          requestHash: job.requestHash,
-          payload,
-          validationRegistryAddress: clientCfg.validationRegistryAddress,
-          signature,
-          deadline,
-        }),
-      });
-
-      const data = (await res.json()) as {
-        error?: string;
-        score?: number;
-        txHash?: string;
-        reasoning?: string;
-        responseURI?: string;
-        responseHash?: string;
-        tag?: string;
-      };
-      if (!res.ok || data.error) {
-        setError(data.error ?? `Oracle returned HTTP ${res.status}`);
-        return;
-      }
-
-      onComplete(job.requestHash, {
-        score: data.score,
-        txHash: data.txHash,
-        responseURI: data.responseURI,
-        responseHash: data.responseHash,
-        tag: data.tag,
-        reasoning: data.reasoning,
-        evidence: {
-          score: data.score,
-          reasoning: data.reasoning,
-        },
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed.");
-    } finally {
-      setIsProcessing(false);
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-mono text-gray-500 truncate">
-          {job.requestHash.slice(0, 20)}…
-        </p>
-        <button
-          type="button"
-          disabled={isProcessing}
-          onClick={() => void handleValidate()}
-          className="shrink-0 px-3 py-1 rounded bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-medium transition-colors"
-        >
-          {isProcessing ? "Validating…" : "Validate"}
-        </button>
-      </div>
-      {payload && (
-        <pre className="text-xs text-gray-400 bg-gray-900/60 rounded p-2 overflow-x-auto max-h-24">
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
-    </div>
+function runForValidationResponse(
+  response: ValidationResponse,
+  runs: CachedOracleRun[],
+  erc8004AgentId?: string,
+): CachedOracleRun | undefined {
+  if (!erc8004AgentId) return undefined;
+  return runs.find(
+    (run) =>
+      buildRunValidationPayload(
+        run,
+        erc8004AgentId,
+      ).requestHash.toLowerCase() === response.requestHash.toLowerCase(),
   );
 }
 
-function PendingValidationsPanel({
-  agentId: _agentId,
+function ValidationResponsesPanel({
+  responses,
+  runs,
   erc8004AgentId,
-  pending,
-  teeOracleUrl,
-  onComplete,
-  clientCfg,
+  onUseForFeedback,
+  canUseForFeedback,
+  feedbackDisabledReason,
 }: {
-  agentId: string;
+  responses: ValidationResponse[];
+  runs: CachedOracleRun[];
   erc8004AgentId?: string;
-  pending: PendingValidation[];
-  teeOracleUrl: string;
-  onComplete: (
-    requestHash: string,
-    response: {
-      score?: number;
-      txHash?: string;
-      responseURI?: string;
-      responseHash?: string;
-      tag?: string;
-      reasoning?: string;
-      evidence?: Record<string, unknown>;
-    } | null,
-  ) => void;
-  clientCfg: ActionClientConfig;
+  onUseForFeedback?: (response: ValidationResponse) => void;
+  canUseForFeedback: boolean;
+  feedbackDisabledReason?: string;
 }) {
-  const oracleUrl = teeOracleUrl.trim().replace(/\/+$/, "");
-  const pendingItems = pending.filter((j) => !j.response);
-  const completedItems = pending.filter((j) => !!j.response);
-
-  if (!pending.length) {
+  if (!responses.length) {
     return (
       <p className="text-xs text-gray-500">
-        No pending validations. Use &ldquo;Request Validation&rdquo; on a run
-        above to create one.
-      </p>
-    );
-  }
-
-  if (!erc8004AgentId) {
-    return (
-      <p className="text-xs text-amber-400/80">
-        Agent is not registered with ERC-8004 — register it before validating.
-      </p>
-    );
-  }
-
-  if (!oracleUrl) {
-    return (
-      <p className="text-xs text-amber-400/80">
-        Add a <span className="font-mono">teeOracle</span> service URL before
-        sending validation jobs to the oracle.
+        No validation responses yet. Use Request validation on a run in Step 2,
+        then refresh once the oracle has responded.
       </p>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {pendingItems.length > 0 && (
-        <>
-          <h4 className="text-sm font-semibold text-gray-300">
-            Pending ({pendingItems.length})
-          </h4>
-          <div className="space-y-2">
-            {pendingItems.map((job) => (
-              <ValidationJobRow
-                key={job.requestHash}
-                job={job}
-                erc8004AgentId={erc8004AgentId}
-                oracleUrl={oracleUrl}
-                onComplete={onComplete}
-                clientCfg={clientCfg}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      {completedItems.length > 0 && (
-        <>
-          <h4 className="text-sm font-semibold text-gray-300">
-            Completed ({completedItems.length})
-          </h4>
-          <div className="space-y-2">
-            {completedItems.map((job) => {
-              const payload = parsePayload(job.requestURI);
-              const llmOutcome = payload?.outcome;
-              const validationReasoning =
-                job.response!.reasoning ??
-                (typeof job.response!.evidence?.reasoning === "string"
-                  ? job.response!.evidence.reasoning
-                  : undefined);
-              const scoreColor =
-                job.response!.score >= 70
-                  ? "text-green-400"
-                  : job.response!.score >= 40
-                    ? "text-yellow-400"
-                    : "text-red-400";
-              return (
-                <div
-                  key={job.requestHash}
-                  className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-mono text-gray-500 truncate">
-                      {job.requestHash.slice(0, 20)}…
-                    </p>
-                    <span
-                      className={`text-xs font-semibold shrink-0 ${scoreColor}`}
-                    >
-                      {job.response!.score}/100
-                    </span>
-                  </div>
-                  {llmOutcome !== undefined && (
-                    <div className="rounded bg-gray-900/60 p-2">
-                      <p className="text-[11px] font-semibold text-gray-500 mb-1">
-                        LLM outcome
-                      </p>
-                      <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words overflow-x-auto max-h-32">
-                        {formatUnknown(llmOutcome)}
-                      </pre>
-                    </div>
-                  )}
-                  {validationReasoning && (
-                    <div className="rounded bg-gray-900/60 p-2">
-                      <p className="text-[11px] font-semibold text-gray-500 mb-1">
-                        Validation reasoning
-                      </p>
-                      <p className="text-xs text-gray-300 whitespace-pre-wrap break-words">
-                        {validationReasoning}
-                      </p>
-                    </div>
-                  )}
-                  {job.response!.txHash && (
-                    <p className="text-[11px] font-mono text-gray-600 truncate">
-                      tx {job.response!.txHash}
-                    </p>
-                  )}
+    <div className="space-y-2">
+      {responses.map((response) => {
+        const matchedRun = runForValidationResponse(
+          response,
+          runs,
+          erc8004AgentId,
+        );
+        const claim = claimFromRunPayload(matchedRun?.payload);
+        const llmOutcome = matchedRun?.result.outcome;
+        const validationResponse = validationResponsePayload(response);
+        const validationReasoning =
+          response.reasoning ??
+          (typeof response.evidence?.reasoning === "string"
+            ? response.evidence.reasoning
+            : undefined);
+        const scoreColor =
+          response.score >= 70
+            ? "text-green-400"
+            : response.score >= 40
+              ? "text-yellow-400"
+              : "text-red-400";
+        return (
+          <div
+            key={response.requestHash}
+            className="rounded-lg border border-gray-700 bg-gray-950/40 p-3 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-mono text-gray-500 truncate">
+                {response.requestHash.slice(0, 20)}…
+              </p>
+              <span className={`text-xs font-semibold shrink-0 ${scoreColor}`}>
+                {response.score}/100
+              </span>
+            </div>
+            {claim && (
+              <div className="rounded bg-gray-900/60 p-2">
+                <p className="text-[11px] font-semibold text-gray-500 mb-1">
+                  Claim
+                </p>
+                <p className="text-xs text-gray-300 whitespace-pre-wrap break-words">
+                  {claim}
+                </p>
+              </div>
+            )}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              <div className="rounded bg-gray-900/60 p-2">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-[11px] font-semibold text-gray-500">
+                    Initial output
+                  </p>
+                  <span className="text-[10px] font-mono text-gray-600">
+                    run
+                  </span>
                 </div>
-              );
-            })}
+                {llmOutcome !== undefined ? (
+                  <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words overflow-x-auto max-h-32">
+                    {formatUnknown(llmOutcome)}
+                  </pre>
+                ) : (
+                  <p className="text-xs text-gray-600">
+                    Matching run not available locally.
+                  </p>
+                )}
+              </div>
+              <div className="rounded bg-gray-900/60 p-2">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-[11px] font-semibold text-gray-500">
+                    Validation response
+                  </p>
+                  <span className={`text-[10px] font-mono ${scoreColor}`}>
+                    {response.score}/100
+                  </span>
+                </div>
+                <pre className="text-xs text-gray-300 whitespace-pre-wrap break-words overflow-x-auto max-h-32">
+                  {formatUnknown(validationResponse)}
+                </pre>
+              </div>
+            </div>
+            {validationReasoning && (
+              <p className="text-xs text-gray-400 whitespace-pre-wrap break-words">
+                {validationReasoning}
+              </p>
+            )}
+            {response.txHash && (
+              <p className="text-[11px] font-mono text-gray-600 truncate">
+                tx {response.txHash}
+              </p>
+            )}
+            {onUseForFeedback && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canUseForFeedback}
+                  onClick={() => onUseForFeedback(response)}
+                  className="rounded bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-default disabled:bg-gray-700 disabled:text-gray-400"
+                >
+                  Use for feedback
+                </button>
+                {!canUseForFeedback && feedbackDisabledReason ? (
+                  <span className="text-xs text-amber-300/80">
+                    {feedbackDisabledReason}
+                  </span>
+                ) : null}
+              </div>
+            )}
           </div>
-        </>
-      )}
+        );
+      })}
     </div>
   );
 }

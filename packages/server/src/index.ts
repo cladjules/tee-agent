@@ -47,21 +47,18 @@ import { z } from "zod";
 import {
   decryptContentKey,
   decryptMetadata,
-  encryptMetadata,
-  generateContentKey,
   hashEncryptedBlob,
   readJsonFromUri,
 } from "@tee-agent/agent/encryption";
-import { uploadZeroGBytes } from "@tee-agent/agent/zero-g";
 import type { EncryptedBlob } from "@tee-agent/agent/types";
 import {
   REENCRYPT_REQUEST_TYPES,
   RUN_REQUEST_TYPES,
   VALIDATE_REQUEST_TYPES,
 } from "@tee-agent/agent/typed-data";
+import { getPublishedSealedKeys } from "@tee-agent/agent/transfer";
 import {
   AGENT_REGISTRY_ABI,
-  IDENTITY_REGISTRY_ABI,
   TEE_VERIFIER_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
@@ -70,6 +67,7 @@ import {
   getNetworkDeploymentByChainId,
   type RawDeployments,
 } from "@tee-agent/agent/config";
+import { createPublicClient, http, type Hex } from "viem";
 import { scoreWithLLM } from "./llm-scorer.js";
 
 // ─── Request schemas ────────────────────────────────────────────────────────────
@@ -191,8 +189,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   );
   const configuredAgentRegistryAddress = deployment.contracts.agentRegistry;
   const configuredTeeVerifierAddress = deployment.contracts.teeVerifier;
-  const ZERO_G_RPC_URL = requiredEnv("ZERO_G_RPC_URL");
-  const ZERO_G_INDEXER_URL = requiredEnv("ZERO_G_INDEXER_URL");
   const PRIVATE_KEY = requiredEnv("PRIVATE_KEY");
   const txSignerAddress = new ethers.Wallet(PRIVATE_KEY).address;
   const DSTACK_VERIFIER_URL = requiredEnv("DSTACK_VERIFIER_URL").replace(
@@ -218,6 +214,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   // chainId and Identity Registry address are derived statically — no RPC call needed.
   const { chainId, isTestnet } = networkConfig;
   const identityRegistryAddress = networkConfig.identityRegistryAddress;
+  const publicClient = createPublicClient({
+    chain: networkConfig.chain,
+    transport: http(RPC_URL),
+  });
 
   // EIP-712 domain: verifyingContract = TEE-derived address → unique per CVM; prevents
   // cross-oracle replay. Callers fetch the oracle address from GET /address before signing.
@@ -332,6 +332,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   async function getAgentData(
     agentId: bigint,
     registryAddress: string,
+    ownerAddress: string,
   ): Promise<{ blobs: unknown[] }> {
     if (!RPC_URL) throw new Error("RPC_URL is not configured on the oracle.");
     const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -354,6 +355,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     }
 
     const blobs: unknown[] = [];
+    let transferredSealedKeys: Hex[] | undefined;
     for (let i = 0; i < datas.length; i++) {
       const data = datas[i] as { dataDescription: string; dataHash: string };
       const uri = data.dataDescription;
@@ -361,7 +363,38 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         `[oracle] decrypting blob ${i} hash=${data.dataHash.slice(0, 10)}…`,
       );
       const blob = await fetchBlob(uri);
-      const key = decryptContentKey(blob, wallet.privateKey);
+      const actualHash = await hashEncryptedBlob(blob);
+      if (actualHash !== data.dataHash) {
+        throw new Error(
+          `Hash mismatch for blob ${i}: expected ${data.dataHash}, got ${actualHash}`,
+        );
+      }
+      let key: Uint8Array;
+      try {
+        key = decryptContentKey(blob, wallet.privateKey);
+      } catch (err) {
+        if (deployment.fromBlock === undefined) {
+          throw new Error(
+            "deployments.json fromBlock is required to read PublishedSealedKey events for transferred agents.",
+          );
+        }
+        transferredSealedKeys ??= await getPublishedSealedKeys({
+          publicClient,
+          registryAddress: registryAddress as `0x${string}`,
+          tokenId: agentId,
+          to: ownerAddress as `0x${string}`,
+          fromBlock: deployment.fromBlock,
+          toBlock: "latest",
+        });
+        const sealedKey = transferredSealedKeys[i];
+        if (!sealedKey) {
+          throw new Error(
+            `PublishedSealedKey event missing sealed key for blob ${i}.`,
+          );
+        }
+        key = decryptContentKey({ encryptedKey: sealedKey }, wallet.privateKey);
+        console.log(`[oracle] blob ${i} decrypted with transfer sealed key`);
+      }
       blobs.push(decryptMetadata<unknown>(blob, key));
       console.log(`[oracle] blob ${i} decrypted ok`);
     }
@@ -378,17 +411,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       ? body.targetPubkey.slice(2)
       : body.targetPubkey;
     const recipientPublicKey = Buffer.from(pubKeyHex, "hex");
-
-    const newContentKey = generateContentKey();
-    const encryptedNewKey = encrypt(
-      recipientPublicKey,
-      Buffer.from(newContentKey),
-    );
-    const sealedKey =
-      `0x${Buffer.from(encryptedNewKey).toString("hex")}` as `0x${string}`;
-
-    const newDataHashes: `0x${string}`[] = [];
-    const newBlobUris: string[] = [];
     const ownershipProofs: Array<{
       oracleType: number;
       dataHash: `0x${string}`;
@@ -411,31 +433,12 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         );
       }
 
-      const plaintext = decryptMetadata<unknown>(blob, oldContentKey);
-      const newBlob = encryptMetadata(
-        blob.name,
-        plaintext,
-        newContentKey,
+      const encryptedKey = encrypt(
         recipientPublicKey,
+        Buffer.from(oldContentKey),
       );
-
-      const newDataHash = await hashEncryptedBlob(newBlob);
-      newDataHashes.push(newDataHash);
-
-      let newBlobUri: string;
-      if (uri.startsWith("data:")) {
-        const encoded = Buffer.from(JSON.stringify(newBlob)).toString("base64");
-        newBlobUri = `data:application/json;base64,${encoded}`;
-      } else {
-        const blobBytes = new TextEncoder().encode(JSON.stringify(newBlob));
-        newBlobUri = await uploadZeroGBytes({
-          bytes: blobBytes,
-          privateKey: PRIVATE_KEY,
-          rpcUrl: ZERO_G_RPC_URL,
-          indexerUrl: ZERO_G_INDEXER_URL,
-        });
-      }
-      newBlobUris.push(newBlobUri);
+      const sealedKey =
+        `0x${Buffer.from(encryptedKey).toString("hex")}` as `0x${string}`;
 
       const nonceBytes = ethers.keccak256(
         ethers.toUtf8Bytes(`ownership:${body.tokenId}:${i}:${Date.now()}`),
@@ -495,7 +498,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       });
     }
 
-    return { newDataHashes, sealedKey, ownershipProofs, newBlobUris };
+    return { ownershipProofs };
   }
 
   // ─── HTTP server ──────────────────────────────────────────────────────────────
@@ -541,7 +544,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     agentId: bigint,
     registryAddress: string,
     signer: string,
-  ): Promise<void> {
+  ): Promise<string> {
     if (!RPC_URL) throw new Error("RPC_URL is not configured.");
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const nft = new ethers.Contract(
@@ -567,29 +570,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         `Signer ${signer} is not the owner of agent #${agentId}.`,
       );
     }
-  }
-
-  /**
-   * Asserts that `signer` is the owner of the given ERC-8004 agent ID
-   * in the official ERC-8004 Identity Registry.
-   */
-  async function assertErc8004Owner(
-    erc8004AgentId: bigint,
-    signer: string,
-  ): Promise<void> {
-    if (!RPC_URL) throw new Error("RPC_URL is not configured.");
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const registry = new ethers.Contract(
-      identityRegistryAddress,
-      IDENTITY_REGISTRY_ABI,
-      provider,
-    );
-    const owner = (await registry.ownerOf(erc8004AgentId)) as string;
-    if (signer.toLowerCase() !== owner.toLowerCase()) {
-      throw new Error(
-        `Signer ${signer} is not the owner of ERC-8004 agent #${erc8004AgentId}.`,
-      );
-    }
+    return owner;
   }
 
   app.get("/health", (_req: Request, res: Response) => {
@@ -806,8 +787,9 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         body.signature,
         body.deadline,
       );
-      // Ownership check against the official ERC-8004 Identity Registry.
-      await assertErc8004Owner(erc8004AgentId, signer);
+      if (signer.toLowerCase() !== txSignerAddress.toLowerCase()) {
+        throw new Error("Unauthorized validation signer.");
+      }
 
       // body.payload is the runMeta encoded in the on-chain requestURI:
       // { type, outcome, payload (original claim), quote, timestamp, agentId }
@@ -922,10 +904,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         body.signature,
         body.deadline,
       );
-      await assertOwner(agentId, registryAddress, signer);
+      const owner = await assertOwner(agentId, registryAddress, signer);
 
       // Resolve + decrypt the agent's skill from the chain and 0G Storage
-      const agentData = await getAgentData(agentId, registryAddress);
+      const agentData = await getAgentData(agentId, registryAddress, owner);
 
       const result = await config.handler.run(body.payload, {
         wallet,
