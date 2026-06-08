@@ -12,6 +12,7 @@ import {
   acceptTransferOffer,
   buildTransferTxArgs,
 } from "@tee-agent/agent/transfer";
+import { IdentityRegistry } from "@tee-agent/agent/registry";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import {
   prepareTeeOracleServiceUpdate,
@@ -362,19 +363,16 @@ export function TransferForm({
                 );
 
                 const erc8004TokenId = BigInt(linkedErc8004AgentId);
+                const identityRegistry = new IdentityRegistry({
+                  address: identityRegistryAddress,
+                  publicClient,
+                });
                 const [approvedAddress, approvedForAll] = await Promise.all([
-                  publicClient.readContract({
-                    address: identityRegistryAddress,
-                    abi: IDENTITY_REGISTRY_ABI,
-                    functionName: "getApproved",
-                    args: [erc8004TokenId],
-                  }) as Promise<`0x${string}`>,
-                  publicClient.readContract({
-                    address: identityRegistryAddress,
-                    abi: IDENTITY_REGISTRY_ABI,
-                    functionName: "isApprovedForAll",
-                    args: [owner, offer.contractAddress],
-                  }) as Promise<boolean>,
+                  identityRegistry.getApproved(erc8004TokenId),
+                  identityRegistry.isApprovedForAll(
+                    owner,
+                    offer.contractAddress,
+                  ),
                 ]);
                 const hasIdentityApproval =
                   approvedForAll ||

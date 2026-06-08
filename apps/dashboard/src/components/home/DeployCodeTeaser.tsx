@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import CopyButton from "./CopyButton";
 
 const TEASER_LINES = [
   "npm run deploy:baseSepolia --workspace=contracts",
@@ -20,6 +21,8 @@ const TEASER_LINES = [
   "      prepared.agentMetadataUri, prepared.intelligentData],",
   "});",
 ] as const;
+
+const TEASER_COPY = TEASER_LINES.join("\n");
 
 export default function DeployCodeTeaser() {
   const rootRef = useRef<HTMLElement | null>(null);
@@ -70,7 +73,7 @@ export default function DeployCodeTeaser() {
       <div className="glass-card min-w-0 overflow-hidden rounded-xl p-4 md:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-slate-100">
-            Deploy The Oracle
+            Deploy The Oracle - Mint an Agent
           </h2>
           <a
             href="/docs"
@@ -89,7 +92,10 @@ export default function DeployCodeTeaser() {
               ⌁
             </span>
             <span className="truncate font-mono text-[10px] text-slate-600">
-              tee-agent deploy
+              tee-agent deploy · copy-ready
+            </span>
+            <span className="ml-auto">
+              <CopyButton value={TEASER_COPY} />
             </span>
           </div>
           <pre className="min-h-72 overflow-hidden whitespace-pre-wrap p-3 text-[11px] leading-6 text-slate-300 md:text-xs">

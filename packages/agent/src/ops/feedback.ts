@@ -7,9 +7,35 @@ import type {
   PrepareFeedbackParams,
   PrepareFeedbackResult,
 } from "../types.js";
+import { createPublicClient, http, type Address } from "viem";
+import { ReputationRegistry } from "../registry/reputation.js";
+
+export type FeedbackView = {
+  client: Address;
+  feedbackIndex: number;
+  value: string;
+  valueDecimals: number;
+  normalizedValue: number;
+  tag1: string;
+  tag2: string;
+  isRevoked: boolean;
+  endpoint?: string;
+  feedbackURI?: string;
+  feedbackHash?: `0x${string}`;
+};
+
+export type FeedbackOverview = {
+  totalScore: number;
+  totalCount: number;
+  feedbacks: FeedbackView[];
+};
 
 function toScaledFeedbackValue(valueNum: number, decimals: number): bigint {
   return BigInt(Math.round(valueNum * Math.pow(10, decimals)));
+}
+
+function normalizeScaledValue(value: bigint, decimals: number): number {
+  return Number(value) / Math.pow(10, decimals);
 }
 
 async function parseFeedbackData(
@@ -76,5 +102,60 @@ export async function prepareFeedback(
     tag1: tag1 ?? "",
     tag2: tag2 ?? "",
     feedbackURI,
+  };
+}
+
+export async function fetchFeedbackOverview(
+  config: AgentConfig,
+  erc8004AgentId: string | bigint | null,
+): Promise<FeedbackOverview> {
+  if (!erc8004AgentId || !config.reputationRegistryAddress || !config.rpcUrl) {
+    return { totalScore: 0, totalCount: 0, feedbacks: [] };
+  }
+
+  const registry = new ReputationRegistry({
+    address: config.reputationRegistryAddress,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    }),
+  });
+  const agentId =
+    typeof erc8004AgentId === "bigint"
+      ? erc8004AgentId
+      : BigInt(erc8004AgentId);
+  const clients = await registry.getClients(agentId);
+
+  if (clients.length === 0) {
+    return { totalScore: 0, totalCount: 0, feedbacks: [] };
+  }
+
+  const [summary, feedbackRows] = await Promise.all([
+    registry.getSummary(agentId, clients, "", ""),
+    registry.readAllFeedback(agentId, clients, "", "", true),
+  ]);
+
+  const feedbacks = feedbackRows.clients.map((client, index) => {
+    const value = feedbackRows.values[index] ?? 0n;
+    const valueDecimals = feedbackRows.valueDecimals[index] ?? 0;
+    return {
+      client,
+      feedbackIndex: Number(feedbackRows.feedbackIndexes[index] ?? 0n),
+      value: value.toString(),
+      valueDecimals,
+      normalizedValue: normalizeScaledValue(value, valueDecimals),
+      tag1: feedbackRows.tag1s[index] ?? "",
+      tag2: feedbackRows.tag2s[index] ?? "",
+      isRevoked: feedbackRows.revokedStatuses[index] ?? false,
+    };
+  });
+
+  return {
+    totalScore: normalizeScaledValue(
+      summary.summaryValue,
+      summary.summaryValueDecimals,
+    ),
+    totalCount: Number(summary.count),
+    feedbacks,
   };
 }

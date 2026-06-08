@@ -12,7 +12,7 @@ const FEATURES = [
   {
     badge: "ERC-7857 · TEE",
     title: "Encrypted private skills",
-    body: "Encrypt agent data such as skills, prompts, and models so only your oracle can decode it, with secure re-encryption during ownership transfer.",
+    body: "Encrypt agent data such as skills, prompts, and models so only your oracle can decode it, uploaded to 0G Storage, with secure re-encryption during ownership transfer.",
   },
 ] as const;
 

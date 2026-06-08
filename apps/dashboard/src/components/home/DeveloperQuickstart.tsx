@@ -5,23 +5,41 @@ const DEPLOY_SNIPPET = `# Deploy contracts and write deployments.json
 npm run deploy:baseSepolia --workspace=contracts
 npm run setup-env --workspace=contracts
 
-# Fill root .env and apps/oracle/.env, then deploy one oracle
+# Copy an example oracle or create your own handler
+cp apps/oracle/src/examples/prediction-market.ts \\
+  apps/oracle/src/prod/my-oracle.ts
+
+# Fill root .env and apps/oracle/.env, then deploy it
 npm run oracle:image
-npm run oracle:deploy -- src/examples/prediction-market.ts`;
+npm run oracle:deploy -- src/prod/my-oracle.ts
 
-const MINT_SNIPPET = `import { getNetworkConfig } from "@tee-agent/agent/network";
-import { getNetworkDeploymentByChainId } from "@tee-agent/agent/config";
-import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/abis";
-import { prepareMint } from "@tee-agent/agent/mint";
-import type { AgentConfig } from "@tee-agent/agent/types";
+# oracle:deploy prints the HTTPS teeOracle endpoint`;
 
-const network = getNetworkConfig("baseSepolia");
-const deployment = getNetworkDeploymentByChainId(network.chainId, deployments);
+const ORACLE_HANDLER_SNIPPET = `const handler = {
+  async run(payload, ctx) {
+    const skill = ctx.blobs[0];
+    const config = ctx.blobs[1];
+    return {
+      answer: await runModel({
+        prompt: skill,
+        input: payload.question,
+        config,
+      }),
+    };
+  },
+};
+
+await startOracle({ handler, deployments });`;
+
+const MINT_SNIPPET = `const network = getNetworkConfig("baseSepolia");
+
+const deployment = deployments[String(network.chainId)];
+const contracts = deployment.contracts;
 const config = {
   chain: network.chain,
-  registryAddress: deployment.contracts.agentRegistry,
-  teeVerifierAddress: deployment.contracts.teeVerifier,
-  validationRegistryAddress: deployment.contracts.validationRegistry,
+  registryAddress: contracts.agentRegistry,
+  teeVerifierAddress: contracts.teeVerifier,
+  validationRegistryAddress: contracts.validationRegistry,
   identityRegistryAddress: network.identityRegistryAddress,
   reputationRegistryAddress: network.reputationRegistryAddress,
   rpcUrl,
@@ -52,21 +70,53 @@ await walletClient.writeContract({
   ],
 });`;
 
-const VALIDATE_FEEDBACK_SNIPPET = `import {
-  REPUTATION_REGISTRY_ABI,
-  VALIDATION_REGISTRY_ABI,
-} from "@tee-agent/agent/abis";
-import { prepareValidation } from "@tee-agent/agent/validate";
-import { prepareFeedback } from "@tee-agent/agent/feedback";
+const ORACLE_HTTP_SNIPPET = `const payload = { question: "Who won this market?" };
+const deadline = Math.floor(Date.now() / 1000) + 300;
+const typedData = buildRunTypedData({
+  oracleAddress,
+  chainId: network.chainId,
+  agentId,
+  payload,
+  deadline,
+});
 
+const signature = await walletClient.signTypedData({
+  account: ownerAddress,
+  ...typedData,
+});
+
+const run = await fetch(\`\${oracleUrl}/run\`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    agentId: agentId.toString(),
+    registryAddress: contracts.agentRegistry,
+    payload,
+    signature,
+    deadline,
+  }),
+}).then((res) => res.json());
+
+const verified = await fetch(\`\${oracleUrl}/verify\`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    quote: run.quote,
+    event_log: run.event_log,
+  }),
+}).then((res) => res.json());`;
+
+const VALIDATION_SNIPPET = `const requestURI = toDataUri({
+  ...
+});
 const validation = prepareValidation(config, {
   agentId: erc8004AgentId,
-  validatorAddress: config.teeVerifierAddress,
-  requestURI: JSON.stringify(runClaim),
+  validatorAddress: contracts.teeVerifier,
+  requestURI,
 });
 
 await walletClient.writeContract({
-  address: validation.contractAddress,
+  address: contracts.validationRegistry,
   abi: VALIDATION_REGISTRY_ABI,
   functionName: "validationRequest",
   args: [
@@ -77,37 +127,15 @@ await walletClient.writeContract({
   ],
 });
 
-const feedback = await prepareFeedback(config, {
-  agentId: erc8004AgentId,
-  value: validationScore / 100,
-  tag1: "validation",
-  tag2: "accuracy",
-  feedbackJson: JSON.stringify(validationResult),
-});
-
-await walletClient.writeContract({
-  address: feedback.contractAddress,
-  abi: REPUTATION_REGISTRY_ABI,
-  functionName: "giveFeedback",
-  args: [
-    BigInt(feedback.agentId),
-    BigInt(feedback.value),
-    feedback.valueDecimals,
-    feedback.tag1,
-    feedback.tag2,
-    "",
-    feedback.feedbackURI,
-    "0x0000000000000000000000000000000000000000000000000000000000000000",
-  ],
+// Worker watches ValidationRequest events, signs as PRIVATE_KEY,
+// then calls the agent teeOracle. The oracle submits validationResponse.
+await fetch(\`\${oracleUrl}/validate\`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(validateRequest),
 });`;
 
-const TRANSFER_SNIPPET = `import {
-  createTransferOffer,
-  acceptTransferOffer,
-  buildTransferTxArgs,
-} from "@tee-agent/agent/transfer";
-
-const offer = await createTransferOffer(config, transferParams);
+const TRANSFER_SNIPPET = `const offer = await createTransferOffer(config, transferParams);
 const acceptance = await acceptTransferOffer(offer, recipientSign);
 await walletClient.writeContract(buildTransferTxArgs(acceptance));`;
 
@@ -196,6 +224,13 @@ export default function DeveloperQuickstart() {
           />
           <QuickstartStep
             step={2}
+            title="Handler"
+            description="Copy an oracle example or create your own handler; /run receives the owner-signed payload and decrypted private blobs."
+            tag="Oracle"
+            code={ORACLE_HANDLER_SNIPPET}
+          />
+          <QuickstartStep
+            step={3}
             title="Mint"
             description="Prepare metadata, ERC-8004 services, and ERC-7857 encrypted data, then call AgentRegistry."
             tag="ERC-7857 + 8004"
@@ -204,18 +239,25 @@ export default function DeveloperQuickstart() {
         </QuickstartGroup>
 
         <QuickstartGroup
-          title="Use And Move It"
-          description="Validate real runs, turn validation into reputation feedback, and transfer the encrypted agent safely."
+          title="Use And Transfer"
+          description="Run the oracle, verify TDX quotes, respond to validation requests, and transfer the encrypted agent safely."
         >
           <QuickstartStep
-            step={3}
-            title="Validate / Feedback"
-            description="Request validation, then use the score and reasoning to submit ERC-8004 feedback."
-            tag="Validation"
-            code={VALIDATE_FEEDBACK_SNIPPET}
+            step={4}
+            title="Run then Verify"
+            description="Call the teeOracle /run endpoint with an owner signature, then verify the returned TDX quote through /verify."
+            tag="/run"
+            code={ORACLE_HTTP_SNIPPET}
           />
           <QuickstartStep
-            step={4}
+            step={5}
+            title="Validate"
+            description="Write a ValidationRequest, then let the owner worker call /validate so the oracle submits the TEE-backed response."
+            tag="/validate"
+            code={VALIDATION_SNIPPET}
+          />
+          <QuickstartStep
+            step={6}
             title="Transfer"
             description="Create an offer, let the recipient accept, then submit the combined transfer transaction."
             tag="Transfer"

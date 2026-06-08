@@ -157,6 +157,7 @@ package-lock.json
 phala.toml
 apps/oracle/.phala/
 .docker-ghcr/
+.oracle-image-state.json
 
 # Hardhat
 /contracts/ignition/deployments

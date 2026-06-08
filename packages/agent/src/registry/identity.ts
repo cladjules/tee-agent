@@ -28,4 +28,22 @@ export class IdentityRegistry {
       args: [agentId],
     }) as Promise<string>;
   }
+
+  async getApproved(agentId: bigint): Promise<Address> {
+    return this._pc.readContract({
+      address: this._addr,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "getApproved",
+      args: [agentId],
+    }) as Promise<Address>;
+  }
+
+  async isApprovedForAll(owner: Address, operator: Address): Promise<boolean> {
+    return this._pc.readContract({
+      address: this._addr,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "isApprovedForAll",
+      args: [owner, operator],
+    }) as Promise<boolean>;
+  }
 }

@@ -12,14 +12,11 @@
     "resolveJsonModule": true,
     "types": ["node"],
     "paths": {
-      "@tee-agent/agent/types": ["../packages/agent/dist/core/types.d.ts"],
-      "@tee-agent/agent/config": ["../packages/agent/dist/core/config.d.ts"],
-      "@tee-agent/agent/encryption": [
-        "../packages/agent/dist/core/crypto.d.ts"
-      ],
+      "@tee-agent/agent/types": ["../packages/agent/dist/types.d.ts"],
+      "@tee-agent/agent/encryption": ["../packages/agent/dist/crypto.d.ts"],
       "@tee-agent/agent/abis": ["../packages/agent/dist/abis.d.ts"],
       "@tee-agent/agent/registry": [
-        "../packages/agent/dist/core/registry.d.ts"
+        "../packages/agent/dist/registry/index.d.ts"
       ],
       "@tee-agent/agent/zero-g": ["../packages/agent/dist/storage/zero-g.d.ts"],
       "@tee-agent/agent/mint": ["../packages/agent/dist/ops/mint.d.ts"],

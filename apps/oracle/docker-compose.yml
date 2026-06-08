@@ -8,7 +8,8 @@
 # First deploy: deploy-cvm.mjs runs `phala link` afterwards to record app_id in phala.toml.
 # On startup, the oracle self-registers in TeeVerifier via initValidator + TDX quote.
 #
-# ORACLE_IMAGE is read from root .env. It is written by npm run oracle:image.
+# ORACLE_IMAGE is injected into the generated compose file by npm run oracle:deploy.
+# The image tag is saved in root .oracle-image-state.json by npm run oracle:image.
 # ORACLE_ENTRY is set by root scripts/deploy-cvm.mjs and selects the entry point
 # compiled into apps/oracle/dist/ inside the CVM image.
 #
@@ -38,7 +39,7 @@ services:
       - RPC_URL_ZERO_G
       - INDEXER_URL_ZERO_G
       # Script-managed private registry credentials for private GHCR pulls.
-      # Values are read from root .env.
+      # Values are injected by root scripts/deploy-cvm.mjs.
       - DSTACK_DOCKER_USERNAME
       - DSTACK_DOCKER_PASSWORD
       - DSTACK_DOCKER_REGISTRY

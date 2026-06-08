@@ -14,6 +14,7 @@
 
 import { AGENT_REGISTRY_ABI } from "../abis.js";
 import { buildAccessPayloads } from "../proofs.js";
+import { AgentRegistry } from "../registry/agent.js";
 import type {
   AgentConfig,
   TransferAcceptance,
@@ -106,35 +107,23 @@ export async function createTransferOffer(
   }
   if (!oracleDeadline) throw new Error("oracleDeadline is required.");
 
-  const publicClient = createPublicClient({
-    chain: config.chain,
-    transport: http(config.rpcUrl),
+  const registry = new AgentRegistry({
+    address: config.registryAddress,
+    publicClient: createPublicClient({
+      chain: config.chain,
+      transport: http(config.rpcUrl),
+    }),
   });
   const numericTokenId = BigInt(tokenId);
-  const intelligentDatas = (await publicClient.readContract({
-    address: config.registryAddress,
-    abi: AGENT_REGISTRY_ABI,
-    functionName: "intelligentDatasOf",
-    args: [numericTokenId],
-  })) as ReadonlyArray<{ dataDescription: string; dataHash: Hex }>;
+  const intelligentDatas = await registry.intelligentDatasOf(numericTokenId);
   const currentHashes = intelligentDatas.map((item) => item.dataHash);
   if (currentHashes.length === 0) {
     throw new Error("Agent has no encrypted intelligent data to transfer.");
   }
 
   const [verifierAddress, from] = await Promise.all([
-    publicClient.readContract({
-      address: config.registryAddress,
-      abi: AGENT_REGISTRY_ABI,
-      functionName: "verifier",
-      args: [],
-    }) as Promise<Address>,
-    publicClient.readContract({
-      address: config.registryAddress,
-      abi: AGENT_REGISTRY_ABI,
-      functionName: "ownerOf",
-      args: [numericTokenId],
-    }) as Promise<Address>,
+    registry.verifier(),
+    registry.ownerOf(numericTokenId),
   ]);
   const oracleUrl = normalizeOracleUrl(params.oracleUrl);
   const deadline = asBigInt(oracleDeadline, "oracleDeadline");

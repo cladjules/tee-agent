@@ -136,8 +136,8 @@ important path is:
 Package roles:
 
 - `@tee-agent/server`: production oracle runtime only.
-- `@tee-agent/agent`: SDK for app/backend usage — config, ABIs, mint prep,
-  transfer prep, registry reads, validation, feedback, service updates,
+- `@tee-agent/agent`: SDK for app/backend usage — network metadata, ABIs, mint
+  prep, transfer prep, registry reads, validation, feedback, service updates,
   encryption, and 0G Storage.
 
 ### Contracts
@@ -202,8 +202,7 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 
 ## Conventions
 
-- TypeScript uses `strict: true` with `strictNullChecks: false`. Keep
-  `strictNullChecks` disabled in tsconfigs unless explicitly asked otherwise.
+- TypeScript uses `strict: true`; keep `strictNullChecks` enabled.
 - Keep `noImplicitAny: false` so implicit any is allowed when inference cannot
   resolve a type.
 - Do not use `unknown`. Prefer concrete domain types, schema-validated types,
@@ -221,7 +220,7 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
   chain files. Chain metadata comes from `@tee-agent/agent/network`
   `NETWORK_CONFIG`; deployment addresses come from root `deployments.json`.
 - Internal imports use `.js` extensions (NodeNext resolution)
-- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/network`, `@tee-agent/agent/config`, `@tee-agent/agent/encryption`, `@tee-agent/agent/abis`, `@tee-agent/agent/registry`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/metadata`, `@tee-agent/agent/mint`, `@tee-agent/agent/transfer`, `@tee-agent/agent/services`, `@tee-agent/agent/feedback`, `@tee-agent/agent/validate`, `@tee-agent/agent/typed-data`
+- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/network`, `@tee-agent/agent/encryption`, `@tee-agent/agent/abis`, `@tee-agent/agent/registry`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/metadata`, `@tee-agent/agent/mint`, `@tee-agent/agent/transfer`, `@tee-agent/agent/services`, `@tee-agent/agent/feedback`, `@tee-agent/agent/validate`, `@tee-agent/agent/typed-data`
 - `zerog://` is the canonical URI scheme for private encrypted blobs; `data:application/json;base64,…` is used for public on-chain metadata
 - Transfer flow belongs in `@tee-agent/agent/transfer` and must stay storage-agnostic. Dashboard storage is an implementation detail, not an SDK requirement.
 - Oracle image command: `npm run oracle:image` from repo root. It saves the pushed URL to root `.env` as `ORACLE_IMAGE`.

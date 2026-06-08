@@ -20,6 +20,7 @@ const distRoot = path.join(oracleRoot, "dist");
 const phalaTomlPath = path.join(oracleRoot, "phala.toml");
 const composeTemplatePath = path.join(oracleRoot, "docker-compose.yml");
 const rootEnvPath = path.join(repoRoot, ".env");
+const imageStatePath = path.join(repoRoot, ".oracle-image-state.json");
 const deploymentsPath = path.join(repoRoot, "deployments.json");
 const generatedDir = path.join(oracleRoot, ".phala");
 const generatedComposePath = path.join(
@@ -351,6 +352,37 @@ function loadRootEnv({ override = false } = {}) {
   }
 }
 
+function readImageState() {
+  if (!existsSync(imageStatePath)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(imageStatePath, "utf8"));
+    return {
+      image:
+        typeof parsed.image === "string" && parsed.image.trim()
+          ? parsed.image.trim()
+          : undefined,
+      deploymentsSha:
+        typeof parsed.deploymentsSha === "string" && parsed.deploymentsSha.trim()
+          ? parsed.deploymentsSha.trim()
+          : undefined,
+      sourceSha:
+        typeof parsed.sourceSha === "string" && parsed.sourceSha.trim()
+          ? parsed.sourceSha.trim()
+          : undefined,
+      dockerUsername:
+        typeof parsed.dockerUsername === "string" && parsed.dockerUsername.trim()
+          ? parsed.dockerUsername.trim()
+          : undefined,
+      dockerRegistry:
+        typeof parsed.dockerRegistry === "string" && parsed.dockerRegistry.trim()
+          ? parsed.dockerRegistry.trim()
+          : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function fileSha256(filePath) {
   if (!existsSync(filePath)) {
     fail(`${path.relative(repoRoot, filePath)} is required.`);
@@ -413,9 +445,12 @@ function runOracleImageBuild(dryRun) {
 function ensureFreshOracleImage(dryRun) {
   const currentDeploymentsSha = fileSha256(deploymentsPath);
   const currentSourceSha = sourceSha256();
-  const oracleImage = process.env.ORACLE_IMAGE?.trim();
-  const imageDeploymentsSha = process.env.ORACLE_DEPLOYMENTS_SHA?.trim();
-  const imageSourceSha = process.env.ORACLE_IMAGE_SOURCE_SHA?.trim();
+  const imageState = readImageState();
+  const oracleImage = process.env.ORACLE_IMAGE?.trim() || imageState?.image;
+  const imageDeploymentsSha =
+    process.env.ORACLE_DEPLOYMENTS_SHA?.trim() || imageState?.deploymentsSha;
+  const imageSourceSha =
+    process.env.ORACLE_IMAGE_SOURCE_SHA?.trim() || imageState?.sourceSha;
 
   if (
     oracleImage &&
@@ -458,12 +493,18 @@ function ensureFreshOracleImage(dryRun) {
   }
 
   loadRootEnv({ override: true });
-  const refreshedOracleImage = process.env.ORACLE_IMAGE?.trim();
-  const refreshedDeploymentsSha = process.env.ORACLE_DEPLOYMENTS_SHA?.trim();
-  const refreshedSourceSha = process.env.ORACLE_IMAGE_SOURCE_SHA?.trim();
+  const refreshedImageState = readImageState();
+  const refreshedOracleImage =
+    process.env.ORACLE_IMAGE?.trim() || refreshedImageState?.image;
+  const refreshedDeploymentsSha =
+    process.env.ORACLE_DEPLOYMENTS_SHA?.trim() ||
+    refreshedImageState?.deploymentsSha;
+  const refreshedSourceSha =
+    process.env.ORACLE_IMAGE_SOURCE_SHA?.trim() ||
+    refreshedImageState?.sourceSha;
   if (!refreshedOracleImage) {
     fail(
-      "oracle image build finished without saving ORACLE_IMAGE to root .env.",
+      `oracle image build finished without saving image state to ${path.relative(repoRoot, imageStatePath)}.`,
     );
   }
   if (refreshedDeploymentsSha !== currentDeploymentsSha) {
@@ -484,6 +525,23 @@ function ensureFreshOracleImage(dryRun) {
   };
 }
 
+function applyDockerPullEnv() {
+  const imageState = readImageState();
+  const dockerUsername =
+    process.env.DSTACK_DOCKER_USERNAME?.trim() || imageState?.dockerUsername;
+  const dockerPassword =
+    process.env.DSTACK_DOCKER_PASSWORD?.trim() ||
+    process.env.GHCR_PUSH_PAT?.trim();
+  const dockerRegistry =
+    process.env.DSTACK_DOCKER_REGISTRY?.trim() ||
+    imageState?.dockerRegistry ||
+    "ghcr.io";
+
+  if (dockerUsername) process.env.DSTACK_DOCKER_USERNAME = dockerUsername;
+  if (dockerPassword) process.env.DSTACK_DOCKER_PASSWORD = dockerPassword;
+  process.env.DSTACK_DOCKER_REGISTRY = dockerRegistry;
+}
+
 loadRootEnv();
 const args = parseArgs(process.argv.slice(2));
 const { oracleImage, deploymentsSha, sourceSha } = ensureFreshOracleImage(
@@ -498,6 +556,7 @@ if (!existsSync(envPath)) {
 
 const { sourcePath, distEntry } = toEntryPath(args.entry);
 const composePath = path.relative(oracleRoot, generatedComposePath);
+applyDockerPullEnv();
 const phalaArgs = [
   "deploy",
   "-c",

@@ -62,11 +62,20 @@ import {
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
 import { getNetworkConfig } from "@tee-agent/agent/network";
-import {
-  getNetworkDeploymentByChainId,
-  type RawDeployments,
-} from "@tee-agent/agent/config";
 import { scoreWithLLM } from "./llm-scorer.js";
+
+type RawDeployments = Record<
+  string,
+  {
+    name?: string;
+    contracts?: {
+      agentRegistry?: string;
+      teeVerifier?: string;
+      validationRegistry?: string;
+    };
+    fromBlock?: string | number;
+  }
+>;
 
 // ─── Request schemas ────────────────────────────────────────────────────────────
 
@@ -308,12 +317,9 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   }
   const networkConfig = getNetworkConfig(networkName);
   const RPC_URL = requiredEnv(networkConfig.rpcEnvVar);
-  const deployment = getNetworkDeploymentByChainId(
-    networkConfig.chainId,
-    config.deployments ?? {},
-  );
-  const configuredAgentRegistryAddress = deployment.contracts.agentRegistry;
-  const configuredTeeVerifierAddress = deployment.contracts.teeVerifier;
+  const deployment = (config.deployments ?? {})[String(networkConfig.chainId)];
+  const configuredAgentRegistryAddress = deployment?.contracts?.agentRegistry;
+  const configuredTeeVerifierAddress = deployment?.contracts?.teeVerifier;
   const PRIVATE_KEY = requiredEnv("PRIVATE_KEY");
   const txSignerAddress = new ethers.Wallet(PRIVATE_KEY).address;
   const DSTACK_VERIFIER_URL = requiredEnv("DSTACK_VERIFIER_URL").replace(

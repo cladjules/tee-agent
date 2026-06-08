@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const envPath = path.join(repoRoot, ".env");
+const imageStatePath = path.join(repoRoot, ".oracle-image-state.json");
 const deploymentsPath = path.join(repoRoot, "deployments.json");
 const dockerConfigDir = path.join(repoRoot, ".docker-ghcr");
 const dockerConfigPath = path.join(dockerConfigDir, "config.json");
@@ -124,6 +125,17 @@ function upsertEnvFile(filePath, key, value) {
 
 function upsertRootEnv(key, value) {
   upsertEnvFile(envPath, key, value);
+}
+
+function writeImageState(state, dryRun) {
+  const contents = `${JSON.stringify(state, null, 2)}\n`;
+  if (dryRun) {
+    console.log(
+      `Would save image state to ${path.relative(repoRoot, imageStatePath)}.`,
+    );
+    return;
+  }
+  writeFileSync(imageStatePath, contents, "utf8");
 }
 
 function output(command, args) {
@@ -367,25 +379,30 @@ run(
 run("docker", ["push", image], { cwd: repoRoot, dryRun: args.dryRun });
 
 if (args.dryRun) {
-  console.log(`Would save ORACLE_IMAGE=${image} to root .env.`);
-  console.log(
-    `Would save ORACLE_DEPLOYMENTS_SHA=${deploymentsSha} to root .env.`,
-  );
-  console.log(`Would save ORACLE_IMAGE_SOURCE_SHA=${sourceSha} to root .env.`);
-  console.log(
-    "Would save Phala private-registry pull credentials to root .env.",
+  writeImageState(
+    {
+      image,
+      deploymentsSha,
+      sourceSha,
+      dockerUsername: username,
+      dockerRegistry: "ghcr.io",
+    },
+    true,
   );
   console.log(`Dry run image: ${image}`);
 } else {
-  upsertRootEnv("ORACLE_IMAGE", image);
-  upsertRootEnv("ORACLE_DEPLOYMENTS_SHA", deploymentsSha);
-  upsertRootEnv("ORACLE_IMAGE_SOURCE_SHA", sourceSha);
-  upsertRootEnv("DSTACK_DOCKER_USERNAME", username);
-  upsertRootEnv("DSTACK_DOCKER_PASSWORD", token);
-  upsertRootEnv("DSTACK_DOCKER_REGISTRY", "ghcr.io");
-  console.log(`Saved ORACLE_IMAGE=${image} to root .env.`);
-  console.log(`Saved ORACLE_DEPLOYMENTS_SHA=${deploymentsSha} to root .env.`);
-  console.log(`Saved ORACLE_IMAGE_SOURCE_SHA=${sourceSha} to root .env.`);
-  console.log("Saved Phala private-registry pull credentials to root .env.");
+  writeImageState(
+    {
+      image,
+      deploymentsSha,
+      sourceSha,
+      dockerUsername: username,
+      dockerRegistry: "ghcr.io",
+    },
+    false,
+  );
+  console.log(
+    `Saved oracle image state to ${path.relative(repoRoot, imageStatePath)}.`,
+  );
   console.log(`Pushed image: ${image}`);
 }

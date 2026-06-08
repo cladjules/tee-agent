@@ -48,10 +48,14 @@ import {
   VALIDATION_REGISTRY_ABI,
   REPUTATION_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
-  TEE_VERIFIER_ABI,
 } from "../packages/agent/dist/abis.js";
-import { AgentRegistry } from "../packages/agent/dist/registry/agent.js";
-import { ReputationRegistry } from "../packages/agent/dist/registry/reputation.js";
+import {
+  AgentRegistry,
+  IdentityRegistry,
+  ReputationRegistry,
+  TeeVerifierRegistry,
+  ValidationRegistry,
+} from "../packages/agent/dist/registry/index.js";
 import {
   acceptTransferOffer,
   buildTransferTxArgs,
@@ -255,6 +259,18 @@ console.log(`Recipient:     ${recipient}`);
 const pc = publicClient as PublicClient;
 const agentRegistry = new AgentRegistry({
   address: AGENT_REGISTRY_ADDRESS,
+  publicClient: pc,
+});
+const identityRegistry = new IdentityRegistry({
+  address: identityRegistryAddress,
+  publicClient: pc,
+});
+const teeVerifierRegistry = new TeeVerifierRegistry({
+  address: teeVerifierAddress,
+  publicClient: pc,
+});
+const validationRegistry = new ValidationRegistry({
+  address: VALIDATION_REGISTRY_ADDRESS,
   publicClient: pc,
 });
 const sdkConfig = {
@@ -637,12 +653,7 @@ async function approveLinkedIdentityForTransfer(
     return 0n;
   }
 
-  const identityOwner = (await publicClient.readContract({
-    address: identityRegistryAddress,
-    abi: IDENTITY_REGISTRY_ABI,
-    functionName: "ownerOf",
-    args: [erc8004AgentId],
-  })) as `0x${string}`;
+  const identityOwner = await identityRegistry.ownerOf(erc8004AgentId);
   if (identityOwner.toLowerCase() !== account.address.toLowerCase()) {
     throw new Error(
       `Linked ERC-8004 owner mismatch before transfer: ${identityOwner}`,
@@ -667,12 +678,7 @@ async function assertLinkedIdentityOwner(
   expectedOwner: `0x${string}`,
 ) {
   if (erc8004AgentId === 0n) return;
-  const identityOwner = (await publicClient.readContract({
-    address: identityRegistryAddress,
-    abi: IDENTITY_REGISTRY_ABI,
-    functionName: "ownerOf",
-    args: [erc8004AgentId],
-  })) as `0x${string}`;
+  const identityOwner = await identityRegistry.ownerOf(erc8004AgentId);
   if (identityOwner.toLowerCase() !== expectedOwner.toLowerCase()) {
     throw new Error(
       `Linked ERC-8004 owner mismatch: expected ${expectedOwner}, got ${identityOwner}`,
@@ -817,12 +823,9 @@ async function assertOwnershipProofSealedKeys(params: {
 }
 
 async function assertOracleRegistered(oracleAddress: `0x${string}`) {
-  const registered = (await publicClient.readContract({
-    address: teeVerifierAddress,
-    abi: TEE_VERIFIER_ABI,
-    functionName: "isOracleRegistered",
-    args: [oracleAddress],
-  })) as boolean;
+  const registered = await teeVerifierRegistry.isOracleRegistered(
+    oracleAddress,
+  );
   if (!registered) {
     throw new Error(
       `Oracle ${oracleAddress} is not registered in TeeVerifier ${teeVerifierAddress}`,
@@ -1202,13 +1205,16 @@ async function testValidationRegistry() {
   );
 
   // Verify status
-  const [validatorAddr, storedAgentId, score, storedResponseHash, tag] =
-    (await publicClient.readContract({
-      address: VALIDATION_REGISTRY_ADDRESS,
-      abi: VALIDATION_REGISTRY_ABI,
-      functionName: "getValidationStatus",
-      args: [preparedValidation.requestHash],
-    })) as [Address, bigint, number, Hex, string, bigint];
+  const validationStatus = await validationRegistry.getValidationStatus(
+    preparedValidation.requestHash,
+  );
+  const {
+    validatorAddress: validatorAddr,
+    agentId: storedAgentId,
+    response: score,
+    responseHash: storedResponseHash,
+    tag,
+  } = validationStatus;
 
   if (validatorAddr.toLowerCase() !== account.address.toLowerCase())
     throw new Error(
@@ -1230,23 +1236,15 @@ async function testValidationRegistry() {
     `  ✔ status confirmed — validator: ${validatorAddr.slice(0, 10)}..., score: ${score}/100`,
   );
 
-  const requestHashes = (await publicClient.readContract({
-    address: VALIDATION_REGISTRY_ADDRESS,
-    abi: VALIDATION_REGISTRY_ABI,
-    functionName: "getAgentValidations",
-    args: [validationAgentId],
-  })) as Hex[];
+  const requestHashes =
+    await validationRegistry.getAgentValidations(validationAgentId);
   if (!requestHashes.includes(preparedValidation.requestHash)) {
     throw new Error("Test 4 FAILED: validation request not indexed by agent.");
   }
 
   // Check getSummary
-  const [count, avgScore] = (await publicClient.readContract({
-    address: VALIDATION_REGISTRY_ADDRESS,
-    abi: VALIDATION_REGISTRY_ABI,
-    functionName: "getSummary",
-    args: [validationAgentId, [], ""],
-  })) as [bigint, number];
+  const { count, averageResponse: avgScore } =
+    await validationRegistry.getSummary(validationAgentId, [], "");
 
   if (count !== 1n || avgScore !== 92)
     throw new Error(`Test 4 FAILED: summary count=${count} avg=${avgScore}`);
@@ -1460,12 +1458,7 @@ async function testUpdateServices() {
   console.log(`  ✔ services updated — URI: ${update.tokenUri}`);
 
   // Verify the URI was set
-  const storedUri = (await publicClient.readContract({
-    address: identityRegistryAddress,
-    abi: IDENTITY_REGISTRY_ABI,
-    functionName: "tokenURI",
-    args: [erc8004AgentId],
-  })) as string;
+  const storedUri = await identityRegistry.tokenURI(erc8004AgentId);
   if (storedUri !== update.tokenUri)
     throw new Error(`Test 6 FAILED: tokenURI mismatch`);
 
