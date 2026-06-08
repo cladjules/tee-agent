@@ -56,18 +56,16 @@ import {
   RUN_REQUEST_TYPES,
   VALIDATE_REQUEST_TYPES,
 } from "@tee-agent/agent/typed-data";
-import { getPublishedSealedKeys } from "@tee-agent/agent/transfer";
 import {
   AGENT_REGISTRY_ABI,
   TEE_VERIFIER_ABI,
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
+import { getNetworkConfig } from "@tee-agent/agent/network";
 import {
-  getNetworkConfig,
   getNetworkDeploymentByChainId,
   type RawDeployments,
 } from "@tee-agent/agent/config";
-import { createPublicClient, http, type Hex } from "viem";
 import { scoreWithLLM } from "./llm-scorer.js";
 
 // ─── Request schemas ────────────────────────────────────────────────────────────
@@ -123,6 +121,134 @@ const runBodySchema = z.object({
   deadline: z.number().int().positive(),
 });
 
+type NormalizedTdxQuoteResponse = Omit<TdxQuoteResponse, "quote"> & {
+  quote: `0x${string}`;
+};
+
+function normalizeHexBytes(
+  value: string | Uint8Array,
+  label: string,
+): `0x${string}` {
+  const hex =
+    typeof value === "string"
+      ? value.trim().replace(/^0x/i, "")
+      : ethers.hexlify(value).slice(2);
+  const prefixed = `0x${hex}` as `0x${string}`;
+  if (!ethers.isHexString(prefixed)) {
+    throw new Error(`${label} must be hex bytes.`);
+  }
+  return prefixed;
+}
+
+function normalizeHexStringIfNeeded(value: string): string {
+  const trimmed = value.trim();
+  const unprefixed = trimmed.replace(/^0x/i, "");
+  if (!/^[0-9a-fA-F]+$/.test(unprefixed)) return value;
+  return `0x${unprefixed}`;
+}
+
+function normalizeTdxQuoteResult(
+  quoteResult: TdxQuoteResponse,
+): NormalizedTdxQuoteResponse {
+  return {
+    ...quoteResult,
+    quote: normalizeHexBytes(quoteResult.quote, "TDX quote"),
+    event_log:
+      typeof quoteResult.event_log === "string"
+        ? normalizeHexStringIfNeeded(quoteResult.event_log)
+        : quoteResult.event_log,
+  };
+}
+
+function revertData(err: unknown): string | undefined {
+  const data = (err as { data?: unknown })?.data;
+  if (typeof data === "string") return data;
+  const nested = (err as { info?: { error?: { data?: unknown } } })?.info?.error
+    ?.data;
+  return typeof nested === "string" ? nested : undefined;
+}
+
+function tryDecodeUtf8(value: string): string | undefined {
+  try {
+    const decoded = ethers.toUtf8String(value);
+    return decoded.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function shorten(value: string, max = 180): string {
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function formatErrorArg(value: unknown, type?: string): string {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "string") {
+    if (type === "bytes") {
+      const decoded = tryDecodeUtf8(value);
+      return decoded ? JSON.stringify(shorten(decoded)) : shorten(value);
+    }
+    return shorten(value);
+  }
+  return String(value);
+}
+
+function describeParsedContractError(parsed: ethers.ErrorDescription): string {
+  const args = parsed.args
+    .toArray()
+    .map((arg, index) =>
+      formatErrorArg(arg, parsed.fragment.inputs[index]?.type),
+    );
+  return `contract reverted: ${parsed.name}${
+    args.length ? `(${args.join(", ")})` : ""
+  }`;
+}
+
+function describeContractError(
+  err: unknown,
+  contractInterface?: ethers.Interface,
+): string {
+  const data = revertData(err);
+
+  if (data && contractInterface) {
+    try {
+      const parsed = contractInterface.parseError(data);
+      if (parsed) return describeParsedContractError(parsed);
+    } catch {
+      // Fall through to selector and generic error handling.
+    }
+  }
+
+  if (data) {
+    return `contract reverted with selector ${data.slice(0, 10)}`;
+  }
+
+  const shortMessage = (err as { shortMessage?: unknown })?.shortMessage;
+  if (typeof shortMessage === "string") return shortMessage;
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function submitContractTx(
+  label: string,
+  contractInterface: ethers.Interface,
+  send: () => Promise<ethers.ContractTransactionResponse>,
+): Promise<ethers.ContractTransactionResponse> {
+  try {
+    return await send();
+  } catch (err) {
+    const described = describeContractError(err, contractInterface);
+    const dcapAdvice =
+      label === "initValidator" &&
+      described.includes('DcapVerificationFailed("QEIDVE")')
+        ? " Automata rejected the QE identity collateral. Redeploy the remote TeeVerifier contract set with Automata standard/current collateral, then rebuild and redeploy the oracle image."
+        : label === "initValidator" &&
+            described.includes('DcapVerificationFailed("TCBR")')
+          ? " Automata rejected this TDX quote because the platform or TDX module TCB status is revoked or missing in the selected collateral set. If the TeeVerifier already uses DCAP_TCB_EVALUATION_DATA_NUMBER=0, redeploy the Phala CVM onto an updated TDX host; redeploying the same contract set will not change this."
+          : "";
+    throw new Error(`${label} failed: ${described}.${dcapAdvice}`);
+  }
+}
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface HandlerContext {
@@ -175,14 +301,13 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   if (!Number.isInteger(PORT) || PORT <= 0) {
     throw new Error("PORT must be a positive integer.");
   }
-  const KEY_PATH = "oracle/reencrypt";
+  const APP_NAME = process.env.APP_NAME?.trim() || "TEE-ORACLE";
   const networkName = requiredEnv("NETWORK");
-  if (!["base", "baseSepolia"].includes(networkName)) {
-    throw new Error("NETWORK must be base or baseSepolia.");
+  if (!networkName) {
+    throw new Error("NETWORK is required.");
   }
   const networkConfig = getNetworkConfig(networkName);
-  const envSuffix = networkConfig.name === "base" ? "_BASE" : "_BASE_SEPOLIA";
-  const RPC_URL = requiredEnv(`RPC_URL${envSuffix}`);
+  const RPC_URL = requiredEnv(networkConfig.rpcEnvVar);
   const deployment = getNetworkDeploymentByChainId(
     networkConfig.chainId,
     config.deployments ?? {},
@@ -201,11 +326,12 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   // The simulator supports deriveKey + tdxQuote but NOT info() — skip those calls in dev.
   const IS_SIMULATOR = !!process.env.DSTACK_SIMULATOR_ENDPOINT;
   const tappd = new TappdClient();
-  const keyResponse = await tappd.deriveKey(KEY_PATH);
+  const keyResponse = await tappd.deriveKey(APP_NAME);
   const wallet = new ethers.Wallet(
-    ethers.hexlify(keyResponse.asUint8Array(32)),
+    ethers.keccak256(ethers.toUtf8Bytes(keyResponse.key)),
   );
   const signingKey = new ethers.SigningKey(wallet.privateKey);
+  console.log(`[oracle] dstack app/key path: ${APP_NAME}`);
   console.log(`[oracle] TEE signing address: ${wallet.address}`);
   console.log(`[oracle] transaction signer address: ${txSignerAddress}`);
 
@@ -214,11 +340,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   // chainId and Identity Registry address are derived statically — no RPC call needed.
   const { chainId, isTestnet } = networkConfig;
   const identityRegistryAddress = networkConfig.identityRegistryAddress;
-  const publicClient = createPublicClient({
-    chain: networkConfig.chain,
-    transport: http(RPC_URL),
-  });
-
   // EIP-712 domain: verifyingContract = TEE-derived address → unique per CVM; prevents
   // cross-oracle replay. Callers fetch the oracle address from GET /address before signing.
   const eip712Domain = {
@@ -228,12 +349,19 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     verifyingContract: wallet.address,
   };
   console.log(
-    `[oracle] network=${networkConfig.name} chainId=${chainId} isTestnet=${isTestnet}`,
+    `[oracle] network=${networkName} chainId=${chainId} isTestnet=${isTestnet}`,
   );
   console.log(
     `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
   );
   console.log(`[oracle] Identity Registry: ${identityRegistryAddress}`);
+
+  let oracleRegistrationStatus:
+    | { registered: true; error?: undefined }
+    | { registered: false; error: string } = {
+    registered: false,
+    error: "registration has not run yet",
+  };
 
   function oracleAddressReportData(): Uint8Array {
     const reportData = new Uint8Array(64);
@@ -268,10 +396,17 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     console.log(
       `[oracle] registering TEE oracle ${wallet.address} in TeeVerifier ${configuredTeeVerifierAddress}`,
     );
-    const quoteResult = await tappd.tdxQuote(oracleAddressReportData(), "raw");
-    const tx = await teeVerifier.initValidator(
-      wallet.address,
-      quoteResult.quote,
+    const quoteResult = normalizeTdxQuoteResult(
+      await tappd.tdxQuote(oracleAddressReportData(), "raw"),
+    );
+    const tx = await submitContractTx(
+      "initValidator",
+      teeVerifier.interface,
+      () =>
+        teeVerifier.initValidator(
+          wallet.address,
+          quoteResult.quote,
+        ) as Promise<ethers.ContractTransactionResponse>,
     );
     console.log(`[oracle] initValidator tx submitted: ${tx.hash}`);
     const receipt = await tx.wait();
@@ -280,7 +415,17 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     );
   }
 
-  await registerAttestedOracle();
+  try {
+    await registerAttestedOracle();
+    oracleRegistrationStatus = { registered: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    oracleRegistrationStatus = { registered: false, error: message };
+    console.error(`[oracle] TEE oracle registration failed: ${message}`);
+    console.error(
+      "[oracle] continuing so /attestation and /info remain available for DCAP debugging; transfer and validation flows will fail until registration succeeds.",
+    );
+  }
 
   /**
    * Commits a JSON payload into a bytes32 hash for EIP-712 signatures.
@@ -300,11 +445,11 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    */
   async function tdxQuoteWithCommitment(
     commitment: string,
-  ): Promise<TdxQuoteResponse> {
+  ): Promise<NormalizedTdxQuoteResponse> {
     const reportData = new Uint8Array(64);
     reportData.set(ethers.getBytes(commitment), 0);
     const tdxResult = await tappd.tdxQuote(reportData, "raw");
-    return tdxResult;
+    return normalizeTdxQuoteResult(tdxResult);
   }
 
   // ─── Blob fetching ────────────────────────────────────────────────────────────
@@ -332,7 +477,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   async function getAgentData(
     agentId: bigint,
     registryAddress: string,
-    ownerAddress: string,
   ): Promise<{ blobs: unknown[] }> {
     if (!RPC_URL) throw new Error("RPC_URL is not configured on the oracle.");
     const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -355,7 +499,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     }
 
     const blobs: unknown[] = [];
-    let transferredSealedKeys: Hex[] | undefined;
     for (let i = 0; i < datas.length; i++) {
       const data = datas[i] as { dataDescription: string; dataHash: string };
       const uri = data.dataDescription;
@@ -369,32 +512,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           `Hash mismatch for blob ${i}: expected ${data.dataHash}, got ${actualHash}`,
         );
       }
-      let key: Uint8Array;
-      try {
-        key = decryptContentKey(blob, wallet.privateKey);
-      } catch (err) {
-        if (deployment.fromBlock === undefined) {
-          throw new Error(
-            "deployments.json fromBlock is required to read PublishedSealedKey events for transferred agents.",
-          );
-        }
-        transferredSealedKeys ??= await getPublishedSealedKeys({
-          publicClient,
-          registryAddress: registryAddress as `0x${string}`,
-          tokenId: agentId,
-          to: ownerAddress as `0x${string}`,
-          fromBlock: deployment.fromBlock,
-          toBlock: "latest",
-        });
-        const sealedKey = transferredSealedKeys[i];
-        if (!sealedKey) {
-          throw new Error(
-            `PublishedSealedKey event missing sealed key for blob ${i}.`,
-          );
-        }
-        key = decryptContentKey({ encryptedKey: sealedKey }, wallet.privateKey);
-        console.log(`[oracle] blob ${i} decrypted with transfer sealed key`);
-      }
+      const key = decryptContentKey(blob, wallet.privateKey);
       blobs.push(decryptMetadata<unknown>(blob, key));
       console.log(`[oracle] blob ${i} decrypted ok`);
     }
@@ -574,7 +692,11 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   }
 
   app.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok" });
+    res.json({
+      status: oracleRegistrationStatus.registered ? "ok" : "degraded",
+      teeOracleRegistered: oracleRegistrationStatus.registered,
+      registrationError: oracleRegistrationStatus.error,
+    });
   });
 
   /**
@@ -636,7 +758,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    *   POST https://cloud-api.phala.com/api/v1/attestations/verify  { hex: quote }
    *
    * Full platform verification (advanced — dstack-verifier):
-   *   curl -d @<(curl -s https://your-oracle/attestation) localhost:8080/verify | jq
+   *   curl -d @<(curl -s https://<your-phala-cvm-oracle-url>/attestation) localhost:8080/verify | jq
    *   See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
    *
    * Note: vm_config (CPU count, memory size) requires @phala/dstack-sdk ≥ 0.5.x.
@@ -646,9 +768,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     try {
       // Embed oracle address at reportData[0:20] so on-chain TeeVerifier and
       // external verifiers can bind the signing key to this quote.
-      const quoteResult = await tappd.tdxQuote(
-        oracleAddressReportData(),
-        "raw",
+      const quoteResult = normalizeTdxQuoteResult(
+        await tappd.tdxQuote(oracleAddressReportData(), "raw"),
       );
       const appInfo = IS_SIMULATOR ? null : await tappd.info();
       res.json({
@@ -842,14 +963,19 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           connectedWallet,
         );
 
-        const tx = (await registry.validationResponse(
-          body.requestHash,
-          score,
-          responseURI,
-          responseHash,
-          body.tag,
-          quote,
-        )) as ethers.ContractTransactionResponse;
+        const tx = await submitContractTx(
+          "validationResponse",
+          registry.interface,
+          () =>
+            registry.validationResponse(
+              body.requestHash,
+              score,
+              responseURI,
+              responseHash,
+              body.tag,
+              quote,
+            ) as Promise<ethers.ContractTransactionResponse>,
+        );
         const receipt = await tx.wait();
         txHash = receipt?.hash;
       }
@@ -887,7 +1013,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       );
       if (!registryAddress) {
         console.error(
-          `[oracle] /run registryAddress not provided and deployments.json has no AgentRegistry for ${networkConfig.name}`,
+          `[oracle] /run registryAddress not provided and deployments.json has no AgentRegistry for ${networkName}`,
         );
         res.status(400).json({
           error:
@@ -904,10 +1030,10 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         body.signature,
         body.deadline,
       );
-      const owner = await assertOwner(agentId, registryAddress, signer);
+      await assertOwner(agentId, registryAddress, signer);
 
       // Resolve + decrypt the agent's skill from the chain and 0G Storage
-      const agentData = await getAgentData(agentId, registryAddress, owner);
+      const agentData = await getAgentData(agentId, registryAddress);
 
       const result = await config.handler.run(body.payload, {
         wallet,

@@ -13,7 +13,7 @@
 
 import { parseAgentServicesJson } from "../crypto.js";
 import { uploadEncryptedIntelligentData } from "../storage/zero-g.js";
-import { uploadMetadata } from "./metadata.js";
+import { buildAgentPublicMetadata, uploadMetadata } from "./metadata.js";
 import { verifyTeeOracleEndpoint } from "./services.js";
 import type {
   AgentConfig,
@@ -116,16 +116,14 @@ export async function prepareMint(
   const validEntries = privateEntries.filter(
     (e) => e.name.trim() && e.data.trim(),
   );
-  if (validEntries.length > 0 && !config.zeroGPrivateKey) {
-    throw new Error(
-      "zeroGPrivateKey is required for private data uploads.",
-    );
+  if (validEntries.length > 0 && !config.privateKey) {
+    throw new Error("privateKey is required for private data uploads.");
   }
 
   const intelligentData = await uploadEncryptedIntelligentData({
     entries: validEntries,
     keyEncryptionPublicKey: keyEncryptionPublicKey as `0x${string}`,
-    zeroGPrivateKey: config.zeroGPrivateKey ?? "",
+    privateKey: config.privateKey ?? "",
     rpcUrl: config.zeroGRpcUrl,
     indexerUrl: config.zeroGIndexerUrl,
   });
@@ -166,19 +164,16 @@ export async function prepareMint(
   }
   const agentRegistry = `eip155:${config.chain.id}:${config.registryAddress}`;
 
-  const publicMetadata = {
+  const publicMetadataParams = {
     name,
     description,
-    image: imageUrl ?? undefined,
-    attributes: [
-      { trait_type: "Agent Type", value: agentType },
-      {
-        trait_type: "Created",
-        value: Math.floor(Date.now() / 1000),
-        display_type: "date",
-      },
-    ],
+    agentType,
+    services,
+    x402Support,
+    createdAt: Math.floor(Date.now() / 1000),
+    ...(imageUrl ? { imageUrl } : {}),
   };
+  const publicMetadata = buildAgentPublicMetadata(publicMetadataParams);
 
   const publicMetadataUri = await uploadMetadata(
     config,

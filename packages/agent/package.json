@@ -5,11 +5,13 @@
   "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
   "exports": {
     "./types": "./dist/types.js",
+    "./network": "./dist/network.js",
     "./config": "./dist/config.js",
     "./encryption": "./dist/crypto.js",
     "./abis": "./dist/abis.js",
     "./registry": "./dist/registry/agent.js",
     "./zero-g": "./dist/storage/zero-g.js",
+    "./metadata": "./dist/ops/metadata.js",
     "./mint": "./dist/ops/mint.js",
     "./transfer": "./dist/ops/transfer.js",
     "./services": "./dist/ops/services.js",

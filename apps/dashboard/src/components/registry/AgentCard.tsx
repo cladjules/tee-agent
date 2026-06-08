@@ -1,72 +1,43 @@
-import type {
-  AgentIdentity,
-  AgentRegistrationFile,
-} from "@tee-agent/agent/types";
+import type { CachedAgentIndexRow } from "@/lib/agent-cache";
 
 interface AgentCardProps {
-  agent: AgentIdentity & { metadata: AgentRegistrationFile };
+  agent: CachedAgentIndexRow;
 }
 
 export default function AgentCard({ agent }: AgentCardProps) {
   return (
     <a
-      href={`/agents/${agent.agentId.toString()}`}
-      className="group block p-5 rounded-xl glass-card space-y-4"
+      href={`/agents/${agent.tokenId}`}
+      className="group block rounded-xl glass-card overflow-hidden"
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
+      {agent.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={agent.imageUrl}
+          alt={agent.name}
+          className="h-28 w-full object-cover border-b border-violet-950/40"
+        />
+      ) : (
+        <div className="flex h-28 w-full items-center justify-center border-b border-violet-950/40 bg-violet-950/20">
+          <span className="text-3xl text-violet-800">◈</span>
+        </div>
+      )}
+
+      <div className="space-y-3 p-3.5">
         <div className="min-w-0">
-          <h3 className="font-semibold text-slate-100 truncate max-w-[180px] group-hover:text-violet-300 transition-colors">
-            {agent.metadata.name}
+          <h3 className="truncate text-sm font-semibold text-slate-100 transition-colors group-hover:text-violet-300">
+            {agent.name}
           </h3>
-          <p className="text-xs font-mono text-slate-600 mt-0.5">
-            #{agent.agentId.toString()}
+          <p className="mt-0.5 text-xs font-mono text-slate-600">
+            AgentRegistry #{agent.tokenId}
           </p>
         </div>
-        {agent.metadata.image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={agent.metadata.image}
-            alt={agent.metadata.name}
-            className="w-11 h-11 rounded-lg object-cover border border-violet-900/50 flex-shrink-0"
-          />
-        ) : (
-          <div className="w-11 h-11 rounded-lg border border-violet-900/30 bg-violet-950/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-lg text-violet-700">◈</span>
-          </div>
-        )}
-      </div>
 
-      {/* Description */}
-      <p className="text-sm text-slate-400 line-clamp-2 leading-relaxed">
-        {agent.metadata.description}
-      </p>
-
-      {/* Services */}
-      <div className="flex flex-wrap gap-1.5">
-        {(agent.metadata.services ?? []).slice(0, 3).map((service) => (
-          <span
-            key={`${service.name}:${service.endpoint}`}
-            className="text-xs px-2 py-0.5 rounded-md bg-violet-950/40 text-violet-400 border border-violet-900/40 font-mono"
-          >
-            {service.name}
+        <div className="border-t border-violet-950/40 pt-2 text-right text-xs">
+          <span className="font-medium text-violet-500 transition-colors group-hover:text-violet-300">
+            View &amp; Manage →
           </span>
-        ))}
-        {(agent.metadata.services?.length ?? 0) === 0 && (
-          <span className="text-xs px-2 py-0.5 rounded-md bg-slate-900/50 text-slate-600 border border-slate-800/50 font-mono">
-            no services
-          </span>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="pt-3 border-t border-violet-950/40 flex items-center justify-between text-xs">
-        <span className="font-mono text-slate-600">
-          {agent.owner.slice(0, 6)}…{agent.owner.slice(-4)}
-        </span>
-        <span className="text-violet-500 group-hover:text-violet-300 font-medium transition-colors">
-          View &amp; Manage →
-        </span>
+        </div>
       </div>
     </a>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Keeps the server-side active-chain cookie in sync with the RainbowKit wallet chain.
+ * Keeps the server-side active chain cookie in sync with the RainbowKit wallet chain.
  * Renders nothing — mount once in the root layout inside <WalletProvider>.
  *
  * When the user switches networks in their wallet:

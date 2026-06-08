@@ -145,6 +145,7 @@ describe("TeeVerifier", function () {
     const teeVerifier = await viem.deployContract("TeeVerifier", [
       owner.account.address,
       dcap.address,
+      0,
     ]);
 
     const registry = await viem.deployContract("AgentRegistry", [
@@ -316,12 +317,14 @@ describe("TeeVerifier", function () {
     );
 
     assert.equal(
-      await teeVerifier.simulate.verifyValidation([
-        agentId,
-        requestHash,
-        response,
-        fakeValidationQuote(commitment),
-      ]).then(({ result }) => result),
+      await teeVerifier.simulate
+        .verifyValidation([
+          agentId,
+          requestHash,
+          response,
+          fakeValidationQuote(commitment),
+        ])
+        .then(({ result }) => result),
       true,
     );
   });

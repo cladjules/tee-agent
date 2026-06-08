@@ -1,9 +1,5 @@
-import {
-  BASE_CHAIN_ID,
-  BASE_SEPOLIA_CHAIN_ID,
-  getDeploymentForChain,
-  getNetworkMetaForChain,
-} from "@/lib/client-config";
+import { getDeploymentForChain } from "@/lib/config";
+import { DEFAULT_NETWORK, NETWORK_CONFIG } from "@tee-agent/agent/network";
 
 function ContractRow({
   label,
@@ -20,25 +16,21 @@ function ContractRow({
 }) {
   if (!address) return null;
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[11rem_minmax(11rem,max-content)_minmax(0,1fr)] gap-x-4 gap-y-2 py-3 border-t border-slate-800/80 first:border-t-0 items-center">
-      <div className="min-w-0">
-        <span className="block text-sm font-medium text-slate-300">
+    <div className="grid grid-cols-[minmax(6rem,8rem)_minmax(0,1fr)] items-center gap-x-2 gap-y-1 rounded-md border border-slate-800/70 bg-slate-950/35 px-2.5 py-2">
+      <div className="min-w-0 leading-none">
+        <span className="block truncate text-xs font-medium text-slate-300">
           {label}
         </span>
-        {scope && (
-          <span className="block pt-0.5 text-[10px] uppercase tracking-wide text-slate-600">
-            {scope === "ours" ? "Tee Agent" : "Global"}
-          </span>
-        )}
+        <span className="mt-1 block text-[9px] uppercase tracking-wide text-slate-600">
+          {scope === "global" ? "Global" : "Tee Agent"} · {tag}
+        </span>
       </div>
-      <span className="justify-self-start text-[10px] font-mono px-2 py-0.5 rounded border border-violet-900/50 text-violet-400 bg-violet-950/20 whitespace-nowrap">
-        {tag}
-      </span>
       <a
         href={`${explorer}/address/${address}`}
         target="_blank"
         rel="noopener noreferrer"
-        className="block min-w-0 overflow-x-auto whitespace-nowrap rounded-md border border-slate-800/80 bg-slate-950/50 px-3 py-2 text-xs font-mono text-slate-300 hover:text-violet-300 transition-colors"
+        title={address}
+        className="block min-w-0 truncate rounded border border-slate-800/80 bg-slate-950/60 px-2 py-1.5 text-[11px] font-mono text-slate-400 transition-colors hover:text-violet-300"
       >
         {address}
       </a>
@@ -47,13 +39,19 @@ function ContractRow({
 }
 
 export default function ContractAddresses() {
-  const deployedChains = [BASE_SEPOLIA_CHAIN_ID, BASE_CHAIN_ID]
-    .map((chainId) => {
+  const deployedChains = [
+    DEFAULT_NETWORK,
+    ...Object.values(NETWORK_CONFIG).filter(
+      (network) => network !== DEFAULT_NETWORK,
+    ),
+  ]
+    .map((network) => {
+      const chainId = network.chain.id;
       const deployment = getDeploymentForChain(chainId);
       return {
         chainId,
         deployment,
-        network: getNetworkMetaForChain(chainId),
+        network,
       };
     })
     .filter(
@@ -64,31 +62,43 @@ export default function ContractAddresses() {
     );
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-xl font-semibold text-slate-100">
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
           Contract Addresses
         </h2>
       </div>
       {deployedChains.map(({ chainId, deployment, network }) => (
-        <div key={chainId} className="glass-card rounded-xl px-5 py-4">
-          <div>
-            <div className="mb-3">
+        <div key={chainId} className="glass-card rounded-lg px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="min-w-0">
               <a
                 href={network.explorerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-violet-950/30 border-violet-900/50 text-violet-400 hover:text-violet-300 hover:border-violet-700 transition-colors"
+                className="text-[11px] font-mono text-violet-400 transition-colors hover:text-violet-300"
               >
                 {network.label} · {chainId} ↗
               </a>
             </div>
+            <span className="rounded border border-slate-800 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-600">
+              Live
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-2">
             <ContractRow
               label="AgentRegistry"
               address={deployment.agentRegistry}
               explorer={network.explorerUrl}
               tag="ERC-7857"
               scope="ours"
+            />
+            <ContractRow
+              label="Reputation Registry"
+              address={network.reputationRegistryAddress}
+              explorer={network.explorerUrl}
+              tag="ERC-8004"
+              scope="global"
             />
             <ContractRow
               label="TeeVerifier"
@@ -98,18 +108,6 @@ export default function ContractAddresses() {
               scope="ours"
             />
             <ContractRow
-              label="ValidationRegistry"
-              address={deployment.validationRegistry}
-              explorer={network.explorerUrl}
-              tag="ERC-8004"
-              scope="ours"
-            />
-          </div>
-          <div className="pt-4">
-            <div className="pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Global ERC-8004 contracts
-            </div>
-            <ContractRow
               label="Identity Registry"
               address={network.identityRegistryAddress}
               explorer={network.explorerUrl}
@@ -117,11 +115,11 @@ export default function ContractAddresses() {
               scope="global"
             />
             <ContractRow
-              label="Reputation Registry"
-              address={network.reputationRegistryAddress}
+              label="ValidationRegistry"
+              address={deployment.validationRegistry}
               explorer={network.explorerUrl}
               tag="ERC-8004"
-              scope="global"
+              scope="ours"
             />
           </div>
         </div>

@@ -1,15 +1,15 @@
 import { notFound } from "next/navigation";
 import { getAgentPageData } from "@/lib/actions/registry";
-import {
-  getClientConfigForChain,
-  getNetworkMetaForChain,
-} from "@/lib/client-config";
+import { getNetworkConfigByChainId } from "@tee-agent/agent/network";
+import { getClientConfigForChain } from "@/lib/config";
 import AgentDetailActions from "./AgentDetailActions";
-import { getActiveChainId } from "@/lib/active-chain";
+import { getActiveChainId } from "@/lib/config";
 import type {
+  AgentPublicMetadata,
   AgentIntelligentDataEntry,
   AgentService,
 } from "@tee-agent/agent/types";
+import { readJsonFromUri } from "@tee-agent/agent/encryption";
 
 // ─── Chain helpers (pure — receive URLs as args) ──────────────────────────────
 
@@ -48,6 +48,51 @@ function ipfsGatewayUrl(uri: string) {
   return null;
 }
 
+function agentTypeFromPublicMetadata(metadata: AgentPublicMetadata): string {
+  const type = metadata.attributes?.find(
+    (attribute) => attribute.trait_type === "Agent Type",
+  )?.value;
+  return typeof type === "string" && type.trim() ? type : "assistant";
+}
+
+function createdAtFromPublicMetadata(
+  metadata: AgentPublicMetadata,
+): number | undefined {
+  const created = metadata.attributes?.find(
+    (attribute) => attribute.trait_type === "Created",
+  )?.value;
+  return typeof created === "number" ? created : undefined;
+}
+
+async function resolvePublicMetadata(
+  publicMetadataUri: string,
+  fallback: {
+    name: string;
+    description: string;
+    image?: string;
+  },
+): Promise<AgentPublicMetadata & { agentType: string; createdAt?: number }> {
+  try {
+    const metadata =
+      await readJsonFromUri<AgentPublicMetadata>(publicMetadataUri);
+    return {
+      name: metadata.name || fallback.name,
+      description: metadata.description || fallback.description,
+      image: metadata.image ?? fallback.image,
+      attributes: metadata.attributes,
+      agentType: agentTypeFromPublicMetadata(metadata),
+      createdAt: createdAtFromPublicMetadata(metadata),
+    };
+  } catch {
+    return {
+      name: fallback.name,
+      description: fallback.description,
+      image: fallback.image,
+      agentType: "assistant",
+    };
+  }
+}
+
 interface Props {
   params: Promise<{ id: string }>;
 }
@@ -63,7 +108,7 @@ export async function generateMetadata({ params }: Props) {
 export default async function AgentDetailPage({ params }: Props) {
   const { id } = await params;
   const chainId = await getActiveChainId();
-  const nc = getNetworkMetaForChain(chainId);
+  const nc = getNetworkConfigByChainId(chainId);
   const clientCfg = getClientConfigForChain(chainId);
   const {
     agent,
@@ -71,9 +116,15 @@ export default async function AgentDetailPage({ params }: Props) {
     feedbackOverview,
     oracleRunsResult,
     validationResponses,
-  } = await getAgentPageData(id, chainId);
+  } = await getAgentPageData(id);
 
   if (!agent) notFound();
+
+  const publicMetadata = await resolvePublicMetadata(agent.publicMetadataUri, {
+    name: agent.metadata.name,
+    description: agent.metadata.description,
+    image: agent.metadata.image,
+  });
 
   const oracleRuns = oracleRunsResult.runs;
   const actionClientCfg = {
@@ -230,6 +281,13 @@ export default async function AgentDetailPage({ params }: Props) {
         erc8004AgentId={intelligentDataInfo.erc8004AgentId ?? undefined}
         owner={agent.owner}
         initialServices={agent.metadata.services ?? []}
+        initialPublicMetadata={{
+          name: publicMetadata.name,
+          description: publicMetadata.description,
+          imageUrl: publicMetadata.image ?? "",
+          agentType: publicMetadata.agentType,
+        }}
+        initialPublicMetadataCreatedAt={publicMetadata.createdAt}
         initialRuns={oracleRuns}
         initialValidationResponses={validationResponses}
         clientCfg={actionClientCfg}

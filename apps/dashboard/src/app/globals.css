@@ -105,6 +105,29 @@ body {
   width: 100%;
 }
 
+/* ── Deploy typing caret ────────────────────────────────────────────────── */
+@keyframes deploy-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.deploy-caret-inline {
+  display: inline-block;
+  width: 1px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.16em;
+  background: rgba(34, 211, 238, 0.9);
+  animation: deploy-caret-blink 0.85s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deploy-caret-inline {
+    animation: none;
+  }
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 5px;

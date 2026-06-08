@@ -189,7 +189,7 @@ export type AgentConfig = {
   /** Pinata JWT for IPFS uploads (agentMetadataUri). */
   pinataJwt?: string;
   /** Private key for 0G Storage upload transactions. */
-  zeroGPrivateKey?: string;
+  privateKey?: string;
   /** 0G Storage EVM RPC. */
   zeroGRpcUrl?: string;
   /** 0G Storage indexer URL. */
@@ -230,6 +230,37 @@ export type MintResult = {
    * co-registration enabled. Use with `prepareRegisterErc8004` post-mint.
    */
   erc8004RegistryAddress?: Address;
+};
+
+// ─── ERC-721 public metadata ─────────────────────────────────────────────────
+
+export type AgentPublicMetadata = {
+  name: string;
+  description: string;
+  image?: string;
+  attributes?: Array<{
+    trait_type: string;
+    value: string | number | boolean;
+    display_type?: string;
+  }>;
+};
+
+export type PreparePublicMetadataUpdateParams = {
+  tokenId: string;
+  name: string;
+  description: string;
+  imageUrl?: string;
+  agentType?: string;
+  services?: readonly AgentService[];
+  x402Support?: boolean;
+  createdAt?: number;
+};
+
+export type PreparePublicMetadataUpdateResult = {
+  contractAddress: Address;
+  tokenId: string;
+  publicMetadataUri: string;
+  publicMetadata: AgentPublicMetadata;
 };
 
 // ─── Transfer ─────────────────────────────────────────────────────────────────

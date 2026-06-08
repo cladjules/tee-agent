@@ -2,7 +2,7 @@
  * Redis-backed agent index cache.
  *
  * Stores these keys per (chainId, registryAddress) pair:
- *   agents:{chainId}:{registryAddress}          — JSON array of RegisteredAgent (oldest-first)
+ *   agents:{chainId}:{registryAddress}          — JSON array of lightweight index rows (oldest-first)
  *   lastBlock:{chainId}:{registryAddress}        — last block number scanned (string)
  *   oracleRuns:{chainId}:{registryAddress}:{id}  — off-chain oracle run history (newest-first)
  *   validationResponses:{chainId}:{registry}:{id} — ValidationResponse events (newest-first)
@@ -12,7 +12,17 @@
  */
 
 import { Redis } from "@upstash/redis";
-import type { RegisteredAgent } from "@tee-agent/agent/types";
+
+export type CachedAgentIndexRow = {
+  tokenId: string;
+  name: string;
+  imageUrl?: string;
+  owner: `0x${string}`;
+  publicMetadataUri: string;
+  erc8004AgentId?: string;
+  metadataUri?: string;
+  tags: string[];
+};
 
 export type IndexedValidationResponse = {
   requestHash: `0x${string}`;
@@ -28,24 +38,14 @@ export type IndexedValidationResponse = {
   evidence?: Record<string, unknown>;
 };
 
-// RegisteredAgent serialised for Redis (agentId as string — JSON can't hold bigint).
-type StoredAgent = Omit<RegisteredAgent, "agentId"> & { agentId: string };
-
-function toStored(agents: RegisteredAgent[]): StoredAgent[] {
-  return agents.map(({ agentId, ...rest }) => ({
-    ...rest,
-    agentId: agentId.toString(),
-  }));
-}
-
-function fromStored(stored: StoredAgent[]): RegisteredAgent[] {
-  return stored.map(({ agentId, ...rest }) => ({
-    ...rest,
-    agentId: BigInt(agentId),
-  }));
-}
-
 let _redis: Redis | null = null;
+const memoryAgents = new Map<
+  string,
+  {
+    agents: CachedAgentIndexRow[];
+    lastBlock: bigint;
+  }
+>();
 
 function getRedis(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -69,6 +69,13 @@ function lastBlockKey(
   return `lastBlock:${chainId}:${registryAddress ?? "none"}`;
 }
 
+function memoryAgentsKey(
+  chainId: number,
+  registryAddress: `0x${string}` | undefined,
+) {
+  return `${chainId}:${registryAddress ?? "none"}`;
+}
+
 /**
  * Reads the cached agent list and the last indexed block.
  * Returns null if Redis is not configured or the cache is empty.
@@ -77,21 +84,25 @@ export async function getCachedAgents(
   chainId: number,
   registryAddress: `0x${string}` | undefined,
 ): Promise<{
-  agents: RegisteredAgent[];
+  agents: CachedAgentIndexRow[];
   lastBlock: bigint;
 } | null> {
   const redis = getRedis();
-  if (!redis) return null;
+  if (!redis) {
+    return memoryAgents.get(memoryAgentsKey(chainId, registryAddress)) ?? null;
+  }
 
   try {
     const [storedAgents, storedBlock] = await Promise.all([
-      redis.get<StoredAgent[]>(agentsKey(chainId, registryAddress)),
+      redis.get<CachedAgentIndexRow[]>(agentsKey(chainId, registryAddress)),
       redis.get<string>(lastBlockKey(chainId, registryAddress)),
     ]);
 
     if (storedAgents === null || storedBlock === null) return null;
 
-    return { agents: fromStored(storedAgents), lastBlock: BigInt(storedBlock) };
+    const cached = { agents: storedAgents, lastBlock: BigInt(storedBlock) };
+    memoryAgents.set(memoryAgentsKey(chainId, registryAddress), cached);
+    return cached;
   } catch (err) {
     console.error("[agent-cache] read failed:", err);
     return null;
@@ -105,15 +116,20 @@ export async function getCachedAgents(
 export async function setCachedAgents(
   chainId: number,
   registryAddress: `0x${string}` | undefined,
-  agents: RegisteredAgent[],
+  agents: CachedAgentIndexRow[],
   lastBlock: bigint,
 ): Promise<void> {
+  memoryAgents.set(memoryAgentsKey(chainId, registryAddress), {
+    agents,
+    lastBlock,
+  });
+
   const redis = getRedis();
   if (!redis) return;
 
   try {
     await Promise.all([
-      redis.set(agentsKey(chainId, registryAddress), toStored(agents)),
+      redis.set(agentsKey(chainId, registryAddress), agents),
       redis.set(lastBlockKey(chainId, registryAddress), lastBlock.toString()),
     ]);
   } catch (err) {

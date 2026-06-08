@@ -120,8 +120,8 @@ export function TransferForm({
     : "Connect the current owner wallet";
   const reencodeStatus = !hasLinkedIdentity
     ? "No linked ERC-8004 identity"
-      : !sourceOracleUrl
-        ? "Missing current teeOracle service"
+    : !sourceOracleUrl
+      ? "Missing current teeOracle service"
       : oracleChangeNeeded
         ? "Needs the wallet that owns the agent now"
         : "Not needed for the current oracle";
@@ -273,8 +273,8 @@ export function TransferForm({
               className="mt-0.5 h-4 w-4 rounded border-gray-700 bg-gray-900 text-violet-600 focus:ring-violet-600"
             />
             <span>
-              I understand this signs re-encryption, publishes sealed keys, and
-              updates the ERC-8004 teeOracle service.
+              I understand this signs re-encryption and updates the private data
+              for the selected oracle.
             </span>
           </label>
 

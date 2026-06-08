@@ -16,11 +16,9 @@
  *   npm run dev:prediction-market     # from apps/oracle/
  *
  * Deploy to Phala Cloud:
- *   npm run deploy -- src/examples/prediction-market.ts  # from apps/oracle/
- *   npm run deploy:oracle -- src/examples/prediction-market.ts  # from repo root
+ *   npm run oracle:deploy -- src/examples/prediction-market.ts
  */
 
-import "dotenv/config";
 import { z } from "zod";
 import { startOracle, type AgentHandler } from "@tee-agent/server";
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
@@ -39,7 +37,7 @@ import deploymentsJson from "../../../../deployments.json" with { type: "json" }
 //   phala/deepseek-v3.2               DeepSeek V3.2, TEE-attested
 //   phala/gpt-oss-20b                 OpenAI GPT OSS 20B, TEE-attested
 //   phala/glm-4.7-flash               Z.AI GLM 4.7 Flash, TEE-attested
-//   google/gemini-2.5-flash           Gemini 2.5 Flash (non-attested)
+//   google/gemini-3-flash-preview     Gemini 3 Flash Preview (non-attested)
 //   openai/gpt-4o-mini                GPT-4o Mini (non-attested)
 
 const configSchema = z.object({
@@ -52,6 +50,17 @@ const payloadSchema = z.object({
   claim: z.string(),
   evidence: z.string().optional(),
 });
+
+function normalizeVerdict(value: unknown): "YES" | "NO" | "INVALID" {
+  if (typeof value === "boolean") return value ? "YES" : "NO";
+  const verdict = String(value).trim().toUpperCase();
+  if (verdict === "TRUE") return "YES";
+  if (verdict === "FALSE") return "NO";
+  if (verdict === "YES" || verdict === "NO" || verdict === "INVALID") {
+    return verdict;
+  }
+  throw new Error(`Unexpected verdict: ${String(value)}`);
+}
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
@@ -113,10 +122,7 @@ const predictionVerifier: AgentHandler = {
       confidence?: number;
       reasoning?: string;
     };
-    const verdict = parsed.verdict;
-    if (verdict !== "YES" && verdict !== "NO" && verdict !== "INVALID") {
-      throw new Error(`Unexpected verdict: ${String(verdict)}`);
-    }
+    const verdict = normalizeVerdict(parsed.verdict);
 
     // ── Confidential AI API: fetch the LLM's ECDSA response signature ──────
     // GET /v1/signature/{request_id}?model=... returns a signature over

@@ -9,11 +9,11 @@
  * Environment variables:
  *   PRIVATE_KEY          — sender key
  *   LOCAL_RPC_URL        — local RPC
- *   BASE_SEPOLIA_RPC_URL — Base Sepolia RPC
+ *   RPC_URL_BASE_SEPOLIA — Base Sepolia RPC
  *   ORACLE_URL           — oracle HTTP base URL
  *   PINATA_JWT           — Pinata JWT for IPFS metadata
- *   ZERO_G_RPC_URL       — 0G Storage RPC for encrypted blobs
- *   ZERO_G_INDEXER_URL   — 0G Storage indexer for encrypted blobs
+ *   RPC_URL_ZERO_G       — 0G Storage RPC for encrypted blobs
+ *   INDEXER_URL_ZERO_G   — 0G Storage indexer for encrypted blobs
  */
 import { config as loadEnv } from "dotenv";
 import {
@@ -42,10 +42,7 @@ import {
   decryptMetadata,
   readJsonFromUri,
 } from "../packages/agent/dist/crypto.js";
-import {
-  defaultIdentityRegistry,
-  defaultReputationRegistry,
-} from "../packages/agent/dist/config.js";
+import { NETWORK_CONFIG } from "../packages/agent/dist/network.js";
 import {
   AGENT_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
@@ -53,15 +50,12 @@ import {
   IDENTITY_REGISTRY_ABI,
   TEE_VERIFIER_ABI,
 } from "../packages/agent/dist/abis.js";
-import {
-  AgentRegistry,
-  ReputationRegistry,
-} from "../packages/agent/dist/registry/agent.js";
+import { AgentRegistry } from "../packages/agent/dist/registry/agent.js";
+import { ReputationRegistry } from "../packages/agent/dist/registry/reputation.js";
 import {
   acceptTransferOffer,
   buildTransferTxArgs,
   createTransferOffer,
-  getPublishedSealedKeys,
 } from "../packages/agent/dist/ops/transfer.js";
 import { prepareMint } from "../packages/agent/dist/ops/mint.js";
 import {
@@ -77,7 +71,17 @@ import {
 } from "../packages/agent/dist/typed-data.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: resolve(__dirname, ".env"), quiet: true });
+const repoRoot = resolve(__dirname, "..");
+const envPaths = [
+  resolve(repoRoot, ".env"),
+  resolve(repoRoot, "apps/dashboard/.env"),
+  resolve(repoRoot, "contracts/.env"),
+  resolve(repoRoot, "apps/oracle/.env"),
+];
+for (const envPath of envPaths) {
+  loadEnv({ path: envPath, quiet: true });
+}
+loadEnv({ path: resolve(__dirname, ".env"), quiet: true, override: true });
 
 // ── Network selection ─────────────────────────────────────────────────────────
 
@@ -96,10 +100,21 @@ const isLocal = NETWORK === "local";
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const CHAIN_ID = isLocal ? 31337 : 84532;
-const RPC_URL = requiredEnv(isLocal ? "LOCAL_RPC_URL" : "BASE_SEPOLIA_RPC_URL");
+const RPC_URL = requiredEnv(isLocal ? "LOCAL_RPC_URL" : "RPC_URL_BASE_SEPOLIA");
 const PRIVATE_KEY = requiredEnv("PRIVATE_KEY") as `0x${string}`;
 const ORACLE_URL = requiredEnv("ORACLE_URL");
 const NORMALIZED_ORACLE_URL = ORACLE_URL.replace(/\/+$/, "");
+if (
+  !isLocal &&
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
+    NORMALIZED_ORACLE_URL,
+  )
+) {
+  throw new Error(
+    `Base Sepolia e2e requires a remote Phala oracle URL, got ${ORACLE_URL}.\n` +
+      "Set ORACLE_URL=<printed-oracle-url> in __tests__/.env.",
+  );
+}
 
 const chain = isLocal
   ? ({ ...hardhat, rpcUrls: { default: { http: [RPC_URL] } } } as const)
@@ -204,10 +219,10 @@ const VALIDATION_REGISTRY_ADDRESS =
  */
 const identityRegistryAddress = isLocal
   ? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
-  : defaultIdentityRegistry(baseSepolia);
+  : NETWORK_CONFIG.baseSepolia.identityRegistryAddress;
 
 const REPUTATION_REGISTRY_ADDRESS = (
-  isLocal ? undefined : defaultReputationRegistry(baseSepolia)
+  isLocal ? undefined : NETWORK_CONFIG.baseSepolia.reputationRegistryAddress
 ) as `0x${string}` | undefined;
 
 // ── Clients ───────────────────────────────────────────────────────────────────
@@ -255,13 +270,10 @@ const sdkConfig = {
     : {}),
   validationRegistryAddress: VALIDATION_REGISTRY_ADDRESS,
   pinataJwt: requiredEnv("PINATA_JWT"),
-  zeroGPrivateKey: PRIVATE_KEY,
-  zeroGRpcUrl: requiredEnv("ZERO_G_RPC_URL"),
-  zeroGIndexerUrl: requiredEnv("ZERO_G_INDEXER_URL"),
+  privateKey: PRIVATE_KEY,
+  zeroGRpcUrl: requiredEnv("RPC_URL_ZERO_G"),
+  zeroGIndexerUrl: requiredEnv("INDEXER_URL_ZERO_G"),
 };
-type PublishedSealedKeyParams = Parameters<typeof getPublishedSealedKeys>[0];
-const transferReadClient =
-  publicClient as unknown as PublishedSealedKeyParams["publicClient"];
 const reputationRegistry = REPUTATION_REGISTRY_ADDRESS
   ? new ReputationRegistry({
       address: REPUTATION_REGISTRY_ADDRESS,
@@ -345,7 +357,7 @@ async function readEncryptedBlob(uri: string): Promise<EncryptedBlob> {
     return JSON.parse(Buffer.from(base64, "base64").toString("utf8"));
   }
   if (uri.startsWith("zerog://")) {
-    const bytes = await readZeroGBytes(uri, requiredEnv("ZERO_G_INDEXER_URL"));
+    const bytes = await readZeroGBytes(uri, requiredEnv("INDEXER_URL_ZERO_G"));
     return JSON.parse(Buffer.from(bytes).toString("utf8"));
   }
   throw new Error(`Unsupported encrypted blob URI: ${uri}`);
@@ -669,6 +681,59 @@ async function assertLinkedIdentityOwner(
   console.log(`  ✔ linked ERC-8004 owner moved to recipient`);
 }
 
+const MAX_LOG_BLOCK_RANGE = 1_900n;
+
+type PublishedSealedKeyLog = {
+  args?: {
+    sealedKeys?: readonly Hex[];
+  };
+};
+
+async function getPublishedSealedKeys(params: {
+  registryAddress: Address;
+  tokenId: bigint;
+  to: Address;
+  fromBlock: bigint;
+  toBlock: bigint | "latest";
+}): Promise<Hex[]> {
+  const finalBlock =
+    params.toBlock === "latest"
+      ? await publicClient.getBlockNumber()
+      : params.toBlock;
+  let latestSealedKeys: readonly Hex[] | undefined;
+  for (
+    let fromBlock = params.fromBlock;
+    fromBlock <= finalBlock;
+    fromBlock += MAX_LOG_BLOCK_RANGE + 1n
+  ) {
+    const toBlock =
+      fromBlock + MAX_LOG_BLOCK_RANGE > finalBlock
+        ? finalBlock
+        : fromBlock + MAX_LOG_BLOCK_RANGE;
+    const chunkLogs = await publicClient.getContractEvents({
+      address: params.registryAddress,
+      abi: AGENT_REGISTRY_ABI,
+      eventName: "PublishedSealedKey",
+      args: {
+        to: params.to,
+        tokenId: params.tokenId,
+      },
+      fromBlock,
+      toBlock,
+    });
+    for (const log of chunkLogs as readonly PublishedSealedKeyLog[]) {
+      const sealedKeys = log.args?.sealedKeys;
+      if (sealedKeys?.length) latestSealedKeys = sealedKeys;
+    }
+  }
+  if (!latestSealedKeys) {
+    throw new Error(
+      `No PublishedSealedKey event found for token ${params.tokenId.toString()} and recipient ${params.to}.`,
+    );
+  }
+  return [...latestSealedKeys];
+}
+
 async function assertTransferSealedKeys(params: {
   tokenId: bigint;
   to: `0x${string}`;
@@ -678,7 +743,6 @@ async function assertTransferSealedKeys(params: {
   fromBlock?: bigint;
 }) {
   const sealedKeys = await getPublishedSealedKeys({
-    publicClient: transferReadClient,
     registryAddress: AGENT_REGISTRY_ADDRESS,
     tokenId: params.tokenId,
     to: params.to,
@@ -861,8 +925,14 @@ async function testIntelligentTransfer() {
     expectedName: "E2E Prediction Market Agent",
     expectedPrivateEntryCount: 2,
   });
+  const erc8004ServicesAgentId = await agentRegistry.getERC8004AgentId(tokenId);
+  if (erc8004ServicesAgentId === 0n) {
+    throw new Error(
+      `Test 2 FAILED: erc8004AgentId is 0 — identity co-registration failed`,
+    );
+  }
   const services = await fetchAgentServices(sdkConfig, {
-    tokenId: tokenId.toString(),
+    tokenId: erc8004ServicesAgentId.toString(),
     expectedOwner: account.address,
   });
   if (services.teeOracleUrl !== NORMALIZED_ORACLE_URL) {
@@ -1027,7 +1097,7 @@ async function testValidationRegistry() {
     privateEntries: [
       {
         name: "instructions",
-        data: "You verify prediction-market claims. Return JSON with verdict, confidence, and reasoning.",
+        data: "You verify prediction-market claims. Return JSON only. The verdict field MUST be exactly one of YES, NO, or INVALID. Use NO for false claims, YES for true claims, and INVALID only when the claim cannot be evaluated. Include confidence and reasoning.",
       },
       {
         name: "runtime-config",
@@ -1425,16 +1495,18 @@ async function testUpdateServices() {
 
 async function assertOracleRunning(): Promise<void> {
   try {
-    const res = await fetch(`${ORACLE_URL}/address`, {
-      signal: AbortSignal.timeout(2_000),
+    const res = await fetch(`${NORMALIZED_ORACLE_URL}/address`, {
+      signal: AbortSignal.timeout(isLocal ? 2_000 : 15_000),
     });
     if (res.ok) return;
   } catch {
     // not running
   }
   throw new Error(
-    `Oracle is not reachable at ${ORACLE_URL}.\n` +
-      `Start it manually: cd apps/oracle && npm run dev`,
+    `Oracle is not reachable at ${NORMALIZED_ORACLE_URL}.\n` +
+      (isLocal
+        ? `Start it manually: cd apps/oracle && npm run dev`
+        : `Check the Phala CVM is running and exposing the oracle endpoint.`),
   );
 }
 

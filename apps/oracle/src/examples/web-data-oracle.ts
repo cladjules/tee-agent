@@ -18,11 +18,9 @@
  *   npm run dev:web-fetcher            # from apps/oracle/
  *
  * Deploy to Phala Cloud:
- *   npm run deploy -- src/examples/web-data-oracle.ts  # from apps/oracle/
- *   npm run deploy:oracle -- src/examples/web-data-oracle.ts  # from repo root
+ *   npm run oracle:deploy -- src/examples/web-data-oracle.ts
  */
 
-import "dotenv/config";
 import { ethers } from "ethers";
 import { z } from "zod";
 import { startOracle, type AgentHandler } from "@tee-agent/server";

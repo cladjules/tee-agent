@@ -2,10 +2,10 @@
   "84532": {
     "name": "baseSepolia",
     "contracts": {
-      "agentRegistry": "0x6bAf397112821efB8E035B0e71c13f4DadDEa224",
-      "teeVerifier": "0xDaD26E31dE380BC9443AAf70c479b13CF73Cc763",
-      "validationRegistry": "0x293edED21208d871aEf291CEd6D028acFBF78ecF"
+      "agentRegistry": "0x09a9e28adfB46240EE4D53FAe0Dd0083944C35e9",
+      "teeVerifier": "0xbd40dcc5d4fCC224B77344Cc8CA4abBEcc83F6cE",
+      "validationRegistry": "0x528E0999B5db42783d08B577F5beb8637bA9e792"
     },
-    "fromBlock": "42331912"
+    "fromBlock": "42524093"
   }
 }

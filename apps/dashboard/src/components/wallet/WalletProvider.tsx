@@ -2,17 +2,18 @@
 
 import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
+import { publicActions } from "viem";
 import type { Address, PublicClient, WalletClient } from "viem";
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider, useConnectModal } from "@rainbow-me/rainbowkit";
 import { useAccount, useDisconnect, useSwitchChain } from "wagmi";
-import { getPublicClient, getWalletClient } from "@wagmi/core";
+import { getWalletClient } from "@wagmi/core";
 import "@rainbow-me/rainbowkit/styles.css";
 import { wagmiConfig } from "@/lib/wagmi";
-import { clientCfg } from "@/lib/client-config";
+import { DEFAULT_NETWORK } from "@tee-agent/agent/network";
 
-const TARGET_CHAIN_ID = clientCfg.chain.id as 8453 | 84532;
+const TARGET_CHAIN_ID = DEFAULT_NETWORK.chain.id;
 
 // ── Types (kept stable so all consumers compile unchanged) ────────────────────
 
@@ -84,10 +85,6 @@ export function useWallet(): WalletContextValue {
 
   const getViemClients = useCallback(async () => {
     if (!rawAddress) throw new Error("Wallet not connected.");
-    const publicClient = getPublicClient(wagmiConfig, {
-      chainId: TARGET_CHAIN_ID,
-    });
-
     let walletClient: WalletClient | undefined;
     let lastError: unknown;
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -107,13 +104,15 @@ export function useWallet(): WalletContextValue {
       throw lastError instanceof Error
         ? lastError
         : new Error(
-            `Wallet is not on ${clientCfg.chain.name}. Switch networks and try again.`,
+            `Wallet is not on ${DEFAULT_NETWORK.chain.name}. Switch networks and try again.`,
           );
     }
 
+    const publicClient = walletClient.extend(publicActions);
+
     return {
       address: rawAddress,
-      publicClient: publicClient as PublicClient,
+      publicClient: publicClient as unknown as PublicClient,
       walletClient: walletClient as WalletClient,
     };
   }, [rawAddress]);

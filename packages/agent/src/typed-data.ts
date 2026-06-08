@@ -150,7 +150,8 @@ export function buildRunTypedData(params: RunTypedDataParams) {
 
 /**
  * Build EIP-712 typed data for the oracle's `/validate` endpoint.
- * The agent owner signs this to trigger on-chain validation scoring.
+ * The validation worker signs this to trigger on-chain validation scoring.
+ * In the bundled oracle, the signer must match the oracle transaction signer.
  *
  * @example
  * ```ts

@@ -5,14 +5,30 @@
 // Usage:
 //   node contracts/scripts/setup-env.mjs
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
 
-const SUPPORTED_CHAIN_IDS = ["8453", "84532"];
+const deploymentsRoot = join(ROOT, "contracts/ignition/deployments");
+const baseSepoliaOracleMode = process.env.BASE_SEPOLIA_ORACLE?.trim();
+const BASE_SEPOLIA_DEPLOYMENT_IDS = {
+  local: "base-sepolia-local-oracle",
+  remote: "base-sepolia-remote-oracle",
+};
+const selectedBaseSepoliaDeploymentId = baseSepoliaOracleMode
+  ? BASE_SEPOLIA_DEPLOYMENT_IDS[baseSepoliaOracleMode]
+  : undefined;
+
+if (
+  baseSepoliaOracleMode &&
+  !Object.hasOwn(BASE_SEPOLIA_DEPLOYMENT_IDS, baseSepoliaOracleMode)
+) {
+  console.error("BASE_SEPOLIA_ORACLE must be local or remote when provided.");
+  process.exit(1);
+}
 
 const chainNames = {
   8453: "base",
@@ -22,17 +38,49 @@ const chainNames = {
 // Map Ignition module keys → shared deployment contract keys
 const KEY_MAP = {
   "TeeAgent#AgentRegistry": "agentRegistry",
+  "TeeAgent#MockDcapAttestation": "mockDcapAttestation",
   "TeeAgent#TeeVerifier": "teeVerifier",
   "TeeAgent#ValidationRegistry": "validationRegistry",
 };
-function readDeployment(chainId) {
-  const deployedPath = join(
-    ROOT,
-    "contracts/ignition/deployments",
-    `chain-${chainId}`,
-    "deployed_addresses.json",
-  );
 
+const REQUIRED_KEYS = ["agentRegistry", "teeVerifier", "validationRegistry"];
+
+function parseDeploymentBlock(journalPath) {
+  let deploymentBlock = null;
+  if (!existsSync(journalPath)) return deploymentBlock;
+
+  const lines = readFileSync(journalPath, "utf8").trim().split("\n");
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      const bn = entry?.receipt?.blockNumber;
+      if (typeof bn === "number") {
+        deploymentBlock = bn;
+        break;
+      }
+    } catch {}
+  }
+  return deploymentBlock;
+}
+
+function parseChainId(journalPath, fallbackChainId) {
+  if (!existsSync(journalPath)) return fallbackChainId;
+
+  const lines = readFileSync(journalPath, "utf8").trim().split("\n");
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      const chainId = entry?.chainId;
+      if (typeof chainId === "number" || typeof chainId === "string") {
+        return String(chainId);
+      }
+    } catch {}
+  }
+  return fallbackChainId;
+}
+
+function readDeploymentFromPath(deploymentPath, fallbackChainId) {
+  const deployedPath = join(deploymentPath, "deployed_addresses.json");
   if (!existsSync(deployedPath)) {
     return null;
   }
@@ -40,47 +88,111 @@ function readDeployment(chainId) {
   const raw = JSON.parse(readFileSync(deployedPath, "utf8"));
   const resolvedContracts = {};
   for (const [ignitionKey, contractKey] of Object.entries(KEY_MAP)) {
-    if (typeof raw[ignitionKey] !== "string") {
+    if (typeof raw[ignitionKey] === "string") {
+      resolvedContracts[contractKey] = raw[ignitionKey];
+    }
+  }
+  for (const key of REQUIRED_KEYS) {
+    if (typeof resolvedContracts[key] !== "string") {
       throw new Error(
-        `Missing required Ignition deployment key ${ignitionKey} for chain ${chainId}`,
+        `Missing required Ignition deployment contract ${key} in ${deployedPath}`,
       );
     }
-    resolvedContracts[contractKey] = raw[ignitionKey];
   }
 
-  const journalPath = join(
-    ROOT,
-    "contracts/ignition/deployments",
-    `chain-${chainId}`,
-    "journal.jsonl",
-  );
-  let deploymentBlock = null;
-  if (existsSync(journalPath)) {
-    const lines = readFileSync(journalPath, "utf8").trim().split("\n");
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        const bn = entry?.receipt?.blockNumber;
-        if (typeof bn === "number") {
-          deploymentBlock = bn;
-          break;
-        }
-      } catch {}
-    }
+  const journalPath = join(deploymentPath, "journal.jsonl");
+  const chainId = parseChainId(journalPath, fallbackChainId);
+  if (!chainId) {
+    throw new Error(`Could not determine chain ID for ${deploymentPath}`);
   }
+  const deploymentBlock = parseDeploymentBlock(journalPath);
 
   return { chainId, deployedPath, resolvedContracts, deploymentBlock };
 }
 
-const foundDeployments = SUPPORTED_CHAIN_IDS.map((chainId) =>
-  readDeployment(chainId),
-).filter((deployment) => deployment !== null);
+function deploymentDirs() {
+  if (!existsSync(deploymentsRoot)) return [];
+  return readdirSync(deploymentsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function fallbackChainIdForDeploymentId(id) {
+  return id.match(/^chain-(\d+)$/)?.[1];
+}
+
+function readDeploymentId(id) {
+  return readDeploymentFromPath(
+    join(deploymentsRoot, id),
+    fallbackChainIdForDeploymentId(id),
+  );
+}
+
+function allDeploymentEntries() {
+  return deploymentDirs()
+    .map((id) => {
+      const deployment = readDeploymentId(id);
+      return deployment ? { id, ...deployment } : null;
+    })
+    .filter((entry) => entry !== null);
+}
+
+function selectDeployments(entries) {
+  if (selectedBaseSepoliaDeploymentId) {
+    const selected = readDeploymentId(selectedBaseSepoliaDeploymentId);
+    if (!selected) {
+      throw new Error(
+        `Missing Ignition deployment id: ${selectedBaseSepoliaDeploymentId}`,
+      );
+    }
+    return [
+      ...entries.filter((entry) => entry.chainId !== "84532"),
+      { id: selectedBaseSepoliaDeploymentId, ...selected },
+    ];
+  }
+
+  const hasChainBaseSepolia = entries.some(
+    (entry) => entry.chainId === "84532" && entry.id === "chain-84532",
+  );
+  const baseSepoliaNamed = entries.filter(
+    (entry) =>
+      entry.chainId === "84532" &&
+      Object.values(BASE_SEPOLIA_DEPLOYMENT_IDS).includes(entry.id),
+  );
+
+  if (!hasChainBaseSepolia && baseSepoliaNamed.length > 1) {
+    throw new Error(
+      "BASE_SEPOLIA_ORACLE must be local or remote when both Base Sepolia deployment modes exist.",
+    );
+  }
+
+  return entries.filter((entry) => {
+    if (entry.chainId !== "84532") return true;
+    if (entry.id === "chain-84532") return true;
+    return !hasChainBaseSepolia && baseSepoliaNamed.length === 1;
+  });
+}
+
+let foundDeployments;
+try {
+  foundDeployments = selectDeployments(allDeploymentEntries());
+} catch (err) {
+  console.error(`\nERROR: ${err instanceof Error ? err.message : err}\n`);
+  process.exit(1);
+}
 
 if (foundDeployments.length === 0) {
-  console.error("\nERROR: No supported deployments found.\n");
-  console.error(
-    `Run: cd contracts && npx hardhat ignition deploy ignition/modules/... --network <name>\n`,
-  );
+  console.error("\nERROR: No Ignition deployments found.\n");
+  if (selectedBaseSepoliaDeploymentId) {
+    console.error(
+      `Missing Ignition deployment id: ${selectedBaseSepoliaDeploymentId}\n`,
+    );
+  } else {
+    console.error(
+      `Run: cd contracts && npx hardhat ignition deploy ignition/modules/... --network <name>\n`,
+    );
+  }
   process.exit(1);
 }
 
@@ -89,6 +201,7 @@ const deployments = existsSync(deploymentsPath)
   ? JSON.parse(readFileSync(deploymentsPath, "utf8"))
   : {};
 for (const {
+  id,
   chainId,
   resolvedContracts,
   deploymentBlock,
@@ -114,11 +227,16 @@ console.log(
   })\n`,
 );
 for (const {
+  id,
   chainId,
   resolvedContracts,
   deploymentBlock,
 } of foundDeployments) {
   console.log(`  ${chainNames[chainId] ?? chainId} (${chainId})`);
+  console.log(`    deploymentId=${id}`);
+  if (baseSepoliaOracleMode) {
+    console.log(`    baseSepoliaOracle=${baseSepoliaOracleMode}`);
+  }
   for (const [k, v] of Object.entries(resolvedContracts)) {
     console.log(`    ${k}=${v}`);
   }

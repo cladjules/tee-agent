@@ -23,14 +23,7 @@ import type {
   TransferProofJson,
   TransferValidityProof,
 } from "../types.js";
-import {
-  createPublicClient,
-  decodeEventLog,
-  http,
-  type Address,
-  type Hex,
-  type PublicClient,
-} from "viem";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 
 function asBigInt(value: string, label: string): bigint {
   if (!value) throw new Error(`${label} is required.`);
@@ -43,16 +36,18 @@ function normalizeOracleUrl(url: string): string {
   return normalized;
 }
 
-const MAX_LOG_BLOCK_RANGE = 1_900n;
-
 function assertOffer(offer: TransferOffer): void {
   if (offer.schema !== "tee-agent.transfer.offer") {
     throw new Error("Invalid transfer offer schema.");
   }
-  if (offer.version !== 1) throw new Error("Unsupported transfer offer version.");
-  if (!offer.registryAddress) throw new Error("Offer registryAddress is required.");
-  if (!offer.verifierAddress) throw new Error("Offer verifierAddress is required.");
-  if (!offer.contractAddress) throw new Error("Offer contractAddress is required.");
+  if (offer.version !== 1)
+    throw new Error("Unsupported transfer offer version.");
+  if (!offer.registryAddress)
+    throw new Error("Offer registryAddress is required.");
+  if (!offer.verifierAddress)
+    throw new Error("Offer verifierAddress is required.");
+  if (!offer.contractAddress)
+    throw new Error("Offer contractAddress is required.");
   if (!offer.tokenId) throw new Error("Offer tokenId is required.");
   if (!offer.from) throw new Error("Offer from is required.");
   if (!offer.to) throw new Error("Offer to is required.");
@@ -312,67 +307,4 @@ export function buildTransferTxArgs(acceptance: TransferAcceptance): {
       proofs,
     ],
   };
-}
-
-/**
- * Reads the latest `PublishedSealedKey` event for a transferred token.
- *
- * Consumers that keep their own index can skip this and load the sealed keys
- * from that index. Consumers without an index should pass the deployment
- * `fromBlock` so the SDK can query the exact registry event range.
- */
-export async function getPublishedSealedKeys(params: {
-  publicClient: PublicClient;
-  registryAddress: Address;
-  tokenId: bigint;
-  to: Address;
-  fromBlock: bigint;
-  toBlock: bigint | "latest";
-}): Promise<Hex[]> {
-  const finalBlock =
-    params.toBlock === "latest"
-      ? await params.publicClient.getBlockNumber()
-      : params.toBlock;
-  const logs = [];
-  for (
-    let fromBlock = params.fromBlock;
-    fromBlock <= finalBlock;
-    fromBlock += MAX_LOG_BLOCK_RANGE + 1n
-  ) {
-    const toBlock =
-      fromBlock + MAX_LOG_BLOCK_RANGE > finalBlock
-        ? finalBlock
-        : fromBlock + MAX_LOG_BLOCK_RANGE;
-    const chunkLogs = await params.publicClient.getContractEvents({
-      address: params.registryAddress,
-      abi: AGENT_REGISTRY_ABI,
-      eventName: "PublishedSealedKey",
-      args: {
-        to: params.to,
-        tokenId: params.tokenId,
-      },
-      fromBlock,
-      toBlock,
-    });
-    logs.push(...chunkLogs);
-  }
-  if (logs.length === 0) {
-    throw new Error(
-      `No PublishedSealedKey event found for token ${params.tokenId.toString()} and recipient ${params.to}.`,
-    );
-  }
-  const latest = logs[logs.length - 1];
-  if (!latest) throw new Error("Latest PublishedSealedKey log is missing.");
-  const decoded = decodeEventLog({
-    abi: AGENT_REGISTRY_ABI,
-    eventName: "PublishedSealedKey",
-    data: latest.data,
-    topics: latest.topics,
-  });
-  const sealedKeys = (decoded.args as { sealedKeys?: readonly Hex[] })
-    .sealedKeys;
-  if (!sealedKeys || sealedKeys.length === 0) {
-    throw new Error("PublishedSealedKey event has no sealedKeys.");
-  }
-  return [...sealedKeys] as Hex[];
 }

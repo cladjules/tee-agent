@@ -1,16 +1,13 @@
 "use server";
 
 import type { Address } from "viem";
-import { getCachedAgents } from "@/lib/agent-cache";
-import { syncEvents } from "@/lib/agent-indexer";
-import { getServerConfigForChain } from "@/lib/config";
-import { getActiveChainId } from "@/lib/active-chain";
+import { getCachedAgents, type CachedAgentIndexRow } from "@/lib/agent-cache";
+import { getActiveChainId, getServerConfigForChain } from "@/lib/config";
 import { AgentRegistry } from "@tee-agent/agent/registry";
 import { REPUTATION_REGISTRY_ABI } from "@tee-agent/agent/abis";
 import { createPublicClient, http } from "viem";
 import { prepareFeedback as sdkPrepareFeedback } from "@tee-agent/agent/feedback";
 import type {
-  RegisteredAgent,
   ResolvedAgentProofData,
   PrepareFeedbackParams,
   PrepareFeedbackResult,
@@ -139,18 +136,10 @@ async function fetchFeedbackOverview(
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-export async function getRegisteredAgents(
-  chainId?: number,
-): Promise<RegisteredAgent[]> {
-  const cid = chainId ?? (await getActiveChainId());
+export async function getRegisteredAgents(): Promise<CachedAgentIndexRow[]> {
+  const cid = await getActiveChainId();
   const cfg = getServerConfigForChain(cid);
   if (!cfg.registryAddress) return [];
-
-  try {
-    await syncEvents(cid);
-  } catch (err) {
-    console.error("[registry] syncEvents failed:", err);
-  }
 
   try {
     const cached = await getCachedAgents(cid, cfg.registryAddress);
@@ -161,8 +150,8 @@ export async function getRegisteredAgents(
   }
 }
 
-export async function getAgentPageData(id: string, chainId?: number) {
-  const cid = chainId ?? (await getActiveChainId());
+export async function getAgentPageData(id: string) {
+  const cid = await getActiveChainId();
   const cfg = getServerConfigForChain(cid);
   if (!cfg.rpcUrl || !cfg.registryAddress)
     throw new Error("Registry not configured");
@@ -194,9 +183,9 @@ export async function getAgentPageData(id: string, chainId?: number) {
 
   const [oracleRunsResult, validationResponses, feedbackOverview] =
     await Promise.all([
-      getOracleRunHistory(id, cid),
+      getOracleRunHistory(id),
       erc8004Id
-        ? fetchValidationResponsesForAgent(erc8004Id, cid)
+        ? fetchValidationResponsesForAgent(erc8004Id)
         : Promise.resolve([]),
       fetchFeedbackOverview(cfg, erc8004Id),
     ]);

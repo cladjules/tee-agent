@@ -18,7 +18,8 @@ COPY apps/oracle ./apps/oracle
 RUN npm run build --workspace=packages/agent \
   && npm run build --workspace=packages/server \
   && npm run build --workspace=apps/oracle \
-  && npm prune --omit=dev
+  && npm prune --omit=dev \
+  && mkdir -p packages/agent/node_modules packages/server/node_modules apps/oracle/node_modules
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
 
@@ -32,10 +33,13 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/deployments.json ./deployments.json
 COPY --from=builder /app/packages/agent/package.json ./packages/agent/package.json
 COPY --from=builder /app/packages/agent/dist ./packages/agent/dist
+COPY --from=builder /app/packages/agent/node_modules ./packages/agent/node_modules
 COPY --from=builder /app/packages/server/package.json ./packages/server/package.json
 COPY --from=builder /app/packages/server/dist ./packages/server/dist
+COPY --from=builder /app/packages/server/node_modules ./packages/server/node_modules
 COPY --from=builder /app/apps/oracle/package.json ./apps/oracle/package.json
 COPY --from=builder /app/apps/oracle/dist ./apps/oracle/dist
+COPY --from=builder /app/apps/oracle/node_modules ./apps/oracle/node_modules
 
 WORKDIR /app/apps/oracle
 EXPOSE 3001

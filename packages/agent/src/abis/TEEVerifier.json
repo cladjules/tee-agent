@@ -10,13 +10,24 @@
         "internalType": "address",
         "name": "dcapAttestation_",
         "type": "address"
+      },
+      {
+        "internalType": "uint32",
+        "name": "dcapTcbEvaluationDataNumber_",
+        "type": "uint32"
       }
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "output",
+        "type": "bytes"
+      }
+    ],
     "name": "DcapVerificationFailed",
     "type": "error"
   },
@@ -213,6 +224,19 @@
         "internalType": "address",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "DCAP_TCB_EVALUATION_DATA_NUMBER",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
       }
     ],
     "stateMutability": "view",

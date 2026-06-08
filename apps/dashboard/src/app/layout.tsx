@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Image from "next/image";
 import WalletConnectButton from "@/components/wallet/WalletConnectButton";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 import ChainSync from "@/components/ChainSync";
@@ -12,7 +13,13 @@ export const metadata: Metadata = {
   description:
     "Deploy, browse, and manage on-chain AI agents (ERC-7857 · ERC-8004).",
   icons: {
-    icon: "/favicon.png",
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
   },
 };
 
@@ -43,63 +50,13 @@ export default function RootLayout({
   );
 }
 
-function HexLogo() {
-  return (
-    <svg
-      width="26"
-      height="26"
-      viewBox="0 0 26 26"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <polygon
-        points="13,1 24,7 24,19 13,25 2,19 2,7"
-        fill="none"
-        stroke="url(#hg)"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <polygon
-        points="13,7 19,10.5 19,17.5 13,21 7,17.5 7,10.5"
-        fill="url(#hgf)"
-        opacity="0.18"
-      />
-      <circle cx="13" cy="13" r="2.5" fill="url(#hg)" />
-      <defs>
-        <linearGradient
-          id="hg"
-          x1="2"
-          y1="1"
-          x2="24"
-          y2="25"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#a78bfa" />
-          <stop offset="1" stopColor="#67e8f9" />
-        </linearGradient>
-        <linearGradient
-          id="hgf"
-          x1="7"
-          y1="7"
-          x2="19"
-          y2="21"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#a78bfa" />
-          <stop offset="1" stopColor="#67e8f9" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
 function Header() {
   return (
     <header className="border-b border-violet-950/60 bg-[#04040a]/80 backdrop-blur-md sticky top-0 z-20">
       <div className="container mx-auto max-w-6xl flex flex-wrap items-center justify-between gap-4 px-4 py-3">
         <div className="flex items-center gap-3">
           <a href="/" className="flex items-center gap-2.5">
-            <HexLogo />
+            <Image src="/favicon.svg" alt="" width={28} height={28} priority />
             <span className="text-lg font-bold bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
               Tee Agent
             </span>
@@ -116,13 +73,16 @@ function Header() {
             <a href="/agents/new" className="nav-link">
               Deploy
             </a>
+            <a href="/docs" className="nav-link">
+              Docs
+            </a>
             <a
               href="https://github.com/cladjules/tee-agent"
               target="_blank"
               rel="noopener noreferrer"
               className="nav-link inline-flex items-center gap-1"
             >
-              Docs <span className="text-[10px] text-slate-600">↗</span>
+              Repo <span className="text-[10px] text-slate-600">↗</span>
             </a>
           </nav>
           <WalletConnectButton />

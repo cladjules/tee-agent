@@ -1,6 +1,6 @@
 /**
- * Core agent indexer — scans new Registered events, resolves agent identities,
- * and persists the result to the Redis cache.
+ * Core agent indexer — scans registry events and persists a lightweight Redis
+ * index. Full ERC-8004/IPFS metadata is resolved on the agent page only.
  *
  * Called by:
  *   - getRegisteredAgents()  (on-demand, skips scan if cache is fresh)
@@ -10,19 +10,28 @@
 
 import {
   addCachedValidationResponses,
+  type CachedAgentIndexRow,
   getCachedAgents,
   type IndexedValidationResponse,
   setCachedAgents,
 } from "@/lib/agent-cache";
 import { AgentRegistry } from "@tee-agent/agent/registry";
-import { createPublicClient, http, type PublicClient } from "viem";
+import {
+  createPublicClient,
+  http,
+  type Address,
+  type PublicClient,
+} from "viem";
 import { getServerConfigForChain } from "@/lib/config";
 import {
+  AGENT_TRANSFER_EVENT,
+  IDENTITY_URI_UPDATED_EVENT,
   REGISTERED_EVENT,
+  TOKEN_URI_UPDATED_EVENT,
   VALIDATION_REQUEST_EVENT,
   VALIDATION_RESPONSE_EVENT,
 } from "@tee-agent/agent/abis";
-import type { RegisteredAgent } from "@tee-agent/agent/types";
+import { readJsonFromUri } from "@tee-agent/agent/encryption";
 import {
   resolveOwnedValidationOracleUrl,
   submitOracleValidation,
@@ -34,13 +43,16 @@ type IndexResult =
       newAgents: number;
       totalAgents: number;
       scannedFrom: string;
+      scannedTo: string;
       latestBlock: string;
+      caughtUp: boolean;
       validationsProcessed: number;
       validationsUpdated: number;
     }
   | { ok: false; skipped: true; reason: string };
 
 type ValidationRequestLog = {
+  eventName: "ValidationRequest";
   args: {
     validatorAddress: `0x${string}`;
     agentId: bigint;
@@ -50,6 +62,7 @@ type ValidationRequestLog = {
 };
 
 type ValidationResponseLog = {
+  eventName: "ValidationResponse";
   args: {
     validatorAddress: `0x${string}`;
     agentId: bigint;
@@ -74,6 +87,63 @@ type UnansweredValidationRequest = {
   requestHash: `0x${string}`;
 };
 
+type AgentRegisteredLog = {
+  eventName: "Registered";
+  args: {
+    agentId: bigint;
+    agentURI: string;
+    owner: Address;
+  };
+  blockNumber?: bigint;
+  logIndex?: number;
+};
+
+type TokenUriUpdatedLog = {
+  eventName: "TokenURIUpdated";
+  args: {
+    tokenId: bigint;
+    newURI: string;
+  };
+  blockNumber?: bigint;
+  logIndex?: number;
+};
+
+type AgentTransferLog = {
+  eventName: "Transfer";
+  args: {
+    to: Address;
+    tokenId: bigint;
+  };
+  blockNumber?: bigint;
+  logIndex?: number;
+};
+
+type IdentityUriUpdatedLog = {
+  eventName: "URIUpdated";
+  args: {
+    agentId: bigint;
+    newURI: string;
+  };
+  blockNumber?: bigint;
+  logIndex?: number;
+};
+
+type AgentIndexLogs = {
+  registrations: AgentRegisteredLog[];
+  tokenUriUpdates: TokenUriUpdatedLog[];
+  transfers: AgentTransferLog[];
+  identityUriUpdates: IdentityUriUpdatedLog[];
+};
+
+type RegistryLog = AgentRegisteredLog | TokenUriUpdatedLog | AgentTransferLog;
+
+type ValidationLog = ValidationRequestLog | ValidationResponseLog;
+
+const LOG_PAGE_SIZE = 2_000n;
+const LOG_PAGE_DELAY_MS = 1_000;
+const MAX_LOG_PAGES_PER_RUN = 5n;
+const MAX_BLOCKS_PER_RUN = LOG_PAGE_SIZE * MAX_LOG_PAGES_PER_RUN;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function decodeJsonDataUri(uri: string): Record<string, unknown> | undefined {
@@ -96,6 +166,122 @@ function validationKey(agentId: bigint, requestHash: string): string {
   return `${agentId.toString()}:${requestHash.toLowerCase()}`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function byLogOrder(
+  a: { blockNumber?: bigint; logIndex?: number },
+  b: { blockNumber?: bigint; logIndex?: number },
+): number {
+  const blockDelta = (a.blockNumber ?? 0n) - (b.blockNumber ?? 0n);
+  if (blockDelta < 0n) return -1;
+  if (blockDelta > 0n) return 1;
+  return (a.logIndex ?? 0) - (b.logIndex ?? 0);
+}
+
+function cleanTag(tag: string): string | undefined {
+  const clean = tag.trim();
+  return clean ? clean : undefined;
+}
+
+function uniqueTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const clean = cleanTag(tag);
+    if (clean) seen.add(clean);
+  }
+  return [...seen].slice(0, 8);
+}
+
+type IndexedMetadata = {
+  name: string;
+  imageUrl?: string;
+  tags: string[];
+};
+
+function baseAgentTags(row: {
+  erc8004AgentId?: string;
+  metadataUri: string;
+}): string[] {
+  return uniqueTags([
+    "ERC-7857",
+    row.erc8004AgentId && row.erc8004AgentId !== "0" ? "ERC-8004" : "",
+    row.metadataUri.startsWith("ipfs://") ? "IPFS" : "",
+  ]);
+}
+
+async function indexedMetadataFromUri(
+  metadataUri: string,
+  baseTags: string[],
+): Promise<IndexedMetadata> {
+  const metadata = await readJsonFromUri<{
+    name?: unknown;
+    image?: unknown;
+    image_url?: unknown;
+    services?: unknown;
+    supportedTrust?: unknown;
+    x402Support?: unknown;
+  }>(metadataUri);
+  if (typeof metadata.name !== "string" || !metadata.name.trim()) {
+    throw new Error(`metadata ${metadataUri} is missing name`);
+  }
+
+  const tags = [...baseTags];
+  if (Array.isArray(metadata.services)) {
+    for (const service of metadata.services) {
+      if (!service || typeof service !== "object") continue;
+      const name = (service as { name?: unknown }).name;
+      if (typeof name === "string") tags.push(name);
+    }
+  }
+
+  if (Array.isArray(metadata.supportedTrust)) {
+    for (const trust of metadata.supportedTrust) {
+      if (typeof trust === "string") tags.push(trust);
+    }
+  }
+
+  if (metadata.x402Support === true) tags.push("x402");
+  const image = metadata.image ?? metadata.image_url;
+  return {
+    name: metadata.name.trim(),
+    imageUrl:
+      typeof image === "string" && image.trim() ? image.trim() : undefined,
+    tags: uniqueTags(tags),
+  };
+}
+
+async function rowFromRegistrationLog(
+  log: AgentRegisteredLog,
+  registry: AgentRegistry,
+): Promise<CachedAgentIndexRow> {
+  const tokenId = log.args.agentId;
+  const [erc8004AgentId, publicMetadataUri, contractMetadataUri] =
+    await Promise.all([
+      registry.getERC8004AgentId(tokenId).then((value) => value.toString()),
+      registry.tokenURI(tokenId),
+      registry.getMetadataUri(tokenId).catch(() => ""),
+    ]);
+  const metadataUri = log.args.agentURI || contractMetadataUri;
+  if (!metadataUri) {
+    throw new Error(`agent tokenId=${tokenId.toString()} has no metadataUri`);
+  }
+  const indexed = await indexedMetadataFromUri(
+    metadataUri,
+    baseAgentTags({ erc8004AgentId, metadataUri }),
+  );
+  const row = {
+    tokenId: tokenId.toString(),
+    ...indexed,
+    owner: log.args.owner,
+    publicMetadataUri,
+    erc8004AgentId,
+    metadataUri,
+  };
+  return row;
+}
+
 async function collectValidationLogs(
   publicClient: PublicClient,
   validationRegistryAddress: `0x${string}`,
@@ -109,25 +295,75 @@ async function collectValidationLogs(
   for (let from = fromBlock; from <= latestBlock; from += pageSize) {
     const to =
       from + pageSize - 1n < latestBlock ? from + pageSize - 1n : latestBlock;
-    const [requestChunk, responseChunk] = await Promise.all([
-      publicClient.getLogs({
-        address: validationRegistryAddress,
-        event: VALIDATION_REQUEST_EVENT,
-        fromBlock: from,
-        toBlock: to,
-      }),
-      publicClient.getLogs({
-        address: validationRegistryAddress,
-        event: VALIDATION_RESPONSE_EVENT,
-        fromBlock: from,
-        toBlock: to,
-      }),
-    ]);
-    requests.push(...(requestChunk as ValidationRequestLog[]));
-    responses.push(...(responseChunk as ValidationResponseLog[]));
+    const logs = (await publicClient.getLogs({
+      address: validationRegistryAddress,
+      events: [VALIDATION_REQUEST_EVENT, VALIDATION_RESPONSE_EVENT],
+      fromBlock: from,
+      toBlock: to,
+    })) as ValidationLog[];
+
+    for (const log of logs) {
+      if (log.eventName === "ValidationRequest") requests.push(log);
+      if (log.eventName === "ValidationResponse") responses.push(log);
+    }
+    if (to < latestBlock) await sleep(LOG_PAGE_DELAY_MS);
   }
 
   return { requests, responses };
+}
+
+async function collectAgentIndexLogs(
+  publicClient: PublicClient,
+  registryAddress: `0x${string}`,
+  identityRegistryAddress: `0x${string}` | undefined,
+  fromBlock: bigint,
+  latestBlock: bigint,
+  pageSize: bigint,
+): Promise<AgentIndexLogs> {
+  const registrations: AgentRegisteredLog[] = [];
+  const tokenUriUpdates: TokenUriUpdatedLog[] = [];
+  const transfers: AgentTransferLog[] = [];
+  const identityUriUpdates: IdentityUriUpdatedLog[] = [];
+
+  for (let from = fromBlock; from <= latestBlock; from += pageSize) {
+    const to =
+      from + pageSize - 1n < latestBlock ? from + pageSize - 1n : latestBlock;
+    const [registryChunk, identityUriChunk] = await Promise.all([
+      publicClient.getLogs({
+        address: registryAddress,
+        events: [
+          REGISTERED_EVENT,
+          TOKEN_URI_UPDATED_EVENT,
+          AGENT_TRANSFER_EVENT,
+        ],
+        fromBlock: from,
+        toBlock: to,
+      }),
+      identityRegistryAddress
+        ? publicClient.getLogs({
+            address: identityRegistryAddress,
+            event: IDENTITY_URI_UPDATED_EVENT,
+            fromBlock: from,
+            toBlock: to,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    for (const log of registryChunk as RegistryLog[]) {
+      if (log.eventName === "Registered") registrations.push(log);
+      if (log.eventName === "TokenURIUpdated") tokenUriUpdates.push(log);
+      if (log.eventName === "Transfer") transfers.push(log);
+    }
+    identityUriUpdates.push(...(identityUriChunk as IdentityUriUpdatedLog[]));
+    if (to < latestBlock) await sleep(LOG_PAGE_DELAY_MS);
+  }
+
+  registrations.sort(byLogOrder);
+  tokenUriUpdates.sort(byLogOrder);
+  transfers.sort(byLogOrder);
+  identityUriUpdates.sort(byLogOrder);
+
+  return { registrations, tokenUriUpdates, transfers, identityUriUpdates };
 }
 
 function validationResponsesFromLogs(
@@ -326,66 +562,122 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
       newAgents: 0,
       totalAgents: existingAgents.length,
       scannedFrom: fromBlock.toString(),
+      scannedTo: latestBlock.toString(),
       latestBlock: latestBlock.toString(),
+      caughtUp: true,
       validationsProcessed: 0,
       validationsUpdated: 0,
     };
   }
 
-  // Paginate in 2000-block chunks (Base Sepolia public RPC limit).
-  const PAGE = 2000n;
+  const scannedTo =
+    latestBlock - fromBlock + 1n > MAX_BLOCKS_PER_RUN
+      ? fromBlock + MAX_BLOCKS_PER_RUN - 1n
+      : latestBlock;
+  const caughtUp = scannedTo === latestBlock;
 
-  // Scan Registered events.
-  const allLogs: any[] = [];
-  for (let from = fromBlock; from <= latestBlock; from += PAGE) {
-    const to = from + PAGE - 1n < latestBlock ? from + PAGE - 1n : latestBlock;
-    const chunk = await publicClient.getLogs({
-      address: cfg.registryAddress,
-      event: REGISTERED_EVENT,
-      fromBlock: from,
-      toBlock: to,
-    });
-    allLogs.push(...chunk);
+  const logs = await collectAgentIndexLogs(
+    publicClient,
+    cfg.registryAddress,
+    cfg.identityRegistryAddress,
+    fromBlock,
+    scannedTo,
+    LOG_PAGE_SIZE,
+  );
+
+  const agentRows = new Map(
+    existingAgents.map((agent) => [agent.tokenId, agent] as const),
+  );
+  let newAgents = 0;
+
+  for (const log of logs.registrations) {
+    try {
+      const row = await rowFromRegistrationLog(log, registry);
+      if (!agentRows.has(row.tokenId)) newAgents += 1;
+      agentRows.set(row.tokenId, row);
+    } catch (err) {
+      console.error(
+        `[indexer] index registered tokenId=${log.args.agentId} failed:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
-  const newAgents: RegisteredAgent[] = [];
-  if (allLogs.length > 0) {
-    const settled = await Promise.allSettled(
-      allLogs.map((log) => registry.resolve(log.args.agentId as bigint)),
+  for (const log of logs.tokenUriUpdates) {
+    const tokenId = log.args.tokenId.toString();
+    const row = agentRows.get(tokenId);
+    if (row) {
+      agentRows.set(tokenId, {
+        ...row,
+        publicMetadataUri: log.args.newURI,
+      });
+    }
+  }
+
+  for (const log of logs.transfers) {
+    const tokenId = log.args.tokenId.toString();
+    const row = agentRows.get(tokenId);
+    if (row) {
+      agentRows.set(tokenId, {
+        ...row,
+        owner: log.args.to,
+      });
+    }
+  }
+
+  const tokenIdByErc8004Id = new Map(
+    [...agentRows.values()].flatMap((row) =>
+      row.erc8004AgentId ? [[row.erc8004AgentId, row.tokenId] as const] : [],
+    ),
+  );
+  for (const log of logs.identityUriUpdates) {
+    const tokenId = tokenIdByErc8004Id.get(log.args.agentId.toString());
+    if (!tokenId) continue;
+    const row = agentRows.get(tokenId);
+    if (!row) continue;
+    const metadataUri = log.args.newURI;
+    const indexed = await indexedMetadataFromUri(
+      metadataUri,
+      baseAgentTags({ erc8004AgentId: row.erc8004AgentId, metadataUri }),
     );
-    settled.forEach((r, i) => {
-      if (r.status === "rejected")
-        console.error(
-          `[indexer] resolve agentId=${allLogs[i]?.args.agentId} failed:`,
-          r.reason,
-        );
-      else newAgents.push(r.value);
+    agentRows.set(tokenId, {
+      ...row,
+      metadataUri,
+      ...indexed,
     });
   }
 
-  const merged = [...existingAgents, ...newAgents];
+  const merged = [...agentRows.values()].sort((a, b) => {
+    const left = BigInt(a.tokenId);
+    const right = BigInt(b.tokenId);
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  });
 
   const { submitted: validationsProcessed, responses: validationsUpdated } =
     cfg.validationRegistryAddress
       ? await syncValidations(
           chainId,
           fromBlock,
-          latestBlock,
+          scannedTo,
           publicClient,
           cfg.validationRegistryAddress,
-          PAGE,
+          LOG_PAGE_SIZE,
         )
       : { submitted: 0, responses: 0 };
 
-  // Advance lastBlock only after all processing for this range is complete.
-  await setCachedAgents(chainId, cfg.registryAddress, merged, latestBlock);
+  // Advance lastBlock only after all processing for this bounded range is complete.
+  await setCachedAgents(chainId, cfg.registryAddress, merged, scannedTo);
 
   return {
     ok: true,
-    newAgents: newAgents.length,
+    newAgents,
     totalAgents: merged.length,
     scannedFrom: fromBlock.toString(),
+    scannedTo: scannedTo.toString(),
     latestBlock: latestBlock.toString(),
+    caughtUp,
     validationsProcessed,
     validationsUpdated: validationsUpdated,
   };

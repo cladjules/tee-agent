@@ -13,22 +13,24 @@ interface IAutomataDcapAttestationFee {
     function verifyAndAttestOnChain(
         bytes calldata rawQuote
     ) external payable returns (bool success, bytes memory output);
+
+    function verifyAndAttestOnChain(
+        bytes calldata rawQuote,
+        uint32 tcbEvaluationDataNumber
+    ) external payable returns (bool success, bytes memory output);
 }
 
 /**
  * @title TeeVerifier
  * @notice ERC-7857 transfer verifier and ERC-8004 validation verifier for Phala Cloud TDX oracle proofs.
  */
-contract TeeVerifier is
-    Ownable,
-    Pausable,
-    ReentrancyGuard,
-    IAgentDataVerifier
-{
+contract TeeVerifier is Ownable, Pausable, ReentrancyGuard, IAgentDataVerifier {
     using ECDSA for bytes32;
 
     /// @dev Automata AutomataDcapAttestationFee contract.
     address public immutable DCAP_ATTESTATION;
+    /// @dev Automata TCB evaluation data number. 0 means Automata standard().
+    uint32 public immutable DCAP_TCB_EVALUATION_DATA_NUMBER;
 
     uint256 private constant QUOTE_REPORT_DATA_OFFSET = 568; // 48 (header) + 520 (body offset to reportData)
     uint256 private constant REPORT_DATA_LENGTH = 64;
@@ -37,7 +39,7 @@ contract TeeVerifier is
     mapping(bytes32 => bool) private _usedProofs;
 
     error InvalidProofLength();
-    error DcapVerificationFailed();
+    error DcapVerificationFailed(bytes output);
     error QuoteTooShort();
     error OracleAddressMismatch();
 
@@ -48,10 +50,32 @@ contract TeeVerifier is
         bytes32 indexed quoteHash
     );
 
-    constructor(address admin_, address dcapAttestation_) Ownable(admin_) {
+    constructor(
+        address admin_,
+        address dcapAttestation_,
+        uint32 dcapTcbEvaluationDataNumber_
+    ) Ownable(admin_) {
         require(admin_ != address(0), "Invalid admin");
         require(dcapAttestation_ != address(0), "Invalid DCAP attestation");
         DCAP_ATTESTATION = dcapAttestation_;
+        DCAP_TCB_EVALUATION_DATA_NUMBER = dcapTcbEvaluationDataNumber_;
+    }
+
+    function _verifyDcapQuote(
+        bytes calldata rawQuote
+    ) private returns (bool success, bytes memory output) {
+        if (DCAP_TCB_EVALUATION_DATA_NUMBER == 0) {
+            return
+                IAutomataDcapAttestationFee(DCAP_ATTESTATION)
+                    .verifyAndAttestOnChain{value: msg.value}(rawQuote);
+        }
+
+        return
+            IAutomataDcapAttestationFee(DCAP_ATTESTATION)
+                .verifyAndAttestOnChain{value: msg.value}(
+                rawQuote,
+                DCAP_TCB_EVALUATION_DATA_NUMBER
+            );
     }
 
     /**
@@ -66,13 +90,13 @@ contract TeeVerifier is
         if (rawQuote.length < QUOTE_REPORT_DATA_OFFSET + REPORT_DATA_LENGTH)
             revert QuoteTooShort();
 
-        (bool success, ) = IAutomataDcapAttestationFee(DCAP_ATTESTATION)
-            .verifyAndAttestOnChain{value: msg.value}(rawQuote);
-        if (!success) revert DcapVerificationFailed();
+        (bool success, bytes memory output) = _verifyDcapQuote(rawQuote);
+        if (!success) revert DcapVerificationFailed(output);
 
-        bytes
-            memory reportDataBytes = rawQuote[QUOTE_REPORT_DATA_OFFSET:QUOTE_REPORT_DATA_OFFSET +
-                REPORT_DATA_LENGTH];
+        bytes memory reportDataBytes = rawQuote[
+            QUOTE_REPORT_DATA_OFFSET:QUOTE_REPORT_DATA_OFFSET +
+                REPORT_DATA_LENGTH
+        ];
 
         address quotedOracleAddress;
         assembly {
@@ -113,9 +137,8 @@ contract TeeVerifier is
         if (proof.length < QUOTE_REPORT_DATA_OFFSET + 32)
             revert InvalidProofLength();
 
-        (bool success, ) = IAutomataDcapAttestationFee(DCAP_ATTESTATION)
-            .verifyAndAttestOnChain{value: msg.value}(proof);
-        if (!success) revert DcapVerificationFailed();
+        (bool success, bytes memory output) = _verifyDcapQuote(proof);
+        if (!success) revert DcapVerificationFailed(output);
 
         bytes32 reportData;
         assembly {

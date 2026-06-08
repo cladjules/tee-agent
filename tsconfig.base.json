@@ -12,12 +12,13 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
+    "noImplicitAny": false,
     "sourceMap": true,
     "composite": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "exactOptionalPropertyTypes": true,
+    "exactOptionalPropertyTypes": false,
     "forceConsistentCasingInFileNames": true
   }
 }

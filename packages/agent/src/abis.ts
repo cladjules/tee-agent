@@ -19,6 +19,18 @@ export const REGISTERED_EVENT = parseAbiItem(
   "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
 );
 
+export const TOKEN_URI_UPDATED_EVENT = parseAbiItem(
+  "event TokenURIUpdated(uint256 indexed tokenId, string newURI)",
+);
+
+export const AGENT_TRANSFER_EVENT = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+);
+
+export const IDENTITY_URI_UPDATED_EVENT = parseAbiItem(
+  "event URIUpdated(uint256 indexed agentId, string newURI, address indexed updatedBy)",
+);
+
 export const VALIDATION_REQUEST_EVENT = parseAbiItem(
   "event ValidationRequest(address indexed validatorAddress, uint256 indexed agentId, string requestURI, bytes32 indexed requestHash)",
 );

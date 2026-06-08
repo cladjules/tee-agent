@@ -1,22 +1,32 @@
 /**
- * Server-only configuration. Never import from Client Components.
- * Extends the client config with secrets and server-side-only fields.
- *
- * Per-network RPC_URL_* vars allow both chains to be configured simultaneously.
- * Public contract addresses and scan start blocks come from deployments.json.
- * `getServerConfigForChain(chainId)` returns the full config for the requested
- * chain.
+ * Dashboard config: public deployment addresses, active chain cookie state,
+ * and server-only secrets layered on top of NETWORK_CONFIG.
  */
 
+import deploymentsJson from "../../../../deployments.json" with { type: "json" };
+import { cookies } from "next/headers";
 import type { AgentConfig } from "@tee-agent/agent/types";
-
+import type { Address } from "viem";
 import {
-  getClientConfigForChain,
-  getDeploymentForChain,
-  clientCfg,
-  BASE_CHAIN_ID,
-  BASE_SEPOLIA_CHAIN_ID,
-} from "./client-config";
+  DEFAULT_NETWORK,
+  getNetworkConfigByChainId,
+  NETWORK_CONFIG,
+} from "@tee-agent/agent/network";
+
+type RawDeployments = Record<
+  string,
+  {
+    contracts?: {
+      agentRegistry?: string;
+      mockDcapAttestation?: string;
+      teeVerifier?: string;
+      validationRegistry?: string;
+    };
+    fromBlock?: string | number;
+  }
+>;
+
+export const ACTIVE_CHAIN_COOKIE = "active_chain_id";
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -26,11 +36,65 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-// Chain IDs are public Base/Base Sepolia constants from client-config.
-const RPC_URL_MAP: Record<number, string | undefined> = {
-  [BASE_CHAIN_ID]: process.env.RPC_URL_BASE,
-  [BASE_SEPOLIA_CHAIN_ID]: process.env.RPC_URL_BASE_SEPOLIA,
-};
+const RPC_MAP = Object.fromEntries(
+  Object.values(NETWORK_CONFIG).map((network) => [
+    network.chain.id,
+    process.env[network.rpcEnvVar],
+  ]),
+) as Record<number, string | undefined>;
+
+export function getDeploymentForChain(chainId: number): {
+  agentRegistry?: Address;
+  teeVerifier?: Address;
+  validationRegistry?: Address;
+  fromBlock: bigint;
+} {
+  const raw = (deploymentsJson as RawDeployments)[String(chainId)];
+  const deployment: {
+    agentRegistry?: Address;
+    teeVerifier?: Address;
+    validationRegistry?: Address;
+    fromBlock: bigint;
+  } = {
+    fromBlock: raw?.fromBlock === undefined ? 0n : BigInt(raw.fromBlock),
+  };
+  if (raw?.contracts?.agentRegistry) {
+    deployment.agentRegistry = raw.contracts.agentRegistry as Address;
+  }
+  if (raw?.contracts?.teeVerifier) {
+    deployment.teeVerifier = raw.contracts.teeVerifier as Address;
+  }
+  if (raw?.contracts?.validationRegistry) {
+    deployment.validationRegistry = raw.contracts.validationRegistry as Address;
+  }
+  return deployment;
+}
+
+export async function getActiveChainId(): Promise<number> {
+  const store = await cookies();
+  const val = store.get(ACTIVE_CHAIN_COOKIE)?.value;
+  const id = val ? parseInt(val, 10) : NaN;
+  try {
+    return getNetworkConfigByChainId(id).chain.id;
+  } catch {
+    return DEFAULT_NETWORK.chain.id;
+  }
+}
+
+export function getClientConfigForChain(chainId: number): AgentConfig {
+  const network = getNetworkConfigByChainId(chainId);
+  const deployment = getDeploymentForChain(network.chain.id);
+  const config: AgentConfig = {
+    chain: network.chain,
+    identityRegistryAddress: network.identityRegistryAddress,
+    reputationRegistryAddress: network.reputationRegistryAddress,
+    registryAddress: deployment.agentRegistry,
+    teeVerifierAddress: deployment.teeVerifier,
+    validationRegistryAddress: deployment.validationRegistry,
+  };
+
+  return config;
+}
 
 /**
  * Returns the full server-side config for the given EVM chain ID.
@@ -43,31 +107,11 @@ export function getServerConfigForChain(chainId: number): AgentConfig & {
 
   return {
     ...clientConfig,
-    rpcUrl: RPC_URL_MAP[chainId],
-    zeroGPrivateKey: process.env.PRIVATE_KEY,
-    zeroGRpcUrl: process.env.ZERO_G_RPC_URL,
-    zeroGIndexerUrl: process.env.ZERO_G_INDEXER_URL,
-    pinataJwt: process.env.PINATA_JWT,
+    rpcUrl: RPC_MAP[chainId],
     registryFromBlock: deployment.fromBlock,
-  };
-}
-
-export function getMutationConfigForChain(
-  chainId: number,
-): AgentConfig & { registryFromBlock: bigint } {
-  return {
-    ...getServerConfigForChain(chainId),
-    zeroGPrivateKey: requiredEnv("PRIVATE_KEY"),
-    zeroGRpcUrl: requiredEnv("ZERO_G_RPC_URL"),
-    zeroGIndexerUrl: requiredEnv("ZERO_G_INDEXER_URL"),
+    privateKey: requiredEnv("PRIVATE_KEY"),
+    zeroGRpcUrl: requiredEnv("RPC_URL_ZERO_G"),
+    zeroGIndexerUrl: requiredEnv("INDEXER_URL_ZERO_G"),
     pinataJwt: requiredEnv("PINATA_JWT"),
   };
 }
-
-/** Chain ID shorthand for cache keys and client-side checks. */
-export const chainId = clientCfg.chain.id;
-
-/** True when the minimum required env vars are present for the default chain. */
-export const isConfigured = !!(
-  clientCfg.registryAddress && RPC_URL_MAP[BASE_SEPOLIA_CHAIN_ID]
-);

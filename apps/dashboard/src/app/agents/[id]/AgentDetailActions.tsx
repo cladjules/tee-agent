@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { keccak256, toBytes } from "viem";
 import type { AgentService } from "@tee-agent/agent/types";
 import {
+  AGENT_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
   REPUTATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
@@ -13,11 +14,16 @@ import { buildRunTypedData } from "@tee-agent/agent/typed-data";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import {
   prepareUpdateAgentServices,
+  prepareUpdateAgentPublicMetadata,
   recordOracleRun,
 } from "@/lib/actions/agents";
 import { prepareFeedback } from "@/lib/actions/registry";
 import type { CachedOracleRun } from "@/lib/agent-cache";
 import type { ValidationResponse } from "@/lib/actions/agents";
+import {
+  AgentMetadataForm,
+  type AgentMetadataFormValue,
+} from "@/components/AgentMetadataForm";
 import {
   ServiceEditorPanel,
   type ServiceEditorEntry,
@@ -40,6 +46,8 @@ interface Props {
   erc8004AgentId?: string;
   owner: string;
   initialServices: readonly AgentService[];
+  initialPublicMetadata: AgentMetadataFormValue;
+  initialPublicMetadataCreatedAt?: number;
   initialRuns?: CachedOracleRun[];
   initialValidationResponses?: ValidationResponse[];
   clientCfg: ActionClientConfig;
@@ -50,6 +58,8 @@ export default function AgentDetailActions({
   erc8004AgentId,
   owner,
   initialServices,
+  initialPublicMetadata,
+  initialPublicMetadataCreatedAt,
   initialRuns,
   initialValidationResponses,
   clientCfg,
@@ -269,15 +279,29 @@ export default function AgentDetailActions({
       </div>
 
       {isOwner && (
-        <CollapsibleSection
-          title="Edit Services"
-          description="Update the ERC-8004 service list and refresh the ERC-721 service traits."
-        >
-          <ServiceEditorForm
-            agentId={agentId}
-            initialServices={initialServices}
-          />
-        </CollapsibleSection>
+        <div className="space-y-4">
+          <CollapsibleSection
+            title="Edit ERC-721 Metadata"
+            description="Update NFT metadata used by tokenURI, marketplaces, and the public metadata URI."
+          >
+            <PublicMetadataForm
+              agentId={agentId}
+              initialMetadata={initialPublicMetadata}
+              createdAt={initialPublicMetadataCreatedAt}
+              services={initialServices}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Edit Services"
+            description="Update the ERC-8004 service list and refresh the ERC-721 service traits."
+          >
+            <ServiceEditorForm
+              agentId={agentId}
+              initialServices={initialServices}
+            />
+          </CollapsibleSection>
+        </div>
       )}
     </div>
   );
@@ -404,6 +428,77 @@ function CollapsibleSection({
 }
 
 // ─── Forms ────────────────────────────────────────────────────────────────────
+
+function PublicMetadataForm({
+  agentId,
+  initialMetadata,
+  createdAt,
+  services,
+}: {
+  agentId: string;
+  initialMetadata: AgentMetadataFormValue;
+  createdAt?: number;
+  services: readonly AgentService[];
+}) {
+  const { isPending, result, run } = useActionState();
+  const router = useRouter();
+  const { getViemClients, switchChain } = useWallet();
+  const [metadata, setMetadata] =
+    useState<AgentMetadataFormValue>(initialMetadata);
+  const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        run(async () => {
+          const prepared = await prepareUpdateAgentPublicMetadata({
+            tokenId: agentId,
+            name: metadata.name,
+            description: metadata.description,
+            imageUrl: metadata.imageUrl || undefined,
+            agentType: metadata.agentType || undefined,
+            services: services.map((service) => ({
+              name: service.name,
+              endpoint: service.endpoint,
+              ...(service.version ? { version: service.version } : {}),
+              ...(service.skills ? { skills: [...service.skills] } : {}),
+              ...(service.domains ? { domains: [...service.domains] } : {}),
+            })),
+            createdAt,
+          });
+          if ("error" in prepared) return { error: prepared.error };
+
+          setShowBackgroundNotice(true);
+          await switchChain();
+
+          const { publicClient, walletClient } = await getViemClients();
+          const hash = await walletClient.writeContract({
+            address: prepared.contractAddress,
+            abi: AGENT_REGISTRY_ABI,
+            functionName: "setTokenURI",
+            args: [BigInt(prepared.tokenId), prepared.publicMetadataUri],
+            chain: walletClient.chain,
+            account: walletClient.account!,
+          });
+          await publicClient.waitForTransactionReceipt({ hash });
+
+          router.refresh();
+          return { txHash: hash };
+        });
+      }}
+      className="space-y-4"
+    >
+      <BackgroundActionModal
+        open={showBackgroundNotice}
+        onClose={() => setShowBackgroundNotice(false)}
+      />
+      <AgentMetadataForm value={metadata} onChange={setMetadata} />
+      <SubmitButton isPending={isPending} label="Save ERC-721 Metadata" />
+      <ResultBanner result={result} />
+    </form>
+  );
+}
 
 function FeedbackForm({
   erc8004AgentId,
@@ -838,17 +933,14 @@ function RunOracleForm({
         account: walletClient.account!,
       });
 
-      const recorded = await recordOracleRun(
-        {
-          agentId,
-          erc8004AgentId: linkedErc8004AgentId,
-          teeOracleUrl: trimmedUrl,
-          payload,
-          signature,
-          deadline,
-        },
-        actualChainId,
-      );
+      const recorded = await recordOracleRun({
+        agentId,
+        erc8004AgentId: linkedErc8004AgentId,
+        teeOracleUrl: trimmedUrl,
+        payload,
+        signature,
+        deadline,
+      });
       if (!recorded.ok) {
         setRunResult({ error: recorded.error });
         return;

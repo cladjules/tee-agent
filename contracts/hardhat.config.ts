@@ -9,8 +9,14 @@ export default defineConfig({
     sources: "./src",
   },
   verify: {
+    blockscout: {
+      enabled: false,
+    },
     etherscan: {
       apiKey: process.env.EXPLORER_API_KEY,
+    },
+    sourcify: {
+      enabled: false,
     },
   },
   chainDescriptors: {
@@ -68,14 +74,14 @@ export default defineConfig({
       type: "http",
       chainType: "op",
       chainId: 84532,
-      url: configVariable("BASE_SEPOLIA_RPC_URL"),
+      url: configVariable("RPC_URL_BASE_SEPOLIA"),
       accounts: [configVariable("PRIVATE_KEY")],
     },
     base: {
       type: "http",
       chainType: "op",
       chainId: 8453,
-      url: configVariable("BASE_RPC_URL"),
+      url: configVariable("RPC_URL_BASE"),
       accounts: [configVariable("PRIVATE_KEY")],
     },
   },

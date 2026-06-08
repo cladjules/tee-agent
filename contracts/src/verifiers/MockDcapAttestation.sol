@@ -8,4 +8,11 @@ contract MockDcapAttestation {
     ) external payable returns (bool success, bytes memory output) {
         return (true, "");
     }
+
+    function verifyAndAttestOnChain(
+        bytes calldata,
+        uint32
+    ) external payable returns (bool success, bytes memory output) {
+        return (true, "");
+    }
 }

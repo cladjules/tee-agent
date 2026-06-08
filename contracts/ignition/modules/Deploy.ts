@@ -16,6 +16,8 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *   identityRegistryAddress  — official ERC-8004 Identity Registry passed to the AgentRegistry
  *                              constructor; zero disables co-registration only when explicitly passed
  *   dcapAttestationAddress   — Automata DCAP attestation contract, or explicit mock address
+ *   dcapTcbEvaluationDataNumber — Automata TCB evaluation data number.
+ *                                 Use 0 for Automata standard().
  *
  * Run:
  *   npm run deploy:baseSepolia
@@ -27,9 +29,13 @@ export default buildModule("TeeAgent", (m) => {
   const identityRegistryAddress = m.getParameter("identityRegistryAddress");
 
   const dcapAttestationAddress = m.getParameter("dcapAttestationAddress");
+  const dcapTcbEvaluationDataNumber = m.getParameter(
+    "dcapTcbEvaluationDataNumber",
+  );
   const teeVerifier = m.contract("TeeVerifier", [
     deployer,
     dcapAttestationAddress,
+    dcapTcbEvaluationDataNumber,
   ]);
 
   const agentRegistry = m.contract("AgentRegistry", [

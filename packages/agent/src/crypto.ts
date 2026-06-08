@@ -27,8 +27,6 @@ import type {
 import { keccak256, stringToHex } from "viem";
 import { readZeroGBytes } from "./storage/zero-g.js";
 
-export { buildAccessPayloads } from "./proofs.js";
-
 const ALGORITHM = "aes-256-gcm";
 const KEY_LEN = 32;
 const IV_LEN = 12;
@@ -239,9 +237,9 @@ export async function readJsonFromUri<T>(uri: string): Promise<T> {
     return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
   }
   if (uri.startsWith("zerog://")) {
-    const indexerUrl = process.env.ZERO_G_INDEXER_URL?.trim();
+    const indexerUrl = process.env.INDEXER_URL_ZERO_G?.trim();
     if (!indexerUrl) {
-      throw new Error("ZERO_G_INDEXER_URL is required to read zerog:// URIs.");
+      throw new Error("INDEXER_URL_ZERO_G is required to read zerog:// URIs.");
     }
     const bytes = await readZeroGBytes(uri, indexerUrl);
     return JSON.parse(new TextDecoder().decode(bytes)) as T;

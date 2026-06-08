@@ -34,6 +34,46 @@ export const recordOracleRunParamsSchema = z
   })
   .strict();
 
+const agentServiceSchema = z
+  .object({
+    name: z.string().trim().min(1, "Service name is required."),
+    endpoint: z.string().trim().min(1, "Service endpoint is required."),
+    version: z.string().trim().optional(),
+    skills: z.array(z.string().trim().min(1)).optional(),
+    domains: z.array(z.string().trim().min(1)).optional(),
+  })
+  .strict();
+
+export const agentPublicMetadataParamsSchema = z
+  .object({
+    tokenId: z.string().trim().min(1, "Token ID is required."),
+    name: z.string().trim().min(1, "Name is required."),
+    description: z.string().trim().min(1, "Description is required."),
+    imageUrl: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value) => (value ? value : undefined))
+      .refine((value) => {
+        if (!value) return true;
+        try {
+          const url = new URL(value);
+          return url.protocol === "http:" || url.protocol === "https:";
+        } catch {
+          return false;
+        }
+      }, "Image URL must be a valid http(s) URL."),
+    agentType: z
+      .string()
+      .trim()
+      .optional()
+      .transform((value) => (value ? value : undefined)),
+    services: z.array(agentServiceSchema).optional(),
+    x402Support: z.boolean().optional(),
+    createdAt: z.number().int().positive().optional(),
+  })
+  .strict();
+
 export const oracleAddressResponseSchema = z
   .object({
     address: hexStringSchema,
@@ -68,7 +108,9 @@ export const oracleErrorResponseSchema = z
   .passthrough();
 
 export type RecordOracleRunParams = z.input<typeof recordOracleRunParamsSchema>;
-
+export type AgentPublicMetadataParams = z.input<
+  typeof agentPublicMetadataParamsSchema
+>;
 export function zodErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof z.ZodError) {
     return err.issues[0]?.message ?? fallback;

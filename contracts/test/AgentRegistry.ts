@@ -39,6 +39,7 @@ describe("AgentRegistry", function () {
     const teeVerifier = await viem.deployContract("TeeVerifier", [
       alice.account.address,
       dcap.address,
+      0,
     ]);
     const registry = await viem.deployContract("AgentRegistry", [
       "AgentRegistry",
@@ -85,12 +86,7 @@ describe("AgentRegistry", function () {
   it("mint: mints token with correct owner and URI", async function () {
     const { registry, alice } = await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
-      [
-        alice.account.address,
-        "zerog://0xAgent123",
-        "zerog://0xAgent123",
-        [],
-      ],
+      [alice.account.address, "zerog://0xAgent123", "zerog://0xAgent123", []],
       { account: alice.account },
     );
     const id = 0n;
@@ -141,12 +137,7 @@ describe("AgentRegistry", function () {
   it("mint: getERC8004AgentId returns 0 when no registry configured", async function () {
     const { registry, alice } = await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
-      [
-        alice.account.address,
-        "zerog://0xAgent123",
-        "zerog://0xAgent123",
-        [],
-      ],
+      [alice.account.address, "zerog://0xAgent123", "zerog://0xAgent123", []],
       { account: alice.account },
     );
     assert.equal(await registry.read.getERC8004AgentId([0n]), 0n);
@@ -180,12 +171,7 @@ describe("AgentRegistry", function () {
   it("setTokenURI: updates URI when called by owner", async function () {
     const { registry, alice } = await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
-      [
-        alice.account.address,
-        "zerog://0xAgent123",
-        "zerog://0xAgent123",
-        [],
-      ],
+      [alice.account.address, "zerog://0xAgent123", "zerog://0xAgent123", []],
       { account: alice.account },
     );
     await registry.write.setTokenURI([0n, "zerog://0xNewHash"], {
@@ -198,12 +184,7 @@ describe("AgentRegistry", function () {
     const { registry, alice, bob } =
       await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
-      [
-        alice.account.address,
-        "zerog://0xAgent123",
-        "zerog://0xAgent123",
-        [],
-      ],
+      [alice.account.address, "zerog://0xAgent123", "zerog://0xAgent123", []],
       { account: alice.account },
     );
     await assert.rejects(
@@ -218,12 +199,7 @@ describe("AgentRegistry", function () {
     const { registry, alice, bob } =
       await networkHelpers.loadFixture(deployFixture);
     await registry.write.mint(
-      [
-        alice.account.address,
-        "zerog://0xAgent123",
-        "zerog://0xAgent123",
-        [],
-      ],
+      [alice.account.address, "zerog://0xAgent123", "zerog://0xAgent123", []],
       { account: alice.account },
     );
     await registry.write.transferFrom(
@@ -237,8 +213,9 @@ describe("AgentRegistry", function () {
   });
 
   it("mint: does not require a registered oracle", async function () {
-    const { registry, alice } =
-      await networkHelpers.loadFixture(deployOracleRegistrationFixture);
+    const { registry, alice } = await networkHelpers.loadFixture(
+      deployOracleRegistrationFixture,
+    );
     const dataHash = keccak256(toHex("encrypted-agent-payload"));
 
     await registry.write.mint(

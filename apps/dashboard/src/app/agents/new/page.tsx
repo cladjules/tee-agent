@@ -2,7 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { parseEventLogs } from "viem";
-import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/abis";
+import {
+  AGENT_REGISTRY_ABI,
+  IDENTITY_REGISTRY_ABI,
+} from "@tee-agent/agent/abis";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import {
   prepareCreateAgent,
@@ -15,19 +18,10 @@ import {
   ServiceEditorPanel,
   type ServiceEditorEntry,
 } from "@/components/ServiceEditorPanel";
-import { IDENTITY_REGISTRY_ABI } from "../../../../../../packages/agent/src/abis";
+import { AgentMetadataForm } from "@/components/AgentMetadataForm";
 import type { PrepareImportedErc8004TeeOracleResult } from "@tee-agent/agent/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-const AGENT_TYPES = [
-  "assistant",
-  "researcher",
-  "coder",
-  "analyst",
-  "creative",
-  "other",
-];
 
 // ── Skill templates (Private Data step presets) ───────────────────────────────
 
@@ -293,35 +287,38 @@ export default function NewAgentPage() {
           await publicClient.waitForTransactionReceipt({ hash: updateHash });
         }
 
-        const mintHash = await walletClient.writeContract(
-          isImport
-            ? {
-                address: prepared.contractAddress!,
-                abi: AGENT_REGISTRY_ABI,
-                functionName: "mintWithExisting8004",
-                args: [
-                  address as `0x${string}`,
-                  prepared.publicMetadataUri!,
-                  BigInt(importTokenId.trim()),
-                  prepared.intelligentData ?? [],
-                ],
-                chain: walletClient.chain,
-                account: walletClient.account!,
-              }
-            : {
-                address: prepared.contractAddress!,
-                abi: AGENT_REGISTRY_ABI,
-                functionName: "mint",
-                args: [
-                  address as `0x${string}`,
-                  prepared.publicMetadataUri!,
-                  prepared.agentMetadataUri!,
-                  prepared.intelligentData ?? [],
-                ],
-                chain: walletClient.chain,
-                account: walletClient.account!,
-              },
-        );
+        const mintRequest = isImport
+          ? {
+              address: prepared.contractAddress!,
+              abi: AGENT_REGISTRY_ABI,
+              functionName: "mintWithExisting8004",
+              args: [
+                address as `0x${string}`,
+                prepared.publicMetadataUri!,
+                BigInt(importTokenId.trim()),
+                prepared.intelligentData ?? [],
+              ],
+              chain: walletClient.chain,
+              account: walletClient.account!,
+            }
+          : {
+              address: prepared.contractAddress!,
+              abi: AGENT_REGISTRY_ABI,
+              functionName: "mint",
+              args: [
+                address as `0x${string}`,
+                prepared.publicMetadataUri!,
+                prepared.agentMetadataUri!,
+                prepared.intelligentData ?? [],
+              ],
+              chain: walletClient.chain,
+              account: walletClient.account!,
+            };
+        const mintGas = await publicClient.estimateContractGas(mintRequest);
+        const mintHash = await walletClient.writeContract({
+          ...mintRequest,
+          gas: (mintGas * 120n) / 100n,
+        });
 
         const receipt = await publicClient.waitForTransactionReceipt({
           hash: mintHash,
@@ -467,50 +464,15 @@ export default function NewAgentPage() {
         {step === 0 && (
           <>
             <h2 className="text-base font-semibold text-gray-100">Identity</h2>
-            <div className="space-y-4">
-              <LabeledField label="Name *">
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="My Research Agent"
-                  className={INPUT}
-                />
-              </LabeledField>
-              <LabeledField label="Description *">
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  placeholder="What does this agent do?"
-                  className={`${INPUT} resize-y`}
-                />
-              </LabeledField>
-              <div className="grid grid-cols-2 gap-4">
-                <LabeledField label="Image URL">
-                  <input
-                    type="url"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="https://…"
-                    className={INPUT}
-                  />
-                </LabeledField>
-                <LabeledField label="Type">
-                  <select
-                    value={agentType}
-                    onChange={(e) => setAgentType(e.target.value)}
-                    className={INPUT}
-                  >
-                    {AGENT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t.charAt(0).toUpperCase() + t.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </LabeledField>
-              </div>
-            </div>
+            <AgentMetadataForm
+              value={{ name, description, imageUrl, agentType }}
+              onChange={(next) => {
+                setName(next.name);
+                setDescription(next.description);
+                setImageUrl(next.imageUrl);
+                setAgentType(next.agentType);
+              }}
+            />
           </>
         )}
 
@@ -899,21 +861,6 @@ function Header() {
       <p className="text-gray-400 text-sm mt-1">
         Register an on-chain AI agent NFT (ERC-721 + ERC-8004).
       </p>
-    </div>
-  );
-}
-
-function LabeledField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1">
-      <label className="block text-xs text-gray-400">{label}</label>
-      {children}
     </div>
   );
 }

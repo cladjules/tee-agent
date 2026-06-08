@@ -13,8 +13,17 @@ Tee Agent is a full-stack framework for deploying AI agents as sovereign on-chai
 
 The production shape is simple: deploy the contracts, deploy at least one Phala
 CVM oracle, mint agents whose `teeOracle` service points at that CVM, then use
-the SDK packages from your own app. The dashboard is a reference app, not a
-required runtime.
+the SDK packages from your own app. Remote oracle trust is enforced on-chain:
+`TeeVerifier` calls Automata DCAP to verify Intel TDX hardware quotes before it
+accepts oracle registration or validation proofs. Transfer proofs are accepted
+only when they are signed by an already registered TDX-attested oracle key. The
+dashboard is a reference app, not a required runtime.
+
+> **Dashboard URL: https://teeagent.xyz**
+>
+> This is the user-facing dashboard. It is **not** the oracle URL. Agent
+> `teeOracle` services must point at the Phala CVM HTTPS endpoint copied from
+> Phala Cloud.
 
 ---
 
@@ -34,16 +43,25 @@ npm run deploy:base
 npm run setup-env
 ```
 
-`setup-env` writes public contract addresses to root `deployments.json`. Keep
-that file with your app and oracle deployment; it is the source of truth for
-`agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks.
+`setup-env` scans every Ignition deployment directory and writes public contract
+addresses to root `deployments.json`. Keep that file with your app and oracle
+deployment; it is the source of truth for `agentRegistry`, `teeVerifier`,
+`validationRegistry`, and scan start blocks.
 
-DCAP mode is controlled by the Ignition parameter file:
+Base Sepolia supports two separate contract deployments:
 
-- Base uses real DCAP.
-- Base Sepolia can use real or fake DCAP through
-  `contracts/ignition/parameters.baseSepolia.json`.
-- Local development uses fake DCAP.
+- `remoteOracle` uses real Automata/DCAP attestation for Phala CVMs.
+- `localOracle` deploys a separate `MockDcapAttestation` contract for tappd
+  simulator development.
+
+There are no runtime deployment profiles. Root `deployments.json` has one
+contract set per chain. Base Sepolia is the only selectable case: run
+`setup-env` with the mode you want before starting the dashboard or oracle:
+
+```bash
+BASE_SEPOLIA_ORACLE=remote npm run setup-env --workspace=contracts
+BASE_SEPOLIA_ORACLE=local npm run setup-env --workspace=contracts
+```
 
 ### 2. Implement an oracle entry
 
@@ -51,7 +69,6 @@ An oracle is just an `@tee-agent/server` handler. Put production entries under
 `apps/oracle/src`, for example `apps/oracle/src/prod/my-oracle.ts`:
 
 ```typescript
-import "dotenv/config";
 import { z } from "zod";
 import { startOracle, type AgentHandler } from "@tee-agent/server";
 import deployments from "../../../../deployments.json" with { type: "json" };
@@ -64,7 +81,7 @@ const handler: AgentHandler = {
   async run(rawPayload, ctx) {
     const payload = payloadSchema.parse(rawPayload);
     const systemPrompt = ctx.blobs[0] as string;
-    const config = ctx.blobs[1] as Record<string, unknown>;
+    const config = ctx.blobs[1] as { model: string };
 
     return {
       result: `${systemPrompt}\n\n${payload.prompt}`,
@@ -80,7 +97,8 @@ await startOracle({ handler, deployments });
 The server package handles the production plumbing:
 
 - derives the oracle wallet inside the Phala TDX CVM
-- self-registers that TEE-derived oracle address in `TeeVerifier`
+- self-registers that TEE-derived oracle address in `TeeVerifier` with an
+  Automata DCAP-verified Intel TDX quote
 - exposes `GET /address`, `POST /run`, `POST /reencrypt`, and `POST /validate`
 - decrypts ERC-7857 blobs inside the TEE
 - re-wraps transfer keys for recipient oracle public keys
@@ -94,9 +112,11 @@ value. Do not set local simulator values in production.
 ```dotenv
 NETWORK=base
 RPC_URL_BASE=
+APP_NAME=TEE-ORACLE
+# Oracle transaction signer, not the agent owner/creator key.
 PRIVATE_KEY=
-ZERO_G_RPC_URL=
-ZERO_G_INDEXER_URL=
+RPC_URL_ZERO_G=
+INDEXER_URL_ZERO_G=
 LLM_API_KEY=
 LLM_API_BASE=
 LLM_VALIDATION_MODEL=
@@ -104,91 +124,145 @@ PORT=3001
 DSTACK_VERIFIER_URL=
 ```
 
-`PRIVATE_KEY` is the transaction signer. It pays gas for `initValidator`,
-validation responses, and 0G storage operations. The oracle identity itself is
-the TEE-derived wallet returned by `GET /address`.
+`PRIVATE_KEY` is the oracle transaction signer, not the agent owner/creator key.
+It pays gas for oracle-owned infrastructure transactions: `initValidator`,
+validation responses, and 0G storage operations. Agent owners still sign
+mint/run/transfer and `ReencryptRequest` messages with their own wallet; those
+signatures are sent in request bodies and are not stored in oracle env. The
+oracle identity itself is the TEE-derived wallet returned by `GET /address`.
 
 ### 4. Deploy the Phala CVM
 
-Phala Cloud supports CVMs deployed from Docker Compose through the dashboard or
-the `phala` CLI. This repo uses the CLI path so oracle deployment can be
-scripted and repeated.
-
-Install and authenticate the Phala CLI once:
-
-```bash
-npm install -g phala
-phala login
-```
+Use the repo scripts from the repository root. They build the image, generate
+the Phala compose file, deploy or update the linked CVM, and print the oracle
+URL when Phala exposes the endpoint.
 
 Deploy any oracle source file under `apps/oracle/src`:
 
 ```bash
-# from repo root
-npm run deploy:oracle -- src/prod/my-oracle.ts
-
-# equivalent from apps/oracle
-cd apps/oracle
-npm run deploy -- src/prod/my-oracle.ts
+npm run oracle:image
+npm run oracle:deploy -- src/prod/my-oracle.ts
 ```
 
 The deploy script validates the source path, maps it to the compiled
-`dist/...js` entry, then runs:
+`dist/...js` entry, reads `ORACLE_IMAGE` from root `.env`, writes
+`apps/oracle/.phala/docker-compose.generated.yml` with that concrete image,
+passes the compiled entry as `ORACLE_ENTRY`, and prints the CVM HTTPS oracle URL
+at the end of a successful deploy.
+
+The image must be pullable by the remote CVM. Use a public registry image or a
+registry Phala can authenticate to.
+
+To build and push the oracle image:
 
 ```bash
-phala deploy -e .env -e ORACLE_ENTRY=<compiled-entry> --wait
+npm run oracle:image
 ```
 
-After the first deploy, link the local `apps/oracle/phala.toml` to the CVM so
-future deploys update the same instance:
+`oracle:image` uses `git config --global user.name` as the Docker login
+username and default GHCR owner. If the GHCR token is missing, the script prints
+the GitHub token link, asks you to paste it, saves it, logs into GHCR, builds
+the image for `linux/amd64`, pushes it under a fresh git-SHA timestamp tag, then
+saves `ORACLE_IMAGE`, `ORACLE_DEPLOYMENTS_SHA`, `ORACLE_IMAGE_SOURCE_SHA`, and
+the Phala pull credentials to root `.env` so Phala Cloud can pull private GHCR
+images and the deploy script can verify the image matches the current
+`deployments.json` and oracle source.
 
-```bash
-cd apps/oracle
-phala link
-```
+After a successful first deploy, the deploy script runs `phala link` when
+`apps/oracle/phala.toml` does not have a CVM identity (`name` or `app_id`), so
+future deploys update the same instance. The first deploy is already processing
+at that point; wait for Phala to finish before running deploy again. If the
+linked CVM is stopped on a later deploy, the script starts it after Phala accepts
+the new compose/env deploy.
+If a later deploy reports that the requested CVM was not found, the script
+treats the stored CVM identity as stale, removes it from `phala.toml`, creates a
+new CVM, and links the new deployment.
 
-In Phala Cloud, expose the oracle port and copy the public HTTPS endpoint from
-the CVM Network tab. Production agents should use that URL as their
-`teeOracle` service endpoint.
-
-### 5. Verify the deployed oracle
-
-```bash
-curl https://your-oracle.example/health
-curl https://your-oracle.example/address
-curl https://your-oracle.example/info
-curl https://your-oracle.example/attestation
-```
+`npm run oracle:deploy` prints the public Phala HTTPS endpoint when it is
+available. Production agents should use that URL as their `teeOracle` service
+endpoint.
 
 `/address` returns the TEE-derived signer address and public key. On startup the
 oracle calls `initValidator`; if that transaction fails, transfer, validation,
 and decryption checks that depend on registered TEE oracle signatures will fail
 on-chain.
 
-### 6. Mint agents against the production oracle
+### 5. TEE hardware verification
+
+Remote oracle deployments use the real Automata DCAP verifier contract. The
+oracle asks Phala dstack for an Intel TDX quote, then `TeeVerifier` submits that
+quote to Automata on-chain.
+
+There are two quote paths:
+
+- `initValidator` registers the oracle key. The quote's `reportData` must bind
+  the TEE-derived oracle address to the running CVM. Any wallet can pay gas for
+  this transaction, but the registered oracle address must come from the TEE
+  quote, not from `PRIVATE_KEY`.
+- `validationResponse` verifies a specific result. The quote commits to the
+  agent id, request hash, and score before the score is accepted on-chain.
+
+This is why `remoteOracle` contract deployments must be used for real Phala CVMs
+and why `localOracle` is only for tappd simulator development. In local mode,
+`TeeVerifier` is wired to `MockDcapAttestation`; in remote mode it is wired to
+Automata DCAP. Remote deployment parameters use Automata's current
+`standard()` collateral with `dcapTcbEvaluationDataNumber = 0`, so the verifier
+is not pinned to stale TD_QE identity collateral.
+
+### 6. Mint agents
 
 When minting, include a `teeOracle` service that points at the deployed Phala
-HTTPS endpoint. `prepareMint` calls `GET /address`, verifies the oracle, encrypts
-private data for its public key, uploads encrypted blobs to 0G Storage, uploads
-metadata to IPFS, and returns calldata-ready mint data.
+CVM oracle endpoint printed by `npm run oracle:deploy`.
+
+`prepareMint` calls `GET /address`, verifies the oracle, encrypts private data
+for its public key, uploads encrypted blobs to 0G Storage, uploads metadata to
+IPFS, and returns calldata-ready mint data.
+
+#### 6a. Use the dashboard
+
+Use the dashboard at:
+
+```text
+https://teeagent.xyz
+```
+
+That dashboard URL is for humans and wallets. It is not the `teeOracle`
+endpoint written into ERC-8004 agent metadata.
+
+The dashboard handles metadata, encryption, 0G uploads, Pinata IPFS uploads,
+wallet minting, agent listing, owner-only decrypt, updates, validation, and
+transfer flows.
+
+#### 6b. Deploy / mint yourself using SDK
+
+Use `@tee-agent/server` only for oracle services. Use `@tee-agent/agent` for
+everything a client or backend app needs: config, ABIs, mint prep, transfer
+prep, registry reads, validation, feedback, service updates, encryption, and 0G
+storage.
 
 ```typescript
-import { createConfig } from "@tee-agent/agent/config";
+import { getNetworkConfig } from "@tee-agent/agent/network";
+import { getNetworkDeploymentByChainId } from "@tee-agent/agent/config";
 import { prepareMint } from "@tee-agent/agent/mint";
 import { AGENT_REGISTRY_ABI } from "@tee-agent/agent/abis";
+import type { AgentConfig } from "@tee-agent/agent/types";
 import deployments from "./deployments.json" with { type: "json" };
 
-const config = createConfig(
-  "base",
-  {
-    rpcUrl: process.env.RPC_URL_BASE!,
-    pinataJwt: process.env.PINATA_JWT!,
-    zeroGPrivateKey: process.env.PRIVATE_KEY!,
-    zeroGRpcUrl: process.env.ZERO_G_RPC_URL!,
-    zeroGIndexerUrl: process.env.ZERO_G_INDEXER_URL!,
-  },
-  deployments,
-);
+const network = getNetworkConfig("base");
+const deployment = getNetworkDeploymentByChainId(network.chainId, deployments);
+const config = {
+  chain: network.chain,
+  registryAddress: deployment.contracts.agentRegistry,
+  teeVerifierAddress: deployment.contracts.teeVerifier,
+  validationRegistryAddress: deployment.contracts.validationRegistry,
+  identityRegistryAddress: network.identityRegistryAddress,
+  reputationRegistryAddress: network.reputationRegistryAddress,
+  rpcUrl: process.env.RPC_URL_BASE!,
+  pinataJwt: process.env.PINATA_JWT!,
+  privateKey: process.env.PRIVATE_KEY!,
+  zeroGRpcUrl: process.env.RPC_URL_ZERO_G!,
+  zeroGIndexerUrl: process.env.INDEXER_URL_ZERO_G!,
+} satisfies AgentConfig;
 
 const prepared = await prepareMint(config, {
   name: "Production Agent",
@@ -197,7 +271,7 @@ const prepared = await prepareMint(config, {
   services: [
     {
       name: "teeOracle",
-      endpoint: "https://your-oracle.example",
+      endpoint: oracleUrl,
     },
   ],
   privateEntries: [
@@ -224,23 +298,6 @@ Changing `teeOracle` later is not a normal service edit. It requires oracle key
 rotation so the encrypted blob keys are re-wrapped for the new oracle public
 key.
 
-### 7. Use the packages in your own app
-
-Use `@tee-agent/server` only for oracle services. Use `@tee-agent/agent` for
-everything a client or backend app needs: config, ABIs, mint prep, transfer
-prep, registry reads, validation, feedback, service updates, encryption, and 0G
-storage.
-
-```typescript
-import { AgentRegistry } from "@tee-agent/agent/registry";
-import { createConfig } from "@tee-agent/agent/config";
-import {
-  createTransferOffer,
-  acceptTransferOffer,
-  buildTransferTxArgs,
-} from "@tee-agent/agent/transfer";
-```
-
 The transfer helpers are storage-agnostic. Store `TransferOffer` and
 `TransferAcceptance` in your own database, queue, inbox, IPFS object, or any
 other message layer.
@@ -261,16 +318,16 @@ Every agent is minted as an **ERC-721 NFT**. Ownership is registered on-chain wi
 
 Sensitive agent data — system prompts, API keys, knowledge bases — is stored as **Intelligent Data** per [ERC-7857](https://eips.ethereum.org/EIPS/eip-7857). All data is AES-256-GCM encrypted and uploaded to **0G Storage**. The `zerog://` URI and a content hash are anchored on-chain.
 
-- Data is encrypted with **AES-256-GCM**, with sealed keys managed by a **TEE Oracle** (Intel TDX via Phala Cloud)
+- Data is encrypted with **AES-256-GCM**, with content keys wrapped by a **TEE Oracle** (Intel TDX via Phala Cloud)
 - Only the current owner (or explicitly approved wallets) can decrypt and use the agent's private data
-- **Transfer** the NFT — the sender oracle re-wraps encrypted content keys for the recipient oracle public key, the recipient signs acceptance proofs, and `TeeVerifier` verifies the transfer on-chain. No plaintext ever leaves the secure enclave.
+- **Transfer** the NFT — the sender oracle re-wraps encrypted content keys for the recipient oracle public key, the recipient signs acceptance proofs, and `TeeVerifier` verifies the transfer on-chain against the registered TDX-attested oracle key. No plaintext ever leaves the secure enclave.
 
 ### 3. On-Chain Reputation & Validation — ERC-8004
 
 Agents earn a verifiable, tamper-proof reputation through [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004).
 
 - **Validation requests** can be submitted on-chain, naming a validator contract (e.g. `TEEVerifier`) or EOA to respond
-- **Validation responses** carry a score (0–100) and optional evidence URI; the `TEEVerifier` path requires a TDX-attested proof
+- **Validation responses** carry a score (0–100) and optional evidence URI; the `TEEVerifier` path requires an Automata DCAP-verified TDX quote for the exact response
 - **Reputation scores** are fixed-point values (int128 × 10^decimals) stored on-chain
 - Reputation and service definitions travel with the agent NFT — new owners inherit the agent's full history
 
@@ -282,8 +339,115 @@ Agents earn a verifiable, tamper-proof reputation through [ERC-8004](https://eip
 2. **Encrypt & Store** — Private data is AES-256-GCM encrypted and uploaded to **0G Storage**. The `zerog://` URI and content hash are anchored on-chain.
 3. **Define Services** — Publish MCP, A2A, web, and other endpoints on-chain so other agents and clients can discover and connect.
 4. **Transfer** — The sender creates a JSON-safe transfer offer, the recipient signs an acceptance, and the sender submits `iTransferFromWithIdentity`. Apps can store pending offers and acceptances in any storage layer.
-5. **Validate** — Request on-chain validation by submitting a `validationRequest` naming `TEEVerifier`. The oracle scores the result inside the TEE and submits a `validationResponse` with a TDX-attested proof.
+5. **Validate** — Request on-chain validation by submitting a `validationRequest` naming `TEEVerifier`. The oracle scores the result inside the TEE and submits a `validationResponse` with an Intel TDX quote that Automata DCAP verifies on-chain.
 6. **Earn Reputation** — Validation scores accumulate on-chain and persist across ownership changes.
+
+---
+
+## Validation Flow
+
+Validation is driven by `ValidationRegistry` events. A client first submits a
+request:
+
+```typescript
+await walletClient.writeContract({
+  address: config.validationRegistryAddress,
+  abi: VALIDATION_REGISTRY_ABI,
+  functionName: "validationRequest",
+  args: [
+    config.teeVerifierAddress,
+    BigInt(erc8004AgentId),
+    requestURI,
+    requestHash,
+  ],
+});
+```
+
+Watch this event:
+
+```solidity
+event ValidationRequest(
+    address indexed validatorAddress,
+    uint256 indexed agentId,
+    string requestURI,
+    bytes32 indexed requestHash
+);
+```
+
+For TEE validation, `validatorAddress` must be the deployed `TeeVerifier`
+address from `deployments.json`. `agentId` is the ERC-8004 Identity Registry
+agent id, not the ERC-721 token id. `requestHash` is
+`keccak256(bytes(requestURI))`.
+
+The dashboard worker scans `ValidationRequest` events from
+`ValidationRegistry`, ignores requests that already have a matching
+`ValidationResponse(agentId, requestHash)`, then calls the agent's `teeOracle`
+`POST /validate`.
+
+The worker only responds when all of these are true:
+
+- `validatorAddress` is the configured `teeVerifier` contract.
+- The dashboard `PRIVATE_KEY` address owns the ERC-8004 `agentId`.
+- The agent metadata has a `teeOracle` service URL listed in
+  `VALIDATION_ORACLE_URLS`.
+- `requestURI` is a `data:application/json;base64,...` JSON payload the oracle
+  can score.
+
+Key usage:
+
+- Dashboard `PRIVATE_KEY`: server-side validation signer. For automatic
+  validation, this address must own the ERC-8004 agent id and must match the
+  oracle validation signer expected by `/validate`.
+- Oracle `PRIVATE_KEY`: oracle transaction signer. The bundled oracle requires
+  `/validate` EIP-712 requests to be signed by this same address, then uses it
+  to submit `ValidationRegistry.validationResponse(...)` and pay gas.
+- Browser wallet: submits the initial `validationRequest` when a user requests
+  validation manually. It is not used by the dashboard worker to submit the
+  response.
+
+When `/validate` succeeds, the oracle submits:
+
+```solidity
+validationResponse(
+    requestHash,
+    score,
+    responseURI,
+    responseHash,
+    tag,
+    tdxQuote
+);
+```
+
+For `TeeVerifier`, the TDX quote commits to `agentId`, `requestHash`, and
+`score`; Automata DCAP verifies that quote on-chain before the response is
+accepted.
+
+---
+
+## Dashboard Model
+
+The dashboard homepage is an explorer-first view:
+
+1. Hero and contract addresses show the active Base/Base Sepolia deployment.
+2. Three feature boxes explain the standards stack: ERC-8004 discovery,
+   ValidationRegistry feedback, and ERC-7857 private skills.
+3. Registered agents appear immediately after those boxes. Cards are intentionally
+   compact: image, name, and `AgentRegistry #<tokenId>` only. Do not show IPFS,
+   metadata URI, owner address, or ERC-8004 ids on the homepage card.
+4. The process diagram below the list explains the three-party flow:
+   WebApp/User -> Phala/Oracle -> Blockchain, plus transfer/oracle rotation.
+5. The diagram must highlight that remote TEE trust is enforced by
+   `TeeVerifier` calling Automata DCAP on-chain with Intel TDX quotes, not by
+   dashboard-side checks.
+6. Developer quickstart comes after the explorer content.
+
+Browser-side wallet flows use the connected wallet provider for reads,
+estimation, receipt polling, and writes. Do not add `NEXT_PUBLIC_RPC_URL_*` or
+route client wallet operations through an app RPC. Server Actions, indexing, and
+cron workers use server-side `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA` because
+there is no wallet provider on the server. Use an RPC provider that supports
+dashboard `eth_getLogs` indexing ranges; public Base RPC endpoints are usually
+better than narrow log-range provider plans for this path.
 
 ---
 
@@ -318,7 +482,11 @@ open-agent/
 | Base         | 8453     | https://mainnet.base.org | https://basescan.org         |
 | Base Sepolia | 84532    | https://sepolia.base.org | https://sepolia.basescan.org |
 
-Set `NETWORK=base` or `NETWORK=baseSepolia` in `apps/oracle/.env`. The dashboard can use both public networks simultaneously — switch via the RainbowKit network selector. RPC URLs must be configured explicitly; missing required config fails fast.
+Set `NETWORK=base` or `NETWORK=baseSepolia` in `apps/oracle/.env`. The
+dashboard can read both public networks from `deployments.json`, while
+client-side wallet operations follow the connected wallet's current chain and
+RPC provider. Server-side RPC URLs must be configured explicitly; missing
+required config fails fast.
 
 ---
 
@@ -334,6 +502,13 @@ Set `NETWORK=base` or `NETWORK=baseSepolia` in `apps/oracle/.env`. The dashboard
 self-registers oracle addresses through `initValidator` using a DCAP quote, and
 the registry calls that verifier directly during ERC-7857 transfer and
 ERC-8004 validation flows.
+
+For remote oracle deployments, the DCAP verifier is Automata's on-chain Intel
+TDX attestation verifier. `TeeVerifier` never trusts a URL, dashboard setting,
+or server claim by itself. It accepts an oracle key only after Automata verifies
+the hardware quote and the quote's `reportData` binds that key to the running
+CVM. Validation responses also carry TDX quotes, so the on-chain score is tied
+to the agent id, request hash, and score.
 
 ABIs are exported from `@tee-agent/agent/abis`:
 
@@ -351,13 +526,13 @@ import {
 
 ### `@tee-agent/agent`
 
-Types, ABIs, encryption/decryption utilities, registry clients, 0G Storage, and network config.
+Types, ABIs, encryption/decryption utilities, registry clients, 0G Storage, deployment helpers, and network config.
 
-Sub-path exports: `./types`, `./config`, `./encryption`, `./abis`, `./registry`, `./zero-g`, `./mint`, `./transfer`, `./services`, `./feedback`, `./validate`, `./typed-data`
+Sub-path exports: `./types`, `./network`, `./config`, `./encryption`, `./abis`, `./registry`, `./zero-g`, `./metadata`, `./mint`, `./transfer`, `./services`, `./feedback`, `./validate`, `./typed-data`
 
 ```typescript
 import { AgentRegistry } from "@tee-agent/agent/registry";
-import { getNetworkConfig } from "@tee-agent/agent/config";
+import { getNetworkConfig } from "@tee-agent/agent/network";
 import {
   readJsonFromUri,
   buildAccessPayloads,
@@ -383,17 +558,18 @@ Ownership transfer is a two-party SDK flow:
 
 1. The sender signs `ReencryptRequest` for the sender oracle.
 2. `createTransferOffer(...)` calls the sender oracle `POST /reencrypt`, which
-   re-wraps each encrypted content key for the recipient oracle public key.
+   verifies the sender signature from the request body, then re-wraps each
+   encrypted content key for the recipient oracle public key. The sender/owner
+   private key is never configured in oracle `.env`.
 3. The recipient signs one access proof per encrypted data entry with their
    wallet.
 4. The sender submits `buildTransferTxArgs(...)`, which calls
    `AgentRegistry.iTransferFromWithIdentity(from, to, tokenId, proofs)`.
 
 `iTransferFromWithIdentity` moves both the ERC-7857 NFT and the linked ERC-8004
-Identity Registry token in one transaction. The transfer emits
-`PublishedSealedKey(to, tokenId, sealedKeys)`; recipient oracles use those
-sealed keys to decrypt transferred agents without changing the encrypted blob
-URIs.
+Identity Registry token in one transaction. After transfer, the new owner must
+complete private-data re-encryption for their selected oracle before the agent
+can run again.
 
 Changing an agent's `teeOracle` service is a separate oracle-key-rotation flow,
 not a regular services edit. The current oracle must re-wrap the existing
@@ -402,15 +578,20 @@ updated, and the registry must anchor the new data hashes/URIs before the
 ERC-8004 service endpoint changes. The dashboard shows this as a dedicated
 rotation action instead of allowing silent `teeOracle` edits.
 
-`getNetworkConfig` returns per-chain addresses, explorer URLs, and OpenSea links — keyed by chain name:
+`NETWORK_CONFIG` and `getNetworkConfig*` are the single source of truth for supported chains, chain IDs, viem chain objects, ERC-8004 singleton addresses, explorer URLs, and OpenSea links:
 
 ```typescript
-import { getNetworkConfigByChainId } from "@tee-agent/agent/config";
+import { getNetworkConfigByChainId } from "@tee-agent/agent/network";
 const nc = getNetworkConfigByChainId(84532);
 // nc.chain, nc.chainId, nc.isTestnet,
 // nc.identityRegistryAddress, nc.reputationRegistryAddress,
 // nc.explorerUrl, nc.erc8004ScanUrl, nc.openseaUrl
 ```
+
+Dashboard config lives in `apps/dashboard/src/lib/config.ts`. Do not recreate
+`client-config.ts`, `active-chain.ts`, or local dashboard chain files; derive
+chain data from `@tee-agent/agent/network` and deployment addresses from root
+`deployments.json`.
 
 ### `@tee-agent/server`
 
@@ -429,7 +610,11 @@ const handler: AgentHandler = {
 await startOracle({ handler });
 ```
 
-The server handles: TEE key derivation via Phala dstack SDK, 0G Storage blob fetch + ECIES-unwrap + AES-256-GCM decrypt, EIP-712 signature verification, TDX DCAP attestation, and on-chain validation response submission.
+The server handles: TEE key derivation via Phala dstack SDK, TDX quote
+generation, 0G Storage blob fetch + ECIES-unwrap + AES-256-GCM decrypt, EIP-712
+signature verification, and on-chain validation response submission. The actual
+hardware attestation decision happens in `TeeVerifier`, which calls Automata
+DCAP on-chain for remote oracle deployments.
 
 HTTP endpoints: `GET /health`, `GET /address`, `GET /info`, `GET /attestation`, `POST /verify`, `POST /reencrypt`, `POST /run`, `POST /validate`
 
@@ -441,9 +626,13 @@ HTTP endpoints: `GET /health`, `GET /address`, `GET /info`, `GET /attestation`, 
 
 Next.js 16 App Router UI. Connects to Base or Base Sepolia.
 
-- All contract writes execute in the browser via viem — no backend proxy
+- All wallet writes execute in the browser via viem — no backend proxy
+- Client-side reads/estimates/receipt polling use the connected wallet provider
+  RPC, not Alchemy or `NEXT_PUBLIC_RPC_URL_*`
 - Server Actions (`src/lib/actions/`) handle encryption and oracle calls
 - No API routes for internal mutations; the only API route is the cron sync endpoint
+- The homepage agent card stays compact: image, name, and AgentRegistry token id
+  only
 
 ### `apps/oracle`
 
@@ -459,20 +648,62 @@ Example oracle deployments built on `@tee-agent/server`:
 npm run dev:prediction-market --prefix apps/oracle
 
 # Deploy any oracle entry to a Phala Cloud CVM
-npm run deploy:oracle -- src/examples/prediction-market.ts
-npm run deploy:oracle -- src/examples/web-data-oracle.ts
+npm run oracle:image
+npm run oracle:deploy -- src/examples/prediction-market.ts
+npm run oracle:deploy -- src/examples/web-data-oracle.ts
 ```
 
-`apps/oracle/scripts/deploy-cvm.mjs` validates that the entry lives under
-`apps/oracle/src`, maps it to the compiled `dist/...js` path, and calls
-`phala deploy -e .env -e ORACLE_ENTRY=<entry> --wait`. `ORACLE_ENTRY` is set by
-the deploy script and should not live in `.env`. After the first deploy, run
-`phala link` from `apps/oracle` so future deploys update the same CVM.
+Root `scripts/deploy-cvm.mjs` validates that the entry lives under
+`apps/oracle/src`, maps it to the compiled `dist/...js` path, reads
+`ORACLE_IMAGE` from root `.env`, writes a generated Phala compose file
+with that image, deploys or updates the linked CVM, and prints the oracle URL
+when the endpoint is available.
+`ORACLE_ENTRY` is set by the deploy script and should not live in `.env`. After
+a successful first deploy, the script auto-runs `phala link` when
+`apps/oracle/phala.toml` does not have a CVM identity (`name` or `app_id`), so
+future deploys update the same CVM. The first deploy is already processing after
+linking; wait for Phala to finish before running deploy again. If the linked CVM
+is stopped, the script starts it after Phala accepts the new compose/env deploy.
+If that linked CVM was deleted manually and Phala returns a "requested CVM was
+not found" error, the script removes the stale identity, deploys a new CVM, and
+links it.
 
 On startup, the oracle reads root `deployments.json`, derives its TEE keypair,
-and submits `initValidator` to `TeeVerifier`. The signer in `PRIVATE_KEY` must
+and submits `initValidator` to `TeeVerifier`. `initValidator` is permissionless:
+any account can pay gas to register an oracle address, but remote deployments
+only succeed when Automata DCAP verifies the Intel TDX quote and the quote's
+`reportData` starts with that oracle address. The signer in oracle `PRIVATE_KEY`
+is a gas wallet for the oracle process, not the agent owner/creator. It must
 have enough gas on the selected Base network for startup registration,
 validation responses, and any 0G upload fees.
+
+---
+
+## Development Rules
+
+- Use `gemini-3-flash-preview` for Gemini API calls in repository scripts.
+- TypeScript uses `strict: true` with `strictNullChecks: false`; keep
+  `strictNullChecks` disabled unless the architecture decision changes.
+- Keep `noImplicitAny: false` so implicit any is allowed when inference cannot
+  resolve a type.
+- Do not use `unknown`. Prefer concrete domain types, schema-validated types,
+  generics with constraints, or small local object types.
+- Avoid `any` as much as possible. If a third-party boundary forces it, isolate
+  it at the boundary and immediately cast or validate into a concrete type.
+- Keep Base and Base Sepolia as the only supported chains unless the architecture
+  decision changes.
+- Do not add deployment profiles. Base Sepolia local-vs-remote oracle mode is
+  selected by which contract set `setup-env` writes into `deployments.json`.
+- User-facing deploy docs should use repo scripts only. Do not document raw
+  `phala` CLI commands or invent new flags/env vars when the existing scripts
+  own the workflow.
+- Keep dashboard mutations and client-triggered fetches in Server Actions; do
+  not add API routes for internal app flows.
+- Use `useWallet().getViemClients()` for browser wallet flows so reads,
+  estimates, receipt polling, and writes use the connected wallet provider RPC.
+- Keep SDK transfer logic in `@tee-agent/agent/transfer` storage-agnostic.
+- Do not edit an existing agent's `teeOracle` like a normal service field;
+  expose/use an oracle key-rotation flow.
 
 ---
 
@@ -494,7 +725,8 @@ npm run build --workspace=packages/server
 
 ### 2. Fund 0G testnet wallet
 
-Private blob uploads require 0G testnet tokens. Fund the wallet used by `PRIVATE_KEY`:
+Private blob uploads require 0G testnet tokens. Fund the backend/oracle wallet
+used by `PRIVATE_KEY`; this does not have to be the agent owner wallet:
 
 - Faucet: https://faucet.0g.ai
 - RPC: `https://evmrpc-testnet.0g.ai`
@@ -504,16 +736,47 @@ Private blob uploads require 0G testnet tokens. Fund the wallet used by `PRIVATE
 ```bash
 cd contracts
 npm test                          # run contract tests first
-npm run deploy:baseSepolia        # deploys AgentRegistry, ValidationRegistry, TeeVerifier
-npm run setup-env                 # writes all found deployed addresses to deployments.json
+npm run deploy:baseSepolia        # remoteOracle: real Automata DCAP
 ```
 
-DCAP mode is selected by deployment parameters:
+DCAP mode is selected by which Base Sepolia deployment you copy into
+`deployments.json`:
 
-- Local always uses fake DCAP.
-- Base Sepolia can use fake or real DCAP, depending on the
-  `dcapAttestationAddress` in `contracts/ignition/parameters.baseSepolia.json`.
+- `remoteOracle` deploys Base Sepolia contracts wired to the real Automata DCAP
+  attestation contract. Base Sepolia uses Automata DCAP v1.0
+  (`0x95175096a9B74165BE0ac84260cc14Fc1c0EF5FF`) because a real Phala Cloud TDX
+  quote that fails with `TCBR` on v1.1 succeeds on v1.0. This is the default
+  `deploy:baseSepolia` path.
+- `localOracle` deploys a separate Base Sepolia contract set wired to
+  `MockDcapAttestation`, for a local oracle using the tappd simulator.
 - Base always uses real DCAP.
+
+```bash
+# Deploy and write deployments.json in one step
+npm run deploy:baseSepolia:remoteOracle
+npm run deploy:baseSepolia:localOracle
+
+# Or switch deployments.json manually after both are deployed
+BASE_SEPOLIA_ORACLE=remote npm run setup-env
+BASE_SEPOLIA_ORACLE=local npm run setup-env
+```
+
+`setup-env` scans every Ignition deployment directory and writes each discovered
+chain to root `deployments.json`. Base Sepolia is the only special case: when
+you want the named local or remote oracle deployment, run `setup-env` with
+`BASE_SEPOLIA_ORACLE=local` before using the tappd simulator oracle, or
+`BASE_SEPOLIA_ORACLE=remote` before using real Phala/Automata DCAP.
+
+If an existing Base Sepolia remote deployment fails oracle startup with
+`DcapVerificationFailed("TCBR")`, redeploy the remote contract set so
+`TeeVerifier` uses the Automata v1.0 Base Sepolia verifier:
+
+```bash
+npm run deploy:baseSepolia:remoteOracle --workspace=contracts
+```
+
+Because the oracle image bakes `deployments.json`, run `npm run oracle:image`
+and redeploy the CVM after this contract redeploy.
 
 ### 4. Configure environment files
 
@@ -541,48 +804,48 @@ npm run dev --workspace=apps/dashboard
 
 ### `apps/dashboard`
 
-| Variable                               | Required | Description                                                                                                                     |
-| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `RPC_URL_BASE`                         | Network  | EVM RPC for Base mainnet (server-side only)                                                                                     |
-| `RPC_URL_BASE_SEPOLIA`                 | Network  | EVM RPC for Base Sepolia (server-side only)                                                                                     |
-| `deployments.json`                     | Yes      | Public deployed contract addresses, including `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks       |
-| `PORT`                                 | Yes      | Dashboard HTTP port                                                                                                             |
-| `PRIVATE_KEY`                          | Yes      | Server-side signer key — never exposed to the client                                                                            |
-| `VALIDATION_ORACLE_URLS`               | Yes      | Comma-separated `teeOracle` URLs this dashboard worker owns; only these URLs are auto-validated from `ValidationRequest` events |
-| `ZERO_G_RPC_URL`                       | Yes      | 0G Storage EVM RPC                                                                                                              |
-| `ZERO_G_INDEXER_URL`                   | Yes      | 0G Indexer URL                                                                                                                  |
-| `PINATA_JWT`                           | Yes      | Pinata V3 Bearer JWT for IPFS metadata uploads (`org:files:write` scope)                                                        |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yes      | WalletConnect project ID (create at https://cloud.walletconnect.com)                                                            |
-| `UPSTASH_REDIS_REST_URL`               | No       | Upstash Redis REST URL — caches indexed agents + last-seen block                                                                |
-| `UPSTASH_REDIS_REST_TOKEN`             | No       | Upstash Redis REST token                                                                                                        |
-| `CRON_SECRET`                          | No       | Bearer token Vercel injects into cron job requests (set in Vercel project settings)                                             |
+| Variable                               | Required | Description                                                                                                                                                               |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RPC_URL_BASE`                         | Network  | EVM RPC for Base mainnet (server-side only); must support dashboard `eth_getLogs` indexing ranges                                                                         |
+| `RPC_URL_BASE_SEPOLIA`                 | Network  | EVM RPC for Base Sepolia (server-side only); must support dashboard `eth_getLogs` indexing ranges                                                                         |
+| `deployments.json`                     | Yes      | Public deployed contract addresses, including `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks                                                 |
+| `PORT`                                 | Yes      | Dashboard HTTP port                                                                                                                                                       |
+| `PRIVATE_KEY`                          | Yes      | Dashboard server-side signer for uploads and validation automation. For automatic validation it must own the ERC-8004 agent id and match the oracle `PRIVATE_KEY` address |
+| `VALIDATION_ORACLE_URLS`               | Yes      | Comma-separated `teeOracle` URLs this dashboard worker owns; only these URLs are auto-validated from `ValidationRequest` events                                           |
+| `RPC_URL_ZERO_G`                       | Yes      | 0G Storage EVM RPC                                                                                                                                                        |
+| `INDEXER_URL_ZERO_G`                   | Yes      | 0G Indexer URL                                                                                                                                                            |
+| `PINATA_JWT`                           | Yes      | Pinata V3 Bearer JWT for IPFS metadata uploads (`org:files:write` scope)                                                                                                  |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Yes      | WalletConnect project ID (create at https://cloud.walletconnect.com)                                                                                                      |
+| `UPSTASH_REDIS_REST_URL`               | No       | Upstash Redis REST URL — caches indexed agents + last-seen block                                                                                                          |
+| `UPSTASH_REDIS_REST_TOKEN`             | No       | Upstash Redis REST token                                                                                                                                                  |
+| `CRON_SECRET`                          | No       | Bearer token Vercel injects into cron job requests (set in Vercel project settings)                                                                                       |
 
 ### `apps/oracle`
 
-| Variable                    | Required   | Description                                                                                                               |
-| --------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `NETWORK`                   | Yes        | `base` or `baseSepolia`                                                                                                   |
-| `RPC_URL_BASE`              | Network    | EVM RPC for Base mainnet                                                                                                  |
-| `RPC_URL_BASE_SEPOLIA`      | Network    | EVM RPC for Base Sepolia                                                                                                  |
-| `deployments.json`          | Yes        | Public deployed contract addresses, including `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks |
-| `PRIVATE_KEY`               | Yes        | Signer used to submit `initValidator` on startup, plus validation responses and 0G fees                                   |
-| `ZERO_G_RPC_URL`            | Yes        | 0G Storage EVM RPC                                                                                                        |
-| `ZERO_G_INDEXER_URL`        | Yes        | 0G Indexer URL                                                                                                            |
-| `LLM_API_KEY`               | Yes        | API key for LLM scoring (Red Pill for TEE-attested models: https://red-pill.ai)                                           |
-| `LLM_API_BASE`              | Yes        | OpenAI-compatible API base                                                                                                |
-| `LLM_VALIDATION_MODEL`      | Yes        | Model used by `/validate` scorer                                                                                          |
-| `PORT`                      | Yes        | HTTP port                                                                                                                 |
-| `DSTACK_VERIFIER_URL`       | Yes        | dstack-verifier sidecar URL                                                                                               |
-| `DSTACK_SIMULATOR_ENDPOINT` | Local only | tappd simulator endpoint for local dev with fake DCAP; omit in real Phala CVMs                                            |
+| Variable                    | Required   | Description                                                                                                                                                                                                    |
+| --------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NETWORK`                   | Yes        | `base` or `baseSepolia`                                                                                                                                                                                        |
+| `RPC_URL_BASE`              | Network    | EVM RPC for Base mainnet                                                                                                                                                                                       |
+| `RPC_URL_BASE_SEPOLIA`      | Network    | EVM RPC for Base Sepolia                                                                                                                                                                                       |
+| `deployments.json`          | Yes        | Public deployed contract addresses, including `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks                                                                                      |
+| `APP_NAME`                  | No         | Root `.env` dstack key path used by Phala deploy to derive the oracle TEE signing key; defaults to `TEE-ORACLE`. Changing it rotates the TEE address and old encrypted blobs will not decrypt with the new key |
+| `PRIVATE_KEY`               | Yes        | Oracle transaction signer for `initValidator`, `/validate` authorization, validation responses, and 0G fees. For dashboard automatic validation this must match dashboard `PRIVATE_KEY`                        |
+| `RPC_URL_ZERO_G`            | Yes        | 0G Storage EVM RPC                                                                                                                                                                                             |
+| `INDEXER_URL_ZERO_G`        | Yes        | 0G Indexer URL                                                                                                                                                                                                 |
+| `LLM_API_KEY`               | Yes        | API key for LLM scoring (Red Pill for TEE-attested models: https://red-pill.ai)                                                                                                                                |
+| `LLM_API_BASE`              | Yes        | OpenAI-compatible API base                                                                                                                                                                                     |
+| `LLM_VALIDATION_MODEL`      | Yes        | Model used by `/validate` scorer                                                                                                                                                                               |
+| `PORT`                      | Yes        | HTTP port                                                                                                                                                                                                      |
+| `DSTACK_VERIFIER_URL`       | Yes        | dstack-verifier sidecar URL                                                                                                                                                                                    |
+| `DSTACK_SIMULATOR_ENDPOINT` | Local only | tappd simulator endpoint for local dev with fake DCAP; omit in real Phala CVMs                                                                                                                                 |
 
 ### `contracts`
 
 | Variable               | Required | Description                                                         |
 | ---------------------- | -------- | ------------------------------------------------------------------- |
 | `PRIVATE_KEY`          | Yes      | Deployer key                                                        |
-| `LOCAL_RPC_URL`        | Local    | RPC for local Hardhat deployment                                    |
-| `BASE_SEPOLIA_RPC_URL` | Network  | RPC for Base Sepolia deployments                                    |
-| `BASE_RPC_URL`         | Network  | RPC for Base mainnet deployments                                    |
+| `RPC_URL_BASE_SEPOLIA` | Network  | RPC for Base Sepolia deployments                                    |
+| `RPC_URL_BASE`         | Network  | RPC for Base mainnet deployments                                    |
 | `EXPLORER_API_KEY`     | No       | Basescan API key for contract source verification (`--verify` flag) |
 
 ### `__tests__`
@@ -596,11 +859,11 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 | ---------------------- | -------- | -------------------------------------------------------------- |
 | `PRIVATE_KEY`          | Yes      | E2E signer for minting, transfer, validation, feedback, and 0G |
 | `LOCAL_RPC_URL`        | Local    | RPC for `npm run e2e:local`                                    |
-| `BASE_SEPOLIA_RPC_URL` | Network  | RPC for `npm run e2e:baseSepolia`                              |
+| `RPC_URL_BASE_SEPOLIA` | Network  | RPC for `npm run e2e:baseSepolia`                              |
 | `ORACLE_URL`           | Yes      | Running oracle URL used by E2E tests                           |
 | `PINATA_JWT`           | Yes      | Pinata JWT used by SDK minting for IPFS metadata               |
-| `ZERO_G_RPC_URL`       | Yes      | 0G Storage EVM RPC used by encrypted blob uploads              |
-| `ZERO_G_INDEXER_URL`   | Yes      | 0G Storage indexer used by encrypted blob uploads/downloads    |
+| `RPC_URL_ZERO_G`       | Yes      | 0G Storage EVM RPC used by encrypted blob uploads              |
+| `INDEXER_URL_ZERO_G`   | Yes      | 0G Storage indexer used by encrypted blob uploads/downloads    |
 
 `Network` means required when using that network. The project does not invent
 RPC URLs, contract addresses, private keys, or oracle URLs at runtime.

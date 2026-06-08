@@ -6,7 +6,7 @@
   "crons": [
     {
       "path": "/api/cron/sync-events",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }

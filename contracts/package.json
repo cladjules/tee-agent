@@ -10,9 +10,13 @@
     "test:foundry": "forge test --config-path foundry.toml",
     "clean": "hardhat clean",
     "node": "hardhat node",
-    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --verify --parameters ignition/parameters.baseSepolia.json && npm run setup-env",
-    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --verify --parameters ignition/parameters.base.json && npm run setup-env",
-    "setup-env": "node scripts/setup-env.mjs"
+    "deploy:baseSepolia": "npm run deploy:baseSepolia:remoteOracle",
+    "deploy:baseSepolia:remoteOracle": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --verify --reset --deployment-id base-sepolia-remote-oracle --parameters ignition/parameters.baseSepolia.json && BASE_SEPOLIA_ORACLE=remote npm run setup-env",
+    "deploy:baseSepolia:localOracle": "yes | hardhat ignition deploy ignition/modules/DeployLocalOracle.ts --network baseSepolia --verify --reset --deployment-id base-sepolia-local-oracle --parameters ignition/parameters.baseSepolia.localOracle.json && BASE_SEPOLIA_ORACLE=local npm run setup-env",
+    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --verify --reset --parameters ignition/parameters.base.json && npm run setup-env",
+    "setup-env": "node scripts/setup-env.mjs",
+    "setup-env:baseSepolia:remoteOracle": "BASE_SEPOLIA_ORACLE=remote npm run setup-env",
+    "setup-env:baseSepolia:localOracle": "BASE_SEPOLIA_ORACLE=local npm run setup-env"
   },
   "devDependencies": {
     "@tee-agent/agent": "file:../packages/agent",

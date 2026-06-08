@@ -221,10 +221,13 @@ export function ServiceEditorPanel({
             Changing this oracle requires encrypted key rotation.
           </p>
         ) : (
-          <p className="text-xs text-gray-500">
-            Required for oracle runs, ERC-7857 encrypted transfers, and
-            on-chain validation.
-          </p>
+          <>
+            <p className="text-xs text-gray-500">
+              Required for oracle runs, ERC-7857 encrypted transfers, and
+              on-chain validation.
+            </p>
+            <PhalaOracleSetup />
+          </>
         )}
       </div>
 
@@ -479,6 +482,70 @@ export function ServiceEditorPanel({
         </>
       )}
       {visibleErrorMsg && <ErrorBox message={visibleErrorMsg} />}
+    </div>
+  );
+}
+
+function PhalaOracleSetup() {
+  return (
+    <details className="rounded-lg border border-violet-800/70 bg-gray-950/50">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-violet-200 hover:text-white">
+        Deploy a Phala TDX oracle
+      </summary>
+      <div className="space-y-3 border-t border-violet-900/60 px-3 py-3">
+        <div className="grid gap-2 text-xs text-gray-400 sm:grid-cols-2">
+          <StepItem index="1" title="Checkout">
+            Clone the repo and install dependencies.
+          </StepItem>
+          <StepItem index="2" title="Configure">
+            Fill root `.env` for image/deploy state and `apps/oracle/.env` for
+            oracle runtime secrets.
+          </StepItem>
+          <StepItem index="3" title="Choose Entry">
+            Use `src/examples/prediction-market.ts`,
+            `src/examples/web-data-oracle.ts`, or copy one under
+            `apps/oracle/src`.
+          </StepItem>
+          <StepItem index="4" title="Deploy">
+            Run the repo scripts. `oracle:deploy` prints the HTTPS oracle URL.
+          </StepItem>
+        </div>
+        <pre className="overflow-x-auto rounded-lg border border-gray-800 bg-black/40 p-3 text-[11px] leading-5 text-gray-300">
+          <code>{`git clone https://github.com/cladjules/tee-agent.git
+cd tee-agent
+npm install
+
+# fill .env and apps/oracle/.env
+npm run oracle:image
+npm run oracle:deploy -- src/examples/prediction-market.ts`}</code>
+        </pre>
+        <p className="text-xs text-gray-500">
+          After deploy, paste the printed Phala HTTPS endpoint here as the
+          `teeOracle` service URL.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+function StepItem({
+  index,
+  title,
+  children,
+}: {
+  index: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-2">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-700 text-[10px] font-bold text-white">
+          {index}
+        </span>
+        <span className="font-medium text-gray-200">{title}</span>
+      </div>
+      <p>{children}</p>
     </div>
   );
 }

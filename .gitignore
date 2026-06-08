@@ -154,6 +154,9 @@ package-lock.json
 .env
 .env.*
 !.env.example
+phala.toml
+apps/oracle/.phala/
+.docker-ghcr/
 
 # Hardhat
 /contracts/ignition/deployments
