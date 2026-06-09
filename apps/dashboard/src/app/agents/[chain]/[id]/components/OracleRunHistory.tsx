@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { keccak256, toBytes } from "viem";
 import type { AgentConfig } from "@tee-agent/agent/types";
@@ -18,7 +18,7 @@ function buildRunValidationPayload(
   const payload = {
     payload: run.payload,
     outcome: run.result.outcome,
-    quote: run.quote,
+    proof: run.proof,
     timestamp: run.timestamp,
     agentId: erc8004AgentId,
   };
@@ -27,6 +27,19 @@ function buildRunValidationPayload(
     requestURI: `data:application/json;base64,${btoa(JSON.stringify(payload))}`,
     requestHash: keccak256(toBytes(JSON.stringify(payload))),
   };
+}
+
+function formatJson(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function formatInlineValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  return JSON.stringify(value);
 }
 
 function OracleRunCard({
@@ -54,23 +67,30 @@ function OracleRunCard({
     unavailable?: boolean;
     error?: string;
   } | null>(null);
-  const claim =
-    run.payload?.claim === undefined ? null : String(run.payload.claim);
+  const payloadPreviewRows = useMemo(
+    () => (run.payload ? Object.entries(run.payload).slice(0, 3) : []),
+    [run.payload],
+  );
 
-  const summary = (() => {
-    if (run.result.outcome?.verdict) return String(run.result.outcome.verdict);
+  const [summary, summaryColor] = useMemo(() => {
+    let verdict: string | null = null;
+    if (run.result.outcome?.verdict)
+      verdict = String(run.result.outcome.verdict);
     if (run.result.outcome?.statusCode)
-      return `HTTP ${String(run.result.outcome.statusCode)}`;
-    return null;
-  })();
+      verdict = `HTTP ${String(run.result.outcome.statusCode)}`;
 
-  const summaryColor =
-    run.result.outcome?.verdict === "YES"
-      ? "text-green-400"
-      : run.result.outcome?.verdict === "NO"
-        ? "text-red-400"
-        : "text-gray-400";
-  const canVerify = !!run.quote && !!run.event_log && !!teeOracleUrl;
+    const lowerVerdict = verdict?.toLowerCase();
+    const color =
+      lowerVerdict === "yes" || lowerVerdict === "valid"
+        ? "text-green-400"
+        : lowerVerdict === "no" || lowerVerdict === "invalid"
+          ? "text-red-400"
+          : "text-gray-400";
+
+    return [verdict, color] as const;
+  }, [run.result.outcome]);
+
+  const canVerify = !!run.proof && !!teeOracleUrl;
   const validationStatus = knownResponse
     ? `Validated ${knownResponse.score}/100`
     : "Not validated";
@@ -100,7 +120,7 @@ function OracleRunCard({
       const res = await fetch(`${trimmedUrl}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote: run.quote, event_log: run.event_log }),
+        body: JSON.stringify({ proof: run.proof }),
       });
       const data = (await res.json()) as {
         is_valid?: boolean;
@@ -189,19 +209,23 @@ function OracleRunCard({
       >
         <div className="flex items-center justify-between gap-3 w-full">
           <div className="min-w-0 space-y-1">
-            {claim ? (
-              <div className="flex gap-1.5 text-xs min-w-0">
-                <span className="font-mono text-violet-400 bg-violet-950/40 px-1 py-0.5 rounded shrink-0">
-                  Claim
-                </span>
-                <span className="text-gray-200 truncate">{claim}</span>
+            {payloadPreviewRows.length > 0 && (
+              <div className="min-w-0 space-y-1">
+                {payloadPreviewRows.map(([key, value]) => (
+                  <div key={key} className="flex gap-1.5 text-xs min-w-0">
+                    <span className="font-mono text-violet-400 rounded shrink-0">
+                      {key}:
+                    </span>
+                    <span className="text-gray-200 truncate">
+                      {formatInlineValue(value)}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <p className="text-xs text-gray-500 font-mono">No claim</p>
             )}
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <span className="text-xs font-mono text-gray-500 shrink-0">
-                Outcome
+                Outcome:
               </span>
               {summary && (
                 <span
@@ -221,26 +245,6 @@ function OracleRunCard({
             </span>
           </div>
         </div>
-        {run.payload &&
-          Object.entries(run.payload).some(([key]) => key !== "claim") && (
-            <div className="w-full rounded bg-gray-900/80 px-2 py-1.5 space-y-0.5">
-              {Object.entries(run.payload)
-                .filter(([key]) => key !== "claim")
-                .map(([k, v]) => (
-                  <div
-                    key={k}
-                    className="flex gap-1.5 text-xs font-mono min-w-0"
-                  >
-                    <span className="text-violet-400 shrink-0">{k}:</span>
-                    <span className="text-gray-300 truncate">
-                      {typeof v === "object" && v !== null
-                        ? JSON.stringify(v)
-                        : String(v)}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          )}
       </button>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-800 px-3 py-2">
         <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
@@ -284,7 +288,7 @@ function OracleRunCard({
               onClick={() => void handleVerify()}
               className="rounded bg-gray-700 px-2 py-1 text-[11px] font-medium text-gray-100 transition-colors hover:bg-gray-600 disabled:opacity-50"
             >
-              {isVerifying ? "Verifying..." : "Verify proof (quote + log)"}
+              {isVerifying ? "Verifying..." : "Verify proof"}
             </button>
           )}
         </div>
@@ -299,18 +303,33 @@ function OracleRunCard({
       )}
       {open && (
         <div className="px-3 pb-3 pt-2 border-t border-gray-800 space-y-2">
-          {Object.keys(run.result).length > 0 && (
-            <pre className="text-xs font-mono text-gray-300 bg-gray-950/60 rounded p-2 overflow-auto max-h-36">
-              {JSON.stringify(run.result, null, 2)}
-            </pre>
-          )}
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="rounded border border-gray-800 bg-gray-950/60">
+              <div className="border-b border-gray-800 px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-gray-500">
+                Original input
+              </div>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words p-2 text-xs font-mono text-gray-300">
+                {formatJson(run.payload)}
+              </pre>
+            </div>
+            <div className="rounded border border-gray-800 bg-gray-950/60">
+              <div className="border-b border-gray-800 px-2 py-1 text-[11px] font-mono uppercase tracking-wide text-gray-500">
+                Outcome
+              </div>
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words p-2 text-xs font-mono text-gray-300">
+                {formatJson(run.result.outcome ?? run.result)}
+              </pre>
+            </div>
+          </div>
           <div>
             <p className="text-xs text-gray-500 break-all font-mono">
               Oracle: {run.oracleAddress}
               <br />
-              Quote: {run.quote?.slice(0, 80)}…
+              Quote: {run.proof?.quote.slice(0, 80)}…
               <br />
-              Event: {run.event_log?.slice(0, 80)}…
+              Event: {run.proof?.event_log.slice(0, 80)}…
+              <br />
+              VM config: {run.proof?.vm_config.slice(0, 80)}…
             </p>
           </div>
         </div>

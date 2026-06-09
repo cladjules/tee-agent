@@ -100,10 +100,7 @@ const run = await fetch(\`\${oracleUrl}/run\`, {
 const verified = await fetch(\`\${oracleUrl}/verify\`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    quote: run.quote,
-    event_log: run.event_log,
-  }),
+  body: JSON.stringify({ proof: run.proof }),
 }).then((res) => res.json());`;
 
 const VALIDATION_SNIPPET = `const requestURI = toDataUri({
@@ -247,7 +244,7 @@ export default function DeveloperQuickstart() {
           <QuickstartStep
             step={4}
             title="Run then Verify"
-            description="Call the teeOracle /run endpoint with an owner signature, then verify the returned TDX quote through /verify."
+            description="Call the teeOracle /run endpoint with an owner signature, then verify the returned TDX proof bundle through /verify."
             tag="/run"
             code={ORACLE_HTTP_SNIPPET}
           />

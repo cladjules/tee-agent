@@ -72,7 +72,7 @@ const SKILL_TEMPLATES = [
         name: "parameters.json",
         data: JSON.stringify(
           {
-            allowedDomains: ["*"],
+            allowedDomains: ["api.github.com"],
             llm: {
               model: "phala/gemma-4-26b-a4b-uncensored",
               temperature: 0.3,

@@ -561,8 +561,12 @@ async function runOracleAgent(params: {
     agentId?: string;
     result?: Record<string, unknown>;
     timestamp?: number;
-    quote?: string;
-    event_log?: string;
+    proof?: {
+      type: "dstack-tdx";
+      quote: string;
+      event_log: string;
+      vm_config: string;
+    };
   };
   if (!res.ok || body.error) {
     throw new Error(body.error ?? `Oracle /run failed: ${res.status}`);
@@ -570,14 +574,13 @@ async function runOracleAgent(params: {
   if (body.agentId !== params.tokenId.toString()) {
     throw new Error(`Oracle /run returned wrong agentId: ${body.agentId}`);
   }
-  if (!body.result || !body.timestamp || !body.quote || !body.event_log) {
+  if (!body.result || !body.timestamp || !body.proof) {
     throw new Error(`Oracle /run response is incomplete.`);
   }
   return {
     result: body.result,
     timestamp: body.timestamp,
-    quote: body.quote,
-    event_log: body.event_log,
+    proof: body.proof,
   };
 }
 
@@ -1151,7 +1154,7 @@ async function testValidationRegistry() {
   const runMeta = {
     payload: runPayload,
     outcome: run.result,
-    quote: run.quote,
+    proof: run.proof,
     timestamp: run.timestamp,
     agentId: validationAgentId.toString(),
   };
@@ -1558,8 +1561,7 @@ async function startLocalOracle(): Promise<void> {
     LOCAL_RPC_URL: RPC_URL,
     RPC_URL_BASE_SEPOLIA: RPC_URL,
     PORT: port,
-    DSTACK_SIMULATOR_ENDPOINT:
-      process.env.DSTACK_SIMULATOR_ENDPOINT?.trim() || "http://localhost:8090",
+    DSTACK_SIMULATOR_ENDPOINT: "http://localhost:8090",
     DSTACK_VERIFIER_URL:
       process.env.DSTACK_VERIFIER_URL?.trim() || "http://localhost:8080",
   };

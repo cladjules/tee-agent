@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type React from "react";
 import { buildRunTypedData } from "@tee-agent/agent/typed-data";
-import type { CachedOracleRun } from "@/lib/agent-cache";
+import type { CachedOracleRun, TdxProof } from "@/lib/agent-cache";
 import { ErrorBox } from "@/components/ErrorBox";
 import { useWallet } from "@/providers/WalletProvider";
 import { recordOracleRun } from "@/lib/actions/agents";
@@ -13,9 +13,25 @@ type OracleRunResult = {
   agentId: string;
   result: Record<string, unknown>;
   timestamp: number;
-  quote: string;
-  event_log: string;
+  proof: TdxProof | undefined;
 };
+
+const runPayloadPresets = {
+  prediction: {
+    label: "Prediction",
+    fieldLabel: "Prediction input JSON",
+    hint: "Use this with the prediction-market oracle example.",
+    json: '{\n  "claim": "Will ETH close above $4,000 on May 30, 2026?",\n  "evidence": "https://example.com/market-resolution-source"\n}',
+  },
+  web: {
+    label: "Web Solver",
+    fieldLabel: "Web solver input JSON",
+    hint: "LLM analysis comes from the encrypted web oracle config; /run only needs the URL and optional selector.",
+    json: '{\n  "url": "https://api.github.com/repos/Phala-Network/dstack",\n  "selector": "description"\n}',
+  },
+} as const;
+
+type RunPayloadPreset = keyof typeof runPayloadPresets;
 
 export function RunOracleForm({
   agentId,
@@ -35,8 +51,10 @@ export function RunOracleForm({
   onNewRun?: (run: CachedOracleRun) => void;
 }) {
   const { getWalletClient, chainId } = useWallet();
-  const [payloadJson, setPayloadJson] = useState(
-    '{\n  "claim": "Was Ethereum above $2000 on January 1st, 2023?"\n}',
+  const [payloadPreset, setPayloadPreset] =
+    useState<RunPayloadPreset>("prediction");
+  const [payloadJson, setPayloadJson] = useState<string>(
+    runPayloadPresets.prediction.json,
   );
   const [isPending, setIsPending] = useState(false);
   const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
@@ -45,7 +63,7 @@ export function RunOracleForm({
     error?: string;
   } | null>(null);
 
-  const payloadError = (() => {
+  const payloadError = useMemo(() => {
     if (!payloadJson.trim()) return null;
     try {
       JSON.parse(payloadJson);
@@ -53,7 +71,7 @@ export function RunOracleForm({
     } catch {
       return "Invalid JSON.";
     }
-  })();
+  }, [payloadJson]);
 
   if (!teeOracleUrl) {
     return (
@@ -164,8 +182,7 @@ export function RunOracleForm({
         agentId: recorded.run.agentId,
         result: recorded.run.result,
         timestamp: recorded.run.timestamp,
-        quote: recorded.run.quote ?? "",
-        event_log: recorded.run.event_log ?? "",
+        proof: recorded.run.proof,
       };
       setRunResult({ data: runData });
       onNewRun?.(recorded.run);
@@ -195,8 +212,33 @@ export function RunOracleForm({
           {runDisabledReason}
         </p>
       )}
+      <div className="inline-flex overflow-hidden rounded-lg border border-gray-700 bg-gray-900 p-0.5">
+        {Object.entries(runPayloadPresets).map(([key, preset]) => {
+          const selected = payloadPreset === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => {
+                const next = key as RunPayloadPreset;
+                setPayloadPreset(next);
+                setPayloadJson(runPayloadPresets[next].json);
+                setRunResult(null);
+              }}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                selected ? "text-gray-100" : "text-gray-400 hover:text-gray-100"
+              }`}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
       <div>
-        <label className="block text-xs text-gray-400 mb-1">Claim JSON</label>
+        <label className="block text-xs text-gray-400 mb-1">
+          {runPayloadPresets[payloadPreset].fieldLabel}
+        </label>
         <textarea
           value={payloadJson}
           onChange={(e) => setPayloadJson(e.target.value)}
@@ -206,6 +248,9 @@ export function RunOracleForm({
         {payloadError && (
           <p className="text-xs text-red-400 mt-1">{payloadError}</p>
         )}
+        <p className="mt-1 text-xs text-gray-600">
+          {runPayloadPresets[payloadPreset].hint}
+        </p>
       </div>
       <p className="text-xs text-gray-600">
         Your wallet signs an EIP-712 message proving ownership of agent #

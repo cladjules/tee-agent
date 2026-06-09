@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AgentConfig } from "@tee-agent/agent/types";
 import { REPUTATION_REGISTRY_ABI } from "@tee-agent/agent/abis";
@@ -84,7 +84,7 @@ export function FeedbackForm({
     );
   }, [prefillValidation]);
 
-  const feedbackJsonError = (() => {
+  const feedbackJsonError = useMemo(() => {
     if (!feedbackJson.trim()) return null;
     try {
       JSON.parse(feedbackJson);
@@ -92,7 +92,7 @@ export function FeedbackForm({
     } catch {
       return "Invalid JSON.";
     }
-  })();
+  }, [feedbackJson]);
   return (
     <form
       onSubmit={async (e) => {

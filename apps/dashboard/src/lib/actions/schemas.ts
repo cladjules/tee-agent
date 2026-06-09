@@ -82,13 +82,21 @@ export const oracleAddressResponseSchema = z
   })
   .passthrough();
 
+const tdxProofSchema = z
+  .object({
+    type: z.literal("dstack-tdx"),
+    quote: hexStringSchema,
+    event_log: z.string().trim().min(1),
+    vm_config: z.string().trim().min(1),
+  })
+  .strict();
+
 export const oracleRunResponseSchema = z
   .object({
     agentId: z.string().trim().min(1),
     result: z.record(z.string(), z.unknown()),
     timestamp: z.number(),
-    quote: z.string().trim().min(1),
-    event_log: z.string().trim().min(1),
+    proof: tdxProofSchema,
   })
   .passthrough();
 

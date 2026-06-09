@@ -42,6 +42,7 @@ import express, { type Request, type Response } from "express";
 import cors from "cors";
 import { TappdClient, TdxQuoteResponse } from "@phala/dstack-sdk";
 import { encrypt } from "eciesjs";
+import crypto from "node:crypto";
 import { ethers } from "ethers";
 import { z } from "zod";
 import {
@@ -101,8 +102,12 @@ const reEncryptBodySchema = z
 type ReEncryptBody = z.infer<typeof reEncryptBodySchema>;
 
 const verifyBodySchema = z.object({
-  quote: z.string().startsWith("0x"),
-  event_log: z.string(),
+  proof: z.object({
+    type: z.literal("dstack-tdx"),
+    quote: z.string().startsWith("0x"),
+    event_log: z.string(),
+    vm_config: z.union([z.string(), z.record(z.string(), z.unknown())]),
+  }),
 });
 
 const validateRequestBodySchema = z.object({
@@ -134,6 +139,28 @@ type NormalizedTdxQuoteResponse = Omit<TdxQuoteResponse, "quote"> & {
   quote: `0x${string}`;
 };
 
+type VerifierEventLogEntry = {
+  imr: number;
+  event_type: number;
+  digest: string;
+  event: string;
+  event_payload: string;
+};
+
+const DSTACK_RUNTIME_EVENT_TYPE = 0x08000001;
+const SHA384_HEX_LENGTH = 96;
+
+type TappdInfoWithVmConfig = Awaited<ReturnType<TappdClient["info"]>> & {
+  vm_config?: unknown;
+};
+
+type TdxProof = {
+  type: "dstack-tdx";
+  quote: `0x${string}`;
+  event_log: string;
+  vm_config: string;
+};
+
 function normalizeHexBytes(
   value: string | Uint8Array,
   label: string,
@@ -149,11 +176,153 @@ function normalizeHexBytes(
   return prefixed;
 }
 
-function normalizeHexStringIfNeeded(value: string): string {
-  const trimmed = value.trim();
-  const unprefixed = trimmed.replace(/^0x/i, "");
-  if (!/^[0-9a-fA-F]+$/.test(unprefixed)) return value;
-  return `0x${unprefixed}`;
+function normalizeVerifierHexField(value: unknown, label: string): string {
+  if (typeof value === "string") {
+    const hex = value.trim().replace(/^0x/i, "");
+    if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) {
+      throw new Error(`${label} must be even-length hex.`);
+    }
+    return hex.toLowerCase();
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)
+  ) {
+    return Buffer.from(value).toString("hex");
+  }
+
+  if (value === undefined || value === null) return "";
+  throw new Error(`${label} must be hex string or byte array.`);
+}
+
+function runtimeEventDigest(
+  eventType: number,
+  event: string,
+  eventPayloadHex: string,
+): string {
+  const eventTypeBytes = Buffer.alloc(4);
+  eventTypeBytes.writeUInt32LE(eventType);
+  return crypto
+    .createHash("sha384")
+    .update(
+      Buffer.concat([
+        eventTypeBytes,
+        Buffer.from(":"),
+        Buffer.from(event),
+        Buffer.from(":"),
+        Buffer.from(eventPayloadHex, "hex"),
+      ]),
+    )
+    .digest("hex");
+}
+
+function normalizeVerifierEventLog(eventLog: string): {
+  eventLog: string;
+  eventCount: number;
+  runtimeEventCount: number;
+  paddedDigestCount: number;
+  recomputedRuntimeDigestCount: number;
+} {
+  const trimmed = eventLog.trim();
+  let eventLogJson = trimmed;
+  const maybeHex = trimmed.replace(/^0x/i, "");
+  if (
+    maybeHex.length > 0 &&
+    maybeHex.length % 2 === 0 &&
+    /^[0-9a-fA-F]+$/.test(maybeHex)
+  ) {
+    eventLogJson = Buffer.from(maybeHex, "hex").toString("utf8");
+  }
+
+  const parsed = JSON.parse(eventLogJson);
+  if (!Array.isArray(parsed)) {
+    throw new Error("event_log must be a JSON array string.");
+  }
+
+  let paddedDigestCount = 0;
+  let recomputedRuntimeDigestCount = 0;
+  const normalized = parsed.map((entry, index): VerifierEventLogEntry => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`event_log[${index}] must be an object.`);
+    }
+
+    const row = entry as Record<string, unknown>;
+    const imr = row.imr;
+    const eventType = row.event_type;
+    if (!Number.isInteger(imr)) {
+      throw new Error(`event_log[${index}].imr must be an integer.`);
+    }
+    if (!Number.isInteger(eventType)) {
+      throw new Error(`event_log[${index}].event_type must be an integer.`);
+    }
+
+    const eventName = typeof row.event === "string" ? row.event : "";
+    const eventPayload = normalizeVerifierHexField(
+      row.event_payload,
+      `event_log[${index}].event_payload`,
+    );
+    let digest = normalizeVerifierHexField(
+      row.digest,
+      `event_log[${index}].digest`,
+    );
+    if ((eventType as number) === DSTACK_RUNTIME_EVENT_TYPE) {
+      digest = runtimeEventDigest(eventType as number, eventName, eventPayload);
+      recomputedRuntimeDigestCount += 1;
+    } else if (digest.length < SHA384_HEX_LENGTH) {
+      digest = digest.padEnd(SHA384_HEX_LENGTH, "0");
+      paddedDigestCount += 1;
+    }
+    if (digest.length !== SHA384_HEX_LENGTH) {
+      throw new Error(
+        `event_log[${index}].digest must be ${SHA384_HEX_LENGTH} hex chars after normalization.`,
+      );
+    }
+
+    return {
+      imr: imr as number,
+      event_type: eventType as number,
+      digest,
+      event: eventName,
+      event_payload: eventPayload,
+    };
+  });
+
+  return {
+    eventLog: JSON.stringify(normalized),
+    eventCount: normalized.length,
+    runtimeEventCount: normalized.filter((entry) => entry.imr === 3).length,
+    paddedDigestCount,
+    recomputedRuntimeDigestCount,
+  };
+}
+
+function normalizeVerifierVmConfig(value: unknown): string {
+  const vmConfig =
+    typeof value === "string"
+      ? value.trim() || "{}"
+      : value && typeof value === "object"
+        ? JSON.stringify(value)
+        : "{}";
+  JSON.parse(vmConfig);
+  return vmConfig;
+}
+
+function getVmConfigFromInfo(appInfo: TappdInfoWithVmConfig | null): string {
+  return normalizeVerifierVmConfig(appInfo?.vm_config);
+}
+
+function buildTdxProof(
+  quoteResult: TdxQuoteResponse,
+  vmConfig: string,
+): TdxProof {
+  const normalized = normalizeTdxQuoteResult(quoteResult);
+  return {
+    type: "dstack-tdx",
+    quote: normalized.quote,
+    event_log: normalized.event_log,
+    vm_config: normalizeVerifierVmConfig(vmConfig),
+  };
 }
 
 function normalizeTdxQuoteResult(
@@ -162,10 +331,7 @@ function normalizeTdxQuoteResult(
   return {
     ...quoteResult,
     quote: normalizeHexBytes(quoteResult.quote, "TDX quote"),
-    event_log:
-      typeof quoteResult.event_log === "string"
-        ? normalizeHexStringIfNeeded(quoteResult.event_log)
-        : quoteResult.event_log,
+    event_log: quoteResult.event_log,
   };
 }
 
@@ -357,6 +523,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   console.log(
     `[oracle] network=${networkName} chainId=${chainId} isTestnet=${isTestnet}`,
   );
+  console.log(`[oracle] dstack verifier URL: ${DSTACK_VERIFIER_URL}`);
   console.log(
     `[oracle] EIP-712 domain: chainId=${chainId}, verifyingContract=${wallet.address}`,
   );
@@ -456,6 +623,18 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     reportData.set(ethers.getBytes(commitment), 0);
     const tdxResult = await tappd.tdxQuote(reportData, "raw");
     return normalizeTdxQuoteResult(tdxResult);
+  }
+
+  async function currentVmConfig(): Promise<string> {
+    if (IS_SIMULATOR) return "{}";
+    return getVmConfigFromInfo((await tappd.info()) as TappdInfoWithVmConfig);
+  }
+
+  async function tdxProofWithCommitment(commitment: string): Promise<TdxProof> {
+    return buildTdxProof(
+      await tdxQuoteWithCommitment(commitment),
+      await currentVmConfig(),
+    );
   }
 
   // ─── Blob fetching ────────────────────────────────────────────────────────────
@@ -744,6 +923,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[oracle] /info error:`, err);
       res.status(503).json({ error: `App info unavailable: ${message}` });
     }
   });
@@ -751,8 +931,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   /**
    * GET /attestation
    * Returns the full TDX attestation bundle required by dstack-verifier:
-   *   - quote       — raw TDX quote hex (Intel-signed, contains MRTD + RTMRs + reportData)
-   *   - event_log   — hex-encoded event log for RTMR replay verification
+   *   - proof       — quote, event log, and VM config bound together
    *   - tcb_info    — RTMR values + compose-hash event log from tappd.info()
    *   - address     — TEE-derived signing address (embedded in reportData[0:20])
    *   - publicKey   — compressed secp256k1 public key
@@ -767,8 +946,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    *   curl -d @<(curl -s https://<your-phala-cvm-oracle-url>/attestation) localhost:8080/verify | jq
    *   See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
    *
-   * Note: vm_config (CPU count, memory size) requires @phala/dstack-sdk ≥ 0.5.x.
-   * The tcb_info field contains equivalent measurements for manual verification.
+   * Note: older Phala images may not expose vm_config from tappd.info(); /verify
+   * falls back to "{}" so quote/event-log verification can still run.
    */
   app.get("/attestation", async (_req: Request, res: Response) => {
     try {
@@ -777,10 +956,11 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       const quoteResult = normalizeTdxQuoteResult(
         await tappd.tdxQuote(oracleAddressReportData(), "raw"),
       );
-      const appInfo = IS_SIMULATOR ? null : await tappd.info();
+      const appInfo = IS_SIMULATOR
+        ? null
+        : ((await tappd.info()) as TappdInfoWithVmConfig);
       res.json({
-        quote: quoteResult.quote,
-        event_log: quoteResult.event_log,
+        proof: buildTdxProof(quoteResult, getVmConfigFromInfo(appInfo)),
         ...(appInfo ? { tcb_info: appInfo.tcb_info } : {}),
         address: wallet.address,
         publicKey: signingKey.compressedPublicKey,
@@ -788,6 +968,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[oracle] /attestation error:`, err);
       res.status(503).json({ error: `Attestation unavailable: ${message}` });
     }
   });
@@ -797,8 +978,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    * Verifies an existing TDX quote against the local dstack-verifier sidecar.
    * No Phala Cloud dependency — fully trustless Intel TDX verification.
    *
-   * Body: { quote: "0x...", event_log: "0x..." }
-   * (the exact shape returned by GET /attestation and GET /run's proof field)
+   * Body: { proof: { type: "dstack-tdx", quote: "0x...", event_log: "[...]", vm_config: "{...}" } }
+   * (the exact proof object returned by GET /attestation and POST /run)
    *
    * The dstack-verifier checks: Intel root CA signature, MRTD, RTMR0-3
    * via event log replay, and TCB status. Returns { is_valid: true } when all pass.
@@ -808,37 +989,56 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    *
    * Sidecar URL configured via DSTACK_VERIFIER_URL env var.
    *
-   * Note: os_image_hash_verified requires vm_config (@phala/dstack-sdk >= 0.5.x).
-   * Without it, dstack-verifier still validates quote signature + event log + TCB status.
+   * Note: older dstack-verifier images require vm_config in the request schema
+   * and reject empty strings, so proof.vm_config must always be valid JSON.
    *
    * See: https://docs.phala.com/phala-cloud/attestation/verify-the-platform
    */
   app.post("/verify", async (req: Request, res: Response) => {
     try {
       const body = verifyBodySchema.parse(req.body);
+      const proof = body.proof;
+      const verifierUrl = `${DSTACK_VERIFIER_URL}/verify`;
+      const verifierQuote = proof.quote.replace(/^0x/i, "");
+      const verifierEventLog = normalizeVerifierEventLog(proof.event_log);
+      const verifierVmConfig = normalizeVerifierVmConfig(proof.vm_config);
+      console.log(
+        `[oracle] /verify quoteBytes=${Math.max(0, proof.quote.length - 2) / 2} eventLogEvents=${verifierEventLog.eventCount} runtimeEvents=${verifierEventLog.runtimeEventCount} paddedDigests=${verifierEventLog.paddedDigestCount} recomputedRuntimeDigests=${verifierEventLog.recomputedRuntimeDigestCount} eventLogChars=${verifierEventLog.eventLog.length} vmConfigChars=${verifierVmConfig.length} verifier=${verifierUrl}`,
+      );
       let fetchRes: globalThis.Response;
       try {
-        fetchRes = await fetch(`${DSTACK_VERIFIER_URL}/verify`, {
+        fetchRes = await fetch(verifierUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            quote: body.quote,
-            event_log: body.event_log,
+            quote: verifierQuote,
+            event_log: verifierEventLog.eventLog,
+            vm_config: verifierVmConfig,
           }),
         });
-      } catch {
+      } catch (err) {
         // Verifier sidecar unreachable.
+        console.error(`[oracle] /verify sidecar unreachable:`, err);
         res.json({ is_valid: false, unavailable: true });
         return;
       }
-      console.log(fetchRes);
+      const raw = await fetchRes.text();
+      console.log(
+        `[oracle] /verify sidecar response status=${fetchRes.status} ok=${fetchRes.ok} body=${raw}`,
+      );
 
       let result: unknown;
       try {
-        result = await fetchRes.json();
-      } catch {
+        result = raw ? (JSON.parse(raw) as unknown) : {};
+      } catch (err) {
         // Verifier returned a non-JSON body (e.g. HTML error page for 4xx/5xx).
         // This means the verifier is reachable but rejected the quote.
+        console.error(`[oracle] /verify sidecar returned non-JSON:`, {
+          status: fetchRes.status,
+          statusText: fetchRes.statusText,
+          body: raw,
+          error: err,
+        });
         res.json({ is_valid: false, status: fetchRes.status });
         return;
       }
@@ -848,12 +1048,16 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       });
     } catch (err) {
       if (err instanceof z.ZodError) {
+        console.error(`[oracle] /verify invalid request:`, err);
         res.status(400).json({
-          error: "quote (0x-prefixed hex) and event_log are required.",
+          error:
+            'proof { type: "dstack-tdx", quote, event_log, vm_config } is required.',
+          issues: err.issues,
         });
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[oracle] /verify error:`, err);
       res.status(503).json({ error: `Verification unavailable: ${message}` });
     }
   });
@@ -919,7 +1123,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       }
 
       // body.payload is the runMeta encoded in the on-chain requestURI:
-      // { type, outcome, payload (original claim), quote, timestamp, agentId }
+      // { outcome, payload (original claim), proof, timestamp, agentId }
       const runMeta = body.payload as {
         outcome?: Record<string, unknown>;
         payload?: Record<string, unknown>;
@@ -956,7 +1160,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           [erc8004AgentId, body.requestHash, score],
         ),
       );
-      const { quote, event_log } = await tdxQuoteWithCommitment(commitment);
+      const proof = await tdxProofWithCommitment(commitment);
 
       let txHash: string | undefined;
       if (RPC_URL) {
@@ -979,7 +1183,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
               responseURI,
               responseHash,
               body.tag,
-              quote,
+              proof.quote,
             ) as Promise<ethers.ContractTransactionResponse>,
         );
         const receipt = await tx.wait();
@@ -992,8 +1196,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       res.json({
         ...validationResult,
         score,
-        quote,
-        event_log,
+        proof,
         responseURI,
         responseHash,
         erc8004AgentId: erc8004AgentId.toString(),
@@ -1061,7 +1264,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           [agentId, resultHash, BigInt(timestamp)],
         ),
       );
-      const { quote, event_log } = await tdxQuoteWithCommitment(commitment);
+      const proof = await tdxProofWithCommitment(commitment);
 
       console.log(
         `[oracle] /run ok agentId=${agentIdStr} result=${resultJson}`,
@@ -1070,8 +1273,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         agentId: agentIdStr,
         result,
         timestamp,
-        quote,
-        event_log,
+        proof,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

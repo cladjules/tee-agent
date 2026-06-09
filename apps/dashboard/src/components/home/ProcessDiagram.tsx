@@ -11,7 +11,7 @@ const PROCESS_COLUMNS = [
       },
       {
         title: "Run your oracle and verify proof",
-        body: "Apps call the oracle endpoint for owner-signed runs, then pass the returned quote and event log to /verify when they need off-chain proof.",
+        body: "Apps call the oracle endpoint for owner-signed runs, then pass the returned proof bundle to /verify when they need off-chain proof.",
         tags: ["/run", "/verify"],
       },
       {

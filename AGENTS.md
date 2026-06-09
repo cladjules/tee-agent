@@ -80,19 +80,18 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 ### Oracle
 
-| Variable                    | Required   | Description                                                                                                                                                                                                                                           |
-| --------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NETWORK`                   | Yes        | `base` or `baseSepolia`                                                                                                                                                                                                                               |
-| `RPC_URL_ZERO_G`            | Yes        | 0G Storage EVM RPC                                                                                                                                                                                                                                    |
-| `INDEXER_URL_ZERO_G`        | Yes        | 0G Indexer URL                                                                                                                                                                                                                                        |
-| `LLM_API_KEY`               | Yes        | LLM provider key for example oracle handlers and `/validate`                                                                                                                                                                                          |
-| `LLM_API_BASE`              | Yes        | OpenAI-compatible API base                                                                                                                                                                                                                            |
-| `LLM_VALIDATION_MODEL`      | Yes        | Model used by `/validate` scorer                                                                                                                                                                                                                      |
-| `PORT`                      | Yes        | HTTP port                                                                                                                                                                                                                                             |
-| `APP_NAME`                  | No         | Root `.env` dstack key path used by Phala deploy to derive the oracle TEE signing key; defaults to `TEE-ORACLE`. Changing it rotates the TEE address and old encrypted blobs will not decrypt with the new key                                        |
-| `PRIVATE_KEY`               | Yes        | Oracle transaction signer for `initValidator`, `/validate` authorization, validation responses, and 0G fees. For dashboard automatic validation, this must match dashboard `PRIVATE_KEY`. Reencrypt owner auth is a request signature, not an env key |
-| `DSTACK_VERIFIER_URL`       | Yes        | dstack-verifier sidecar URL                                                                                                                                                                                                                           |
-| `DSTACK_SIMULATOR_ENDPOINT` | Local only | tappd simulator endpoint for local fake DCAP; omit in real Phala CVMs                                                                                                                                                                                 |
+| Variable               | Required | Description                                                                                                                                                                                                                                           |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NETWORK`              | Yes      | `base` or `baseSepolia`                                                                                                                                                                                                                               |
+| `RPC_URL_ZERO_G`       | Yes      | 0G Storage EVM RPC                                                                                                                                                                                                                                    |
+| `INDEXER_URL_ZERO_G`   | Yes      | 0G Indexer URL                                                                                                                                                                                                                                        |
+| `LLM_API_KEY`          | Yes      | LLM provider key for example oracle handlers and `/validate`                                                                                                                                                                                          |
+| `LLM_API_BASE`         | Yes      | OpenAI-compatible API base                                                                                                                                                                                                                            |
+| `LLM_VALIDATION_MODEL` | Yes      | Model used by `/validate` scorer                                                                                                                                                                                                                      |
+| `PORT`                 | Yes      | HTTP port                                                                                                                                                                                                                                             |
+| `APP_NAME`             | No       | Root `.env` dstack key path used by Phala deploy to derive the oracle TEE signing key; defaults to `TEE-ORACLE`. Changing it rotates the TEE address and old encrypted blobs will not decrypt with the new key                                        |
+| `PRIVATE_KEY`          | Yes      | Oracle transaction signer for `initValidator`, `/validate` authorization, validation responses, and 0G fees. For dashboard automatic validation, this must match dashboard `PRIVATE_KEY`. Reencrypt owner auth is a request signature, not an env key |
+| `DSTACK_VERIFIER_URL`  | Yes      | dstack-verifier sidecar URL                                                                                                                                                                                                                           |
 
 `ORACLE_ENTRY` is set by root `scripts/deploy-cvm.mjs` during deploy; do not put it in `.env`.
 
@@ -209,6 +208,9 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
   generics with constraints, or small local object types.
 - Avoid `any` as much as possible. If a third-party boundary forces it, isolate
   it at the boundary and immediately cast or validate into a concrete type.
+- In React components, prefer `useMemo` for derived values with branching,
+  parsing, filtering, or formatting. Do not use inline IIFE constants like
+  `const value = (() => { ... })()` for render-time derivations.
 - All mutations and client-triggered data fetches use **Server Actions** in `apps/dashboard/src/lib/actions/` — no API routes for internal use
 - Keep exactly one project README: root `README.md`. Do not add package READMEs
   or duplicate deploy/setup instructions elsewhere.

@@ -34,7 +34,7 @@ services:
       - LLM_API_KEY
       - LLM_API_BASE
       - LLM_VALIDATION_MODEL
-      - DSTACK_VERIFIER_URL
+      - DSTACK_VERIFIER_URL=http://verifier:8080
       # 0G Storage
       - RPC_URL_ZERO_G
       - INDEXER_URL_ZERO_G

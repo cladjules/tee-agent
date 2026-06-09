@@ -244,11 +244,16 @@ export async function readJsonFromUri<T>(uri: string): Promise<T> {
     const bytes = await readZeroGBytes(uri, indexerUrl);
     return JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
-  // Translate ipfs:// to a public HTTP gateway
-  const httpUri = uri.startsWith("ipfs://")
-    ? `https://ipfs.io/ipfs/${uri.slice(7)}`
-    : uri;
-  const response = await fetch(httpUri);
+  if (uri.startsWith("ipfs://")) {
+    const cid = uri.slice(7);
+    const response = await fetch(`https://gateway.pinata.cloud/ipfs/${cid}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch JSON from ${uri}: ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }
+
+  const response = await fetch(uri);
   if (!response.ok) {
     throw new Error(`Failed to fetch JSON from ${uri}: ${response.status}`);
   }

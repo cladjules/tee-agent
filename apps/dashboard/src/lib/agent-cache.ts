@@ -41,6 +41,13 @@ export type IndexedValidationResponse = {
   evidence?: Record<string, unknown>;
 };
 
+export type TdxProof = {
+  type: "dstack-tdx";
+  quote: string;
+  event_log: string;
+  vm_config: string;
+};
+
 let _redis: Redis | null = null;
 const memoryAgents = new Map<
   string,
@@ -158,10 +165,8 @@ export type CachedOracleRun = {
     };
     extra?: Record<string, unknown>;
   };
-  /** Raw TDX quote hex from the oracle response. Not present for on-chain indexed runs. */
-  quote?: string;
-  /** TDX event log hex — stored so the owner can POST /verify on historical runs. */
-  event_log?: string;
+  /** TDX proof bundle returned by the oracle. */
+  proof?: TdxProof;
   /** Unix timestamp in seconds (from oracle response). */
   timestamp: number;
   /** Oracle's TEE-derived signing address. */

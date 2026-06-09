@@ -36,7 +36,7 @@ export function ValidationResponsesPanel({
               const payload = {
                 payload: run.payload,
                 outcome: run.result.outcome,
-                quote: run.quote,
+                proof: run.proof,
                 timestamp: run.timestamp,
                 agentId: erc8004AgentId,
               };

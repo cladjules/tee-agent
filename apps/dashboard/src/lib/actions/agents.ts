@@ -202,11 +202,17 @@ export async function recordOracleRun(
     const addressRes = await fetch(`${oracleUrl}/address`, {
       cache: "no-store",
     });
+    const addressRaw = await addressRes.text();
     if (!addressRes.ok) {
+      console.error("[dashboard] oracle GET /address failed:", {
+        status: addressRes.status,
+        statusText: addressRes.statusText,
+        body: addressRaw,
+      });
       throw new Error(`GET /address failed: ${addressRes.status}`);
     }
     const oracleInfo = oracleAddressResponseSchema.parse(
-      await addressRes.json(),
+      JSON.parse(addressRaw) as unknown,
     );
 
     const runRes = await fetch(`${oracleUrl}/run`, {
@@ -222,9 +228,26 @@ export async function recordOracleRun(
       }),
     });
     const raw = await runRes.text();
-    const parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    let parsed: unknown = {};
+    try {
+      parsed = raw ? (JSON.parse(raw) as unknown) : {};
+    } catch (err) {
+      console.error("[dashboard] oracle POST /run returned invalid JSON:", {
+        status: runRes.status,
+        statusText: runRes.statusText,
+        body: raw,
+        error: err,
+      });
+      throw err;
+    }
     if (!runRes.ok) {
       const errorBody = oracleErrorResponseSchema.safeParse(parsed);
+      console.error("[dashboard] oracle POST /run failed:", {
+        status: runRes.status,
+        statusText: runRes.statusText,
+        body: raw,
+        parsed,
+      });
       throw new Error(
         errorBody.success
           ? errorBody.data.error
@@ -240,8 +263,7 @@ export async function recordOracleRun(
       agentId: parsedParams.agentId,
       result: runResponse.result as CachedOracleRun["result"],
       timestamp: runResponse.timestamp,
-      quote: runResponse.quote,
-      event_log: runResponse.event_log,
+      proof: runResponse.proof,
       oracleAddress: oracleInfo.address,
       payload: parsedParams.payload,
     };
@@ -253,6 +275,7 @@ export async function recordOracleRun(
     );
     return { ok: true, run };
   } catch (err) {
+    console.error("[dashboard] recordOracleRun failed:", err);
     return {
       ok: false,
       error: zodErrorMessage(err, "Failed to record run."),

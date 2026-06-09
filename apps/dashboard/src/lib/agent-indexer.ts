@@ -568,7 +568,6 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
     latestBlock - fromBlock + 1n > MAX_BLOCKS_PER_RUN
       ? fromBlock + MAX_BLOCKS_PER_RUN - 1n
       : latestBlock;
-  const caughtUp = scannedTo === latestBlock;
 
   const logs = await collectAgentIndexLogs(
     publicClient,
@@ -583,6 +582,7 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
     existingAgents.map((agent) => [agent.tokenId, agent] as const),
   );
   let newAgents = 0;
+  let earliestFailedBlock: bigint | undefined;
 
   for (const log of logs.registrations) {
     try {
@@ -590,11 +590,30 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
       if (!agentRows.has(row.tokenId)) newAgents += 1;
       agentRows.set(row.tokenId, row);
     } catch (err) {
+      const failedBlock = log.blockNumber ?? fromBlock;
+      if (
+        (earliestFailedBlock === undefined ||
+          failedBlock < earliestFailedBlock)
+      ) {
+        earliestFailedBlock = failedBlock;
+      }
       console.error(
-        `[indexer] index registered tokenId=${log.args.agentId} failed:`,
-        err instanceof Error ? err.message : err,
+        `[indexer] index registered tokenId=${log.args.agentId} block=${log.blockNumber?.toString() ?? "unknown"} failed:`,
+        err,
       );
     }
+  }
+
+  const cursorBlock =
+    earliestFailedBlock === undefined
+      ? scannedTo
+      : earliestFailedBlock > 0n
+        ? earliestFailedBlock - 1n
+        : -1n;
+  if (cursorBlock < scannedTo) {
+    console.error(
+      `[indexer] keeping cursor at ${cursorBlock.toString()} instead of ${scannedTo.toString()} so failed registration block ${earliestFailedBlock?.toString() ?? "unknown"} is retried`,
+    );
   }
 
   for (const log of logs.tokenUriUpdates) {
@@ -650,11 +669,11 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
   });
 
   const { submitted: validationsProcessed, responses: validationsUpdated } =
-    cfg.validationRegistryAddress
+    cfg.validationRegistryAddress && cursorBlock >= fromBlock
       ? await syncValidations(
           chainId,
           fromBlock,
-          scannedTo,
+          cursorBlock,
           publicClient,
           cfg.validationRegistryAddress,
           LOG_PAGE_SIZE,
@@ -662,14 +681,15 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
       : { submitted: 0, responses: 0 };
 
   // Advance lastBlock only after all processing for this bounded range is complete.
-  await setCachedAgents(chainId, cfg.registryAddress, merged, scannedTo);
+  await setCachedAgents(chainId, cfg.registryAddress, merged, cursorBlock);
+  const caughtUp = cursorBlock === latestBlock;
 
   return {
     ok: true,
     newAgents,
     totalAgents: merged.length,
     scannedFrom: fromBlock.toString(),
-    scannedTo: scannedTo.toString(),
+    scannedTo: cursorBlock.toString(),
     latestBlock: latestBlock.toString(),
     caughtUp,
     validationsProcessed,

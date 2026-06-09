@@ -127,9 +127,9 @@ agent's ERC-8004 `teeOracle` service.
 | ------------------ | ------------------------------------------------------- |
 | `GET /health`      | Liveness check                                          |
 | `GET /address`     | TEE-derived oracle address and public key               |
-| `GET /attestation` | Current CVM quote for inspection                        |
+| `GET /attestation` | Current CVM proof bundle for inspection                 |
 | `POST /run`        | Run the agent handler inside the Phala CVM              |
-| `POST /verify`     | Verify a returned quote and event log off-chain         |
+| `POST /verify`     | Verify a returned TDX proof bundle off-chain            |
 | `POST /validate`   | Score a run and submit the on-chain validation response |
 | `POST /reencrypt`  | Re-wrap ERC-7857 keys during transfer / oracle rotation |
 
@@ -189,7 +189,7 @@ await walletClient.writeContract({
 **Run And Verify**
 
 The agent owner signs `/run`. The oracle checks ownership, decrypts ERC-7857
-private data inside the CVM, runs your handler, and returns a quote.
+private data inside the CVM, runs your handler, and returns a TDX proof bundle.
 
 ```typescript
 const oracleInfo = await fetch(`${oracleUrl}/address`).then((res) =>
@@ -224,10 +224,7 @@ const run = await fetch(`${oracleUrl}/run`, {
 const verified = await fetch(`${oracleUrl}/verify`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    quote: run.quote,
-    event_log: run.event_log,
-  }),
+  body: JSON.stringify({ proof: run.proof }),
 }).then((res) => res.json());
 ```
 
@@ -249,7 +246,7 @@ const requestURI = toDataUri({
   agentId: agentId.toString(),
   payload,
   outcome: run.result,
-  quote: run.quote,
+  proof: run.proof,
   timestamp: run.timestamp,
 });
 const validation = prepareValidation(config, {
@@ -500,20 +497,19 @@ manually.
 
 ### `apps/oracle/.env.example`
 
-| Name                        | Required                 | Description                                             |
-| --------------------------- | ------------------------ | ------------------------------------------------------- |
-| `NETWORK`                   | Yes                      | `base` or `baseSepolia`                                 |
-| `RPC_URL_BASE`              | If `NETWORK=base`        | Base mainnet RPC                                        |
-| `RPC_URL_BASE_SEPOLIA`      | If `NETWORK=baseSepolia` | Base Sepolia RPC                                        |
-| `PRIVATE_KEY`               | Yes                      | Oracle gas / validation signer; not the agent owner key |
-| `LLM_API_KEY`               | Yes                      | LLM provider key for example handlers and `/validate`   |
-| `LLM_API_BASE`              | Yes                      | OpenAI-compatible API base                              |
-| `LLM_VALIDATION_MODEL`      | Yes                      | Model used by `/validate`                               |
-| `RPC_URL_ZERO_G`            | Yes                      | 0G Storage EVM RPC                                      |
-| `INDEXER_URL_ZERO_G`        | Yes                      | 0G Storage indexer                                      |
-| `PORT`                      | Yes                      | Oracle HTTP port; Phala compose uses `3001`             |
-| `DSTACK_VERIFIER_URL`       | Yes                      | dstack verifier sidecar URL used by `/verify`           |
-| `DSTACK_SIMULATOR_ENDPOINT` | Local only               | tappd simulator endpoint; omit in real Phala CVMs       |
+| Name                   | Required                 | Description                                             |
+| ---------------------- | ------------------------ | ------------------------------------------------------- |
+| `NETWORK`              | Yes                      | `base` or `baseSepolia`                                 |
+| `RPC_URL_BASE`         | If `NETWORK=base`        | Base mainnet RPC                                        |
+| `RPC_URL_BASE_SEPOLIA` | If `NETWORK=baseSepolia` | Base Sepolia RPC                                        |
+| `PRIVATE_KEY`          | Yes                      | Oracle gas / validation signer; not the agent owner key |
+| `LLM_API_KEY`          | Yes                      | LLM provider key for example handlers and `/validate`   |
+| `LLM_API_BASE`         | Yes                      | OpenAI-compatible API base                              |
+| `LLM_VALIDATION_MODEL` | Yes                      | Model used by `/validate`                               |
+| `RPC_URL_ZERO_G`       | Yes                      | 0G Storage EVM RPC                                      |
+| `INDEXER_URL_ZERO_G`   | Yes                      | 0G Storage indexer                                      |
+| `PORT`                 | Yes                      | Oracle HTTP port; Phala compose uses `3001`             |
+| `DSTACK_VERIFIER_URL`  | Yes                      | dstack verifier sidecar URL used by `/verify`           |
 
 ### `apps/dashboard/.env.example` (optional local dashboard)
 
