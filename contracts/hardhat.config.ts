@@ -70,6 +70,13 @@ export default defineConfig({
       type: "edr-simulated",
       chainType: "op",
     },
+    localhost: {
+      type: "http",
+      chainType: "l1",
+      chainId: 31337,
+      url: configVariable("LOCAL_RPC_URL"),
+      accounts: [configVariable("PRIVATE_KEY")],
+    },
     baseSepolia: {
       type: "http",
       chainType: "op",

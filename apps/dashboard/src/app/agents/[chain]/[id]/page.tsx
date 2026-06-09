@@ -1,15 +1,14 @@
 import { notFound } from "next/navigation";
 import { getAgentPageData } from "@/lib/actions/registry";
-import { getNetworkConfigByChainId } from "@tee-agent/agent/network";
+import { DEFAULT_NETWORK, NETWORK_CONFIG } from "@tee-agent/agent/network";
 import { getClientConfigForChain } from "@/lib/config";
-import AgentDetailActions from "./AgentDetailActions";
-import { getActiveChainId } from "@/lib/config";
+import AgentDetailActions from "./components/AgentDetailActions";
 import type {
   AgentPublicMetadata,
   AgentIntelligentDataEntry,
   AgentService,
 } from "@tee-agent/agent/types";
-import { readJsonFromUri } from "@tee-agent/agent/encryption";
+import { readJsonFromUri } from "@tee-agent/agent/crypto";
 
 // ─── Chain helpers (pure — receive URLs as args) ──────────────────────────────
 
@@ -94,7 +93,7 @@ async function resolvePublicMetadata(
 }
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params: Promise<{ chain: string; id: string }>;
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -106,9 +105,10 @@ export async function generateMetadata({ params }: Props) {
 }
 
 export default async function AgentDetailPage({ params }: Props) {
-  const { id } = await params;
-  const chainId = await getActiveChainId();
-  const nc = getNetworkConfigByChainId(chainId);
+  const { chain, id } = await params;
+  const nc =
+    NETWORK_CONFIG[chain as keyof typeof NETWORK_CONFIG] ?? DEFAULT_NETWORK;
+  const chainId = nc.chain.id;
   const clientCfg = getClientConfigForChain(chainId);
   const {
     agent,
@@ -116,7 +116,7 @@ export default async function AgentDetailPage({ params }: Props) {
     feedbackOverview,
     oracleRunsResult,
     validationResponses,
-  } = await getAgentPageData(id);
+  } = await getAgentPageData(id, chainId);
 
   if (!agent) notFound();
 
@@ -127,13 +127,6 @@ export default async function AgentDetailPage({ params }: Props) {
   });
 
   const oracleRuns = oracleRunsResult.runs;
-  const actionClientCfg = {
-    registryAddress: clientCfg.registryAddress,
-    teeVerifierAddress: clientCfg.teeVerifierAddress,
-    identityRegistryAddress: clientCfg.identityRegistryAddress,
-    reputationRegistryAddress: clientCfg.reputationRegistryAddress,
-    validationRegistryAddress: clientCfg.validationRegistryAddress,
-  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -278,6 +271,7 @@ export default async function AgentDetailPage({ params }: Props) {
       {/* Oracle runs + actions — primary content */}
       <AgentDetailActions
         agentId={id}
+        chainId={chainId}
         erc8004AgentId={intelligentDataInfo.erc8004AgentId ?? undefined}
         owner={agent.owner}
         initialServices={agent.metadata.services ?? []}
@@ -290,7 +284,6 @@ export default async function AgentDetailPage({ params }: Props) {
         initialPublicMetadataCreatedAt={publicMetadata.createdAt}
         initialRuns={oracleRuns}
         initialValidationResponses={validationResponses}
-        clientCfg={actionClientCfg}
       />
 
       {/* Secondary sections */}

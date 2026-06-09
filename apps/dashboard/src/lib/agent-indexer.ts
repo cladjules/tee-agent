@@ -31,7 +31,7 @@ import {
   VALIDATION_REQUEST_EVENT,
   VALIDATION_RESPONSE_EVENT,
 } from "@tee-agent/agent/abis";
-import { readJsonFromUri } from "@tee-agent/agent/encryption";
+import { readJsonFromUri } from "@tee-agent/agent/crypto";
 import {
   resolveOwnedValidationOracleUrl,
   submitOracleValidation,
@@ -140,8 +140,8 @@ type RegistryLog = AgentRegisteredLog | TokenUriUpdatedLog | AgentTransferLog;
 type ValidationLog = ValidationRequestLog | ValidationResponseLog;
 
 const LOG_PAGE_SIZE = 2_000n;
-const LOG_PAGE_DELAY_MS = 1_000;
-const MAX_LOG_PAGES_PER_RUN = 5n;
+const LOG_PAGE_DELAY_MS = 300; // 300ms delay between log page fetches to avoid hitting RPC rate limits
+const MAX_LOG_PAGES_PER_RUN = 10n;
 const MAX_BLOCKS_PER_RUN = LOG_PAGE_SIZE * MAX_LOG_PAGES_PER_RUN;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -253,6 +253,7 @@ async function indexedMetadataFromUri(
 }
 
 async function rowFromRegistrationLog(
+  chainId: number,
   log: AgentRegisteredLog,
   registry: AgentRegistry,
 ): Promise<CachedAgentIndexRow> {
@@ -272,6 +273,7 @@ async function rowFromRegistrationLog(
     baseAgentTags({ erc8004AgentId, metadataUri }),
   );
   const row = {
+    chainId,
     tokenId: tokenId.toString(),
     ...indexed,
     owner: log.args.owner,
@@ -533,24 +535,16 @@ async function syncValidations(
 export async function syncEvents(chainId: number): Promise<IndexResult> {
   const cfg = getServerConfigForChain(chainId);
 
-  if (!cfg.registryAddress) {
-    return { ok: false, skipped: true, reason: "no registry address" };
-  }
-
-  if (!cfg.rpcUrl)
-    return { ok: false, skipped: true, reason: "no rpc/registry" };
+  if (!cfg.rpcUrl) return { ok: false, skipped: true, reason: "no rpc" };
   const publicClient = createPublicClient({
     chain: cfg.chain,
     transport: http(cfg.rpcUrl),
   });
   const registry = new AgentRegistry({
     address: cfg.registryAddress,
-    publicClient,
+    chainId,
+    rpcUrl: cfg.rpcUrl,
   });
-  if (!publicClient || !registry) {
-    return { ok: false, skipped: true, reason: "no rpc/registry" };
-  }
-
   const cached = await getCachedAgents(chainId, cfg.registryAddress);
   const existingAgents = cached?.agents ?? [];
   const fromBlock = cached ? cached.lastBlock + 1n : cfg.registryFromBlock;
@@ -592,7 +586,7 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
 
   for (const log of logs.registrations) {
     try {
-      const row = await rowFromRegistrationLog(log, registry);
+      const row = await rowFromRegistrationLog(chainId, log, registry);
       if (!agentRows.has(row.tokenId)) newAgents += 1;
       agentRows.set(row.tokenId, row);
     } catch (err) {

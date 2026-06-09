@@ -130,7 +130,7 @@ important path is:
 9. Confirm `/attestation` is exposed for inspection. The on-chain gate is still
    `TeeVerifier` calling Automata DCAP during `initValidator` and validation
    responses.
-10. Mint agents through `@tee-agent/agent/mint`; do not hand-edit `teeOracle`
+10. Mint agents through `@tee-agent/agent/ops/mint`; do not hand-edit `teeOracle`
     for existing agents without an oracle key rotation flow.
 
 Package roles:
@@ -177,7 +177,7 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 - [x] Phala Cloud TDX oracle for secure NFT transfers (key re-wrapping inside TEE)
 - [x] Dashboard: create, list, view, update agents
 - [x] Dashboard: decrypt intelligent data (owner-only, signature-gated)
-- [x] SDK two-party transfer helpers (`createTransferOffer`, `acceptTransferOffer`, `buildTransferTxArgs`)
+- [x] SDK two-party transfer helpers (`createTransferOffer`, `getTransferAccessPayloadsToSign`, `buildTransferAcceptance`, `buildTransferTxArgs`)
 - [x] Post-transfer private-data re-encryption flow for the new owner
 - [x] E2E coverage for mint, ERC-7857 transfer, ERC-8004 identity transfer, reputation, validation, and `teeOracle` service metadata
 - [x] Generic Phala CVM deploy script for any oracle entry under `apps/oracle/src`
@@ -220,9 +220,9 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
   chain files. Chain metadata comes from `@tee-agent/agent/network`
   `NETWORK_CONFIG`; deployment addresses come from root `deployments.json`.
 - Internal imports use `.js` extensions (NodeNext resolution)
-- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/network`, `@tee-agent/agent/encryption`, `@tee-agent/agent/abis`, `@tee-agent/agent/registry`, `@tee-agent/agent/zero-g`, `@tee-agent/agent/metadata`, `@tee-agent/agent/mint`, `@tee-agent/agent/transfer`, `@tee-agent/agent/services`, `@tee-agent/agent/feedback`, `@tee-agent/agent/validate`, `@tee-agent/agent/typed-data`
+- Sub-path exports only: `@tee-agent/agent/types`, `@tee-agent/agent/network`, `@tee-agent/agent/crypto`, `@tee-agent/agent/abis`, `@tee-agent/agent/registry`, `@tee-agent/agent/storage/zero-g`, `@tee-agent/agent/ops/metadata`, `@tee-agent/agent/ops/mint`, `@tee-agent/agent/ops/transfer`, `@tee-agent/agent/ops/transfer-acceptance`, `@tee-agent/agent/ops/services`, `@tee-agent/agent/ops/feedback`, `@tee-agent/agent/ops/validate`, `@tee-agent/agent/typed-data`
 - `zerog://` is the canonical URI scheme for private encrypted blobs; `data:application/json;base64,…` is used for public on-chain metadata
-- Transfer flow belongs in `@tee-agent/agent/transfer` and must stay storage-agnostic. Dashboard storage is an implementation detail, not an SDK requirement.
+- Transfer offer creation belongs in `@tee-agent/agent/ops/transfer`; browser-safe acceptance/tx helpers belong in `@tee-agent/agent/ops/transfer-acceptance`. Dashboard storage is an implementation detail, not an SDK requirement.
 - Oracle image command: `npm run oracle:image` from repo root. It saves the pushed URL to root `.env` as `ORACLE_IMAGE`.
 - Oracle deployment command: `npm run oracle:deploy -- src/examples/<entry>.ts` from repo root. The script prints the oracle URL when Phala exposes it. The `apps/oracle` workspace `deploy` script is only a thin alias.
 - User-facing docs and UI must show repo scripts as the deploy interface. Do

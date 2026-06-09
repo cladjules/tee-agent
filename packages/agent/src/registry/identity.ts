@@ -1,14 +1,19 @@
-import type { RegistryConfig } from "../types.js";
-import type { Address, PublicClient } from "viem";
+import { createPublicClient, http, type Address } from "viem";
 import { IDENTITY_REGISTRY_ABI } from "../abis.js";
+import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class IdentityRegistry {
   private readonly _addr: Address;
-  private readonly _pc: PublicClient;
+  private readonly _pc;
 
-  constructor(config: RegistryConfig) {
-    this._addr = config.address;
-    this._pc = config.publicClient;
+  constructor(params: { chainId: number; rpcUrl?: string }) {
+    const network =
+      getNetworkConfigByChainId(params.chainId) ?? DEFAULT_NETWORK;
+    this._addr = network.identityRegistryAddress;
+    this._pc = createPublicClient({
+      chain: network.chain,
+      transport: http(params.rpcUrl),
+    });
   }
 
   async ownerOf(agentId: bigint): Promise<Address> {

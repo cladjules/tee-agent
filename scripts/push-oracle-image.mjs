@@ -228,10 +228,7 @@ function promptHidden(prompt) {
 }
 
 function defaultTag() {
-  const commit = output("git", ["rev-parse", "--short", "HEAD"]);
-  if (!commit) return undefined;
-  const timestamp = new Date().toISOString().replaceAll(/\D/g, "").slice(0, 14);
-  return `${commit}-${timestamp}`;
+  return "dev";
 }
 
 function fileSha256(filePath) {

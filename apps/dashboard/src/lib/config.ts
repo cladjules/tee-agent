@@ -1,10 +1,9 @@
 /**
- * Dashboard config: public deployment addresses, active chain cookie state,
- * and server-only secrets layered on top of NETWORK_CONFIG.
+ * Dashboard config: public deployment addresses and server-only secrets layered
+ * on top of NETWORK_CONFIG.
  */
 
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
-import { cookies } from "next/headers";
 import type { AgentConfig } from "@tee-agent/agent/types";
 import type { Address } from "viem";
 import {
@@ -26,7 +25,19 @@ type RawDeployments = Record<
   }
 >;
 
-export const ACTIVE_CHAIN_COOKIE = "active_chain_id";
+export type DashboardClientConfig = AgentConfig & {
+  registryAddress: Address;
+  teeVerifierAddress: Address;
+  validationRegistryAddress: Address;
+};
+
+export type DashboardServerConfig = DashboardClientConfig & {
+  registryFromBlock: bigint;
+  privateKey: string;
+  zeroGRpcUrl: string;
+  zeroGIndexerUrl: string;
+  pinataJwt: string;
+};
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -43,48 +54,58 @@ const RPC_MAP = Object.fromEntries(
   ]),
 ) as Record<number, string | undefined>;
 
-export function getDeploymentForChain(chainId: number): {
-  agentRegistry?: Address;
-  teeVerifier?: Address;
-  validationRegistry?: Address;
-  fromBlock: bigint;
-} {
-  const raw = (deploymentsJson as RawDeployments)[String(chainId)];
-  const deployment: {
-    agentRegistry?: Address;
-    teeVerifier?: Address;
-    validationRegistry?: Address;
-    fromBlock: bigint;
-  } = {
-    fromBlock: raw?.fromBlock === undefined ? 0n : BigInt(raw.fromBlock),
-  };
-  if (raw?.contracts?.agentRegistry) {
-    deployment.agentRegistry = raw.contracts.agentRegistry as Address;
-  }
-  if (raw?.contracts?.teeVerifier) {
-    deployment.teeVerifier = raw.contracts.teeVerifier as Address;
-  }
-  if (raw?.contracts?.validationRegistry) {
-    deployment.validationRegistry = raw.contracts.validationRegistry as Address;
-  }
-  return deployment;
-}
-
-export async function getActiveChainId(): Promise<number> {
-  const store = await cookies();
-  const val = store.get(ACTIVE_CHAIN_COOKIE)?.value;
-  const id = val ? parseInt(val, 10) : NaN;
-  try {
-    return getNetworkConfigByChainId(id).chain.id;
-  } catch {
+export function getAvailableChainId(chainId?: number): number {
+  if (!chainId) {
     return DEFAULT_NETWORK.chain.id;
   }
+
+  return (
+    getNetworkConfigByChainId(chainId)?.chain.id ?? DEFAULT_NETWORK.chain.id
+  );
 }
 
-export function getClientConfigForChain(chainId: number): AgentConfig {
-  const network = getNetworkConfigByChainId(chainId);
+export function getDeploymentForChain(chainId: number): {
+  agentRegistry: Address;
+  teeVerifier: Address;
+  validationRegistry: Address;
+  fromBlock: bigint;
+} {
+  const activeChainId = getAvailableChainId(chainId);
+  const raw = (deploymentsJson as RawDeployments)[String(activeChainId)];
+  if (!raw?.contracts?.agentRegistry) {
+    throw new Error(
+      `AgentRegistry deployment missing for chain ${activeChainId}.`,
+    );
+  }
+  if (!raw.contracts.teeVerifier) {
+    throw new Error(
+      `TeeVerifier deployment missing for chain ${activeChainId}.`,
+    );
+  }
+  if (!raw.contracts.validationRegistry) {
+    throw new Error(
+      `ValidationRegistry deployment missing for chain ${activeChainId}.`,
+    );
+  }
+  return {
+    agentRegistry: raw.contracts.agentRegistry as Address,
+    teeVerifier: raw.contracts.teeVerifier as Address,
+    validationRegistry: raw.contracts.validationRegistry as Address,
+    fromBlock: raw?.fromBlock === undefined ? 0n : BigInt(raw.fromBlock),
+  };
+}
+
+export function getConfiguredChainIds(): number[] {
+  return Object.values(NETWORK_CONFIG).map((network) => network.chain.id);
+}
+
+export function getClientConfigForChain(
+  chainId?: number,
+): DashboardClientConfig {
+  const activeChainId = getAvailableChainId(chainId);
+  const network = getNetworkConfigByChainId(activeChainId) ?? DEFAULT_NETWORK;
   const deployment = getDeploymentForChain(network.chain.id);
-  const config: AgentConfig = {
+  const config: DashboardClientConfig = {
     chain: network.chain,
     identityRegistryAddress: network.identityRegistryAddress,
     reputationRegistryAddress: network.reputationRegistryAddress,
@@ -99,15 +120,16 @@ export function getClientConfigForChain(chainId: number): AgentConfig {
 /**
  * Returns the full server-side config for the given EVM chain ID.
  */
-export function getServerConfigForChain(chainId: number): AgentConfig & {
-  registryFromBlock: bigint;
-} {
-  const clientConfig = getClientConfigForChain(chainId);
-  const deployment = getDeploymentForChain(chainId);
+export function getServerConfigForChain(
+  chainId?: number,
+): DashboardServerConfig {
+  const activeChainId = getAvailableChainId(chainId);
+  const clientConfig = getClientConfigForChain(activeChainId);
+  const deployment = getDeploymentForChain(activeChainId);
 
   return {
     ...clientConfig,
-    rpcUrl: RPC_MAP[chainId],
+    rpcUrl: RPC_MAP[activeChainId],
     registryFromBlock: deployment.fromBlock,
     privateKey: requiredEnv("PRIVATE_KEY"),
     zeroGRpcUrl: requiredEnv("RPC_URL_ZERO_G"),

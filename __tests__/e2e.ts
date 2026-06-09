@@ -10,7 +10,7 @@
  *   PRIVATE_KEY          — sender key
  *   LOCAL_RPC_URL        — local RPC
  *   RPC_URL_BASE_SEPOLIA — Base Sepolia RPC
- *   ORACLE_URL           — oracle HTTP base URL
+ *   ORACLE_URL           — unused by e2e; tests run a localhost oracle
  *   PINATA_JWT           — Pinata JWT for IPFS metadata
  *   RPC_URL_ZERO_G       — 0G Storage RPC for encrypted blobs
  *   INDEXER_URL_ZERO_G   — 0G Storage indexer for encrypted blobs
@@ -26,12 +26,14 @@ import {
   toBytes,
   zeroAddress,
 } from "viem";
-import type { Address, Hex, PublicClient } from "viem";
+import type { Address, Hex } from "viem";
 import type { EncryptedBlob } from "../packages/agent/dist/types.js";
 import { baseSepolia, hardhat } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 import {
@@ -56,11 +58,12 @@ import {
   TeeVerifierRegistry,
   ValidationRegistry,
 } from "../packages/agent/dist/registry/index.js";
+import { createTransferOffer } from "../packages/agent/dist/ops/transfer.js";
 import {
-  acceptTransferOffer,
+  buildTransferAcceptance,
   buildTransferTxArgs,
-  createTransferOffer,
-} from "../packages/agent/dist/ops/transfer.js";
+  getTransferAccessPayloadsToSign,
+} from "../packages/agent/dist/ops/transfer-acceptance.js";
 import { prepareMint } from "../packages/agent/dist/ops/mint.js";
 import {
   fetchAgentServices,
@@ -106,19 +109,8 @@ const isLocal = NETWORK === "local";
 const CHAIN_ID = isLocal ? 31337 : 84532;
 const RPC_URL = requiredEnv(isLocal ? "LOCAL_RPC_URL" : "RPC_URL_BASE_SEPOLIA");
 const PRIVATE_KEY = requiredEnv("PRIVATE_KEY") as `0x${string}`;
-const ORACLE_URL = requiredEnv("ORACLE_URL");
+const ORACLE_URL = "http://localhost:3001";
 const NORMALIZED_ORACLE_URL = ORACLE_URL.replace(/\/+$/, "");
-if (
-  !isLocal &&
-  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(
-    NORMALIZED_ORACLE_URL,
-  )
-) {
-  throw new Error(
-    `Base Sepolia e2e requires a remote Phala oracle URL, got ${ORACLE_URL}.\n` +
-      "Set ORACLE_URL=<printed-oracle-url> in __tests__/.env.",
-  );
-}
 
 const chain = isLocal
   ? ({ ...hardhat, rpcUrls: { default: { http: [RPC_URL] } } } as const)
@@ -147,6 +139,49 @@ if (isLocal) {
   }
 }
 
+function runRequiredCommand(
+  label: string,
+  command: string,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+  hint = `Run local deploy first: npm --workspace @tee-agent/contracts run deploy:localOracle`,
+): void {
+  const result = spawnSync(command, args, {
+    cwd: repoRoot,
+    env: { ...process.env, ...extraEnv },
+    encoding: "utf8",
+  });
+  if (result.status === 0) return;
+
+  const details = [result.stdout, result.stderr]
+    .filter((value) => value && value.trim())
+    .join("\n")
+    .trim();
+  throw new Error(`${label} failed.${details ? `\n${details}` : ""}\n` + hint);
+}
+
+if (isLocal) {
+  runRequiredCommand(
+    "setup-env:localOracle",
+    "npm",
+    ["--workspace", "@tee-agent/contracts", "run", "setup-env:localOracle"],
+    { LOCAL_ORACLE: "local" },
+  );
+} else {
+  runRequiredCommand(
+    "setup-env:baseSepolia:localOracle",
+    "npm",
+    [
+      "--workspace",
+      "@tee-agent/contracts",
+      "run",
+      "setup-env:baseSepolia:localOracle",
+    ],
+    { BASE_SEPOLIA_ORACLE: "local" },
+    "Deploy the Base Sepolia local-oracle contract set first: npm --workspace @tee-agent/contracts run deploy:baseSepolia:localOracle",
+  );
+}
+
 // ── Load deployed addresses ───────────────────────────────────────────────────
 
 type DeploymentJson = Record<
@@ -157,42 +192,13 @@ type DeploymentJson = Record<
   }
 >;
 
-function readIgnitionDeploymentContracts(): Record<string, string | undefined> {
-  const deploymentPath = resolve(
-    __dirname,
-    `../contracts/ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`,
-  );
-  let raw: Record<string, string | undefined>;
-  try {
-    raw = JSON.parse(readFileSync(deploymentPath, "utf8")) as Record<
-      string,
-      string | undefined
-    >;
-  } catch {
-    throw new Error(
-      `Missing local deployment file: ${deploymentPath}.\n` +
-        "Deploy contracts to the running local Hardhat node before npm run e2e:local.",
-    );
-  }
-  return {
-    agentRegistry: raw["TeeAgent#AgentRegistry"],
-    teeVerifier: raw["TeeAgent#TeeVerifier"],
-    validationRegistry: raw["TeeAgent#ValidationRegistry"],
-  };
-}
-
-const rootDeployments = isLocal
-  ? undefined
-  : (JSON.parse(
-      readFileSync(resolve(__dirname, "../deployments.json"), "utf8"),
-    ) as DeploymentJson);
+const rootDeployments = JSON.parse(
+  readFileSync(resolve(__dirname, "../deployments.json"), "utf8"),
+) as DeploymentJson;
 const rootDeployment = rootDeployments?.[String(CHAIN_ID)];
-const deploymentContracts = isLocal
-  ? readIgnitionDeploymentContracts()
-  : rootDeployment?.contracts;
-const deploymentFromBlock = isLocal
-  ? 0n
-  : rootDeployment?.fromBlock !== undefined
+const deploymentContracts = rootDeployment?.contracts;
+const deploymentFromBlock =
+  rootDeployment?.fromBlock !== undefined
     ? BigInt(rootDeployment.fromBlock)
     : undefined;
 if (!isLocal && deploymentFromBlock === undefined) {
@@ -256,22 +262,24 @@ console.log(`Recipient:     ${recipient}`);
 
 // ── Registry clients ──────────────────────────────────────────────────────────
 
-const pc = publicClient as PublicClient;
 const agentRegistry = new AgentRegistry({
   address: AGENT_REGISTRY_ADDRESS,
-  publicClient: pc,
+  chainId: CHAIN_ID,
+  rpcUrl: RPC_URL,
 });
 const identityRegistry = new IdentityRegistry({
-  address: identityRegistryAddress,
-  publicClient: pc,
+  chainId: CHAIN_ID,
+  rpcUrl: RPC_URL,
 });
 const teeVerifierRegistry = new TeeVerifierRegistry({
   address: teeVerifierAddress,
-  publicClient: pc,
+  chainId: CHAIN_ID,
+  rpcUrl: RPC_URL,
 });
 const validationRegistry = new ValidationRegistry({
   address: VALIDATION_REGISTRY_ADDRESS,
-  publicClient: pc,
+  chainId: CHAIN_ID,
+  rpcUrl: RPC_URL,
 });
 const sdkConfig = {
   chain,
@@ -292,8 +300,8 @@ const sdkConfig = {
 };
 const reputationRegistry = REPUTATION_REGISTRY_ADDRESS
   ? new ReputationRegistry({
-      address: REPUTATION_REGISTRY_ADDRESS,
-      publicClient: pc,
+      chainId: CHAIN_ID,
+      rpcUrl: RPC_URL,
     })
   : undefined;
 
@@ -399,7 +407,7 @@ async function mintPreparedAgent(params: {
 }> {
   const prepared = await prepareMint(sdkConfig, {
     agentType: "assistant",
-    imageUrl: "https://example.com/tee-agent-e2e.png",
+    imageUrl: "https://placehold.co/512x512/png?text=Tee+Agent+E2E",
     services: [
       {
         name: "teeOracle",
@@ -632,12 +640,17 @@ async function buildAcceptedTransferOffer(params: {
     `  SDK offer built — accessPayloads=${offer.accessPayloads.length}, ownershipProofs=${offer.ownershipProofs.length}`,
   );
 
-  const acceptance = await acceptTransferOffer(offer, (digest) =>
-    recipientWalletClient.signMessage({
-      account: recipientAccount,
-      message: digest,
-    }),
+  const signatureRequests = getTransferAccessPayloadsToSign(offer);
+  const accessSignatures = await Promise.all(
+    signatureRequests.map(async ({ index, digest }) => ({
+      index,
+      proof: await recipientWalletClient.signMessage({
+        account: recipientAccount,
+        message: digest,
+      }),
+    })),
   );
+  const acceptance = buildTransferAcceptance(offer, accessSignatures);
   console.log(`  SDK acceptance signed — proofs=${acceptance.proofs.length}`);
   return acceptance;
 }
@@ -823,9 +836,8 @@ async function assertOwnershipProofSealedKeys(params: {
 }
 
 async function assertOracleRegistered(oracleAddress: `0x${string}`) {
-  const registered = await teeVerifierRegistry.isOracleRegistered(
-    oracleAddress,
-  );
+  const registered =
+    await teeVerifierRegistry.isOracleRegistered(oracleAddress);
   if (!registered) {
     throw new Error(
       `Oracle ${oracleAddress} is not registered in TeeVerifier ${teeVerifierAddress}`,
@@ -1486,10 +1498,14 @@ async function testUpdateServices() {
 
 // ── Oracle health-check ──────────────────────────────────────────────────────
 
+let localOracleProcess: ChildProcess | null = null;
+let stoppingLocalOracle = false;
+let localOracleSpawnError = "";
+
 async function assertOracleRunning(): Promise<void> {
   try {
     const res = await fetch(`${NORMALIZED_ORACLE_URL}/address`, {
-      signal: AbortSignal.timeout(isLocal ? 2_000 : 15_000),
+      signal: AbortSignal.timeout(2_000),
     });
     if (res.ok) return;
   } catch {
@@ -1497,16 +1513,120 @@ async function assertOracleRunning(): Promise<void> {
   }
   throw new Error(
     `Oracle is not reachable at ${NORMALIZED_ORACLE_URL}.\n` +
-      (isLocal
-        ? `Start it manually: cd apps/oracle && npm run dev`
-        : `Check the Phala CVM is running and exposing the oracle endpoint.`),
+      `Check the local oracle startup logs above.`,
   );
+}
+
+async function waitForOracleRunning(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "";
+
+  while (Date.now() < deadline) {
+    if (localOracleSpawnError) {
+      throw new Error(localOracleSpawnError);
+    }
+    if (localOracleProcess?.exitCode !== null) {
+      throw new Error(`Local oracle exited before it became ready.`);
+    }
+
+    try {
+      await assertOracleRunning();
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      await delay(500);
+    }
+  }
+
+  throw new Error(`Local oracle did not become ready.\n${lastError}`);
+}
+
+async function startLocalOracle(): Promise<void> {
+  runRequiredCommand(
+    "oracle dev services",
+    "npm",
+    ["--workspace", "@tee-agent/oracle", "run", "dev:up"],
+    {},
+    "Make sure Docker is running, then retry npm run e2e:local.",
+  );
+
+  const oracleUrl = new URL(NORMALIZED_ORACLE_URL);
+  const port = oracleUrl.port || "3001";
+  const oracleEnv = {
+    ...process.env,
+    NETWORK: isLocal ? "local" : "baseSepolia",
+    LOCAL_RPC_URL: RPC_URL,
+    RPC_URL_BASE_SEPOLIA: RPC_URL,
+    PORT: port,
+    DSTACK_SIMULATOR_ENDPOINT:
+      process.env.DSTACK_SIMULATOR_ENDPOINT?.trim() || "http://localhost:8090",
+    DSTACK_VERIFIER_URL:
+      process.env.DSTACK_VERIFIER_URL?.trim() || "http://localhost:8080",
+  };
+
+  localOracleProcess = spawn(
+    "node",
+    ["--import", "tsx", "src/examples/prediction-market.ts"],
+    {
+      cwd: resolve(repoRoot, "apps/oracle"),
+      env: oracleEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  localOracleProcess.stdout?.on("data", (chunk: Buffer) => {
+    process.stdout.write(chunk);
+  });
+  localOracleProcess.stderr?.on("data", (chunk: Buffer) => {
+    process.stderr.write(chunk);
+  });
+  localOracleProcess.on("exit", (code, signal) => {
+    if (!stoppingLocalOracle) {
+      console.error(
+        `Local oracle exited unexpectedly: code=${code ?? "null"} signal=${signal ?? "null"}`,
+      );
+    }
+  });
+  localOracleProcess.on("error", (err) => {
+    localOracleSpawnError = `Local oracle failed to start: ${err.message}`;
+  });
+
+  await waitForOracleRunning(60_000);
+}
+
+async function stopLocalOracle(): Promise<void> {
+  stoppingLocalOracle = true;
+  const child = localOracleProcess;
+  if (child && child.exitCode === null) {
+    child.kill("SIGTERM");
+    await Promise.race([
+      new Promise<void>((resolveStop) =>
+        child.once("exit", () => resolveStop()),
+      ),
+      delay(5_000).then(() => {
+        if (child.exitCode === null) child.kill("SIGKILL");
+      }),
+    ]);
+  }
+
+  try {
+    runRequiredCommand(
+      "oracle dev services shutdown",
+      "npm",
+      ["--workspace", "@tee-agent/oracle", "run", "dev:down"],
+      {},
+      "Stop Docker dev services manually with: npm --workspace @tee-agent/oracle run dev:down",
+    );
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+  }
 }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
 
-await assertOracleRunning();
 try {
+  await startLocalOracle();
+  await assertOracleRunning();
   await testSimpleTransfer();
   await testIntelligentTransfer();
   await testEncryptDecryptPrivateEntries();
@@ -1515,5 +1635,5 @@ try {
   await testUpdateServices();
   console.log("\n✔ All tests passed");
 } finally {
-  // nothing to clean up
+  await stopLocalOracle();
 }

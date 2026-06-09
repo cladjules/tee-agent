@@ -49,7 +49,7 @@ import {
   decryptMetadata,
   hashEncryptedBlob,
   readJsonFromUri,
-} from "@tee-agent/agent/encryption";
+} from "@tee-agent/agent/crypto";
 import type { EncryptedBlob } from "@tee-agent/agent/types";
 import {
   REENCRYPT_REQUEST_TYPES,

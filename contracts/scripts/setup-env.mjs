@@ -13,14 +13,26 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
 
 const deploymentsRoot = join(ROOT, "contracts/ignition/deployments");
+const localOracleMode = process.env.LOCAL_ORACLE?.trim();
 const baseSepoliaOracleMode = process.env.BASE_SEPOLIA_ORACLE?.trim();
+const LOCAL_DEPLOYMENT_IDS = {
+  local: "chain-31337-local-oracle",
+};
 const BASE_SEPOLIA_DEPLOYMENT_IDS = {
   local: "base-sepolia-local-oracle",
   remote: "base-sepolia-remote-oracle",
 };
+const selectedLocalDeploymentId = localOracleMode
+  ? LOCAL_DEPLOYMENT_IDS[localOracleMode]
+  : undefined;
 const selectedBaseSepoliaDeploymentId = baseSepoliaOracleMode
   ? BASE_SEPOLIA_DEPLOYMENT_IDS[baseSepoliaOracleMode]
   : undefined;
+
+if (localOracleMode && !Object.hasOwn(LOCAL_DEPLOYMENT_IDS, localOracleMode)) {
+  console.error("LOCAL_ORACLE must be local when provided.");
+  process.exit(1);
+}
 
 if (
   baseSepoliaOracleMode &&
@@ -31,6 +43,7 @@ if (
 }
 
 const chainNames = {
+  31337: "local",
   8453: "base",
   84532: "baseSepolia",
 };
@@ -119,7 +132,7 @@ function deploymentDirs() {
 }
 
 function fallbackChainIdForDeploymentId(id) {
-  return id.match(/^chain-(\d+)$/)?.[1];
+  return id.match(/^chain-(\d+)/)?.[1];
 }
 
 function readDeploymentId(id) {
@@ -139,6 +152,20 @@ function allDeploymentEntries() {
 }
 
 function selectDeployments(entries) {
+  let selectedEntries = entries;
+  if (selectedLocalDeploymentId) {
+    const selected = readDeploymentId(selectedLocalDeploymentId);
+    if (!selected) {
+      throw new Error(
+        `Missing Ignition deployment id: ${selectedLocalDeploymentId}`,
+      );
+    }
+    selectedEntries = [
+      ...selectedEntries.filter((entry) => entry.chainId !== "31337"),
+      { id: selectedLocalDeploymentId, ...selected },
+    ];
+  }
+
   if (selectedBaseSepoliaDeploymentId) {
     const selected = readDeploymentId(selectedBaseSepoliaDeploymentId);
     if (!selected) {
@@ -147,15 +174,15 @@ function selectDeployments(entries) {
       );
     }
     return [
-      ...entries.filter((entry) => entry.chainId !== "84532"),
+      ...selectedEntries.filter((entry) => entry.chainId !== "84532"),
       { id: selectedBaseSepoliaDeploymentId, ...selected },
     ];
   }
 
-  const hasChainBaseSepolia = entries.some(
+  const hasChainBaseSepolia = selectedEntries.some(
     (entry) => entry.chainId === "84532" && entry.id === "chain-84532",
   );
-  const baseSepoliaNamed = entries.filter(
+  const baseSepoliaNamed = selectedEntries.filter(
     (entry) =>
       entry.chainId === "84532" &&
       Object.values(BASE_SEPOLIA_DEPLOYMENT_IDS).includes(entry.id),
@@ -167,7 +194,7 @@ function selectDeployments(entries) {
     );
   }
 
-  return entries.filter((entry) => {
+  return selectedEntries.filter((entry) => {
     if (entry.chainId !== "84532") return true;
     if (entry.id === "chain-84532") return true;
     return !hasChainBaseSepolia && baseSepoliaNamed.length === 1;
@@ -187,6 +214,10 @@ if (foundDeployments.length === 0) {
   if (selectedBaseSepoliaDeploymentId) {
     console.error(
       `Missing Ignition deployment id: ${selectedBaseSepoliaDeploymentId}\n`,
+    );
+  } else if (selectedLocalDeploymentId) {
+    console.error(
+      `Missing Ignition deployment id: ${selectedLocalDeploymentId}\n`,
     );
   } else {
     console.error(
@@ -234,6 +265,9 @@ for (const {
 } of foundDeployments) {
   console.log(`  ${chainNames[chainId] ?? chainId} (${chainId})`);
   console.log(`    deploymentId=${id}`);
+  if (localOracleMode && chainId === "31337") {
+    console.log(`    localOracle=${localOracleMode}`);
+  }
   if (baseSepoliaOracleMode) {
     console.log(`    baseSepoliaOracle=${baseSepoliaOracleMode}`);
   }

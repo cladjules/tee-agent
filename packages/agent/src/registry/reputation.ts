@@ -1,15 +1,20 @@
-import type { RegistryConfig } from "../types.js";
-import type { Address, PublicClient } from "viem";
+import { createPublicClient, http, type Address } from "viem";
 import { REPUTATION_REGISTRY_ABI } from "../abis.js";
+import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class ReputationRegistry {
   readonly address: Address;
-  private readonly _pc: PublicClient;
+  private readonly _pc;
 
-  constructor(config: RegistryConfig) {
-    this.address = config.address;
-    this._pc = config.publicClient;
-    console.debug("initialised reputationRegistry=%s", config.address);
+  constructor(params: { chainId: number; rpcUrl?: string }) {
+    const network =
+      getNetworkConfigByChainId(params.chainId) ?? DEFAULT_NETWORK;
+    this.address = network.reputationRegistryAddress;
+    this._pc = createPublicClient({
+      chain: network.chain,
+      transport: http(params.rpcUrl),
+    });
+    console.debug("initialised reputationRegistry=%s", this.address);
   }
 
   async getLastIndex(agentId: bigint, clientAddress: Address): Promise<bigint> {

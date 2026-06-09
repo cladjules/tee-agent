@@ -9,17 +9,17 @@ import {
 } from "@tee-agent/agent/abis";
 import { buildReencryptTypedData } from "@tee-agent/agent/typed-data";
 import {
-  acceptTransferOffer,
+  buildTransferAcceptance,
   buildTransferTxArgs,
-} from "@tee-agent/agent/transfer";
-import { IdentityRegistry } from "@tee-agent/agent/registry";
-import { useWallet } from "@/components/wallet/WalletProvider";
+  getTransferAccessPayloadsToSign,
+} from "@tee-agent/agent/ops/transfer-acceptance";
+import type { AgentConfig } from "@tee-agent/agent/types";
+import { useWallet } from "@/providers/WalletProvider";
 import {
   prepareTeeOracleServiceUpdate,
   prepareTransferOfferAgent,
 } from "@/lib/actions/agents";
-import { ResultBanner, useActionState } from "./action-ui";
-import type { ActionClientConfig } from "./action-types";
+import { ResultBanner, useActionState } from "./ActionUI";
 
 const ERC721_TRANSFER_ABI = [
   {
@@ -96,12 +96,12 @@ export function TransferForm({
   tokenId: string;
   erc8004AgentId?: string;
   teeOracleUrl: string;
-  clientCfg: ActionClientConfig;
+  clientCfg: AgentConfig;
 }) {
   const router = useRouter();
   const transferState = useActionState();
   const keyState = useActionState();
-  const { address, getViemClients, switchChain } = useWallet();
+  const { address, getWalletClient } = useWallet();
   const sourceOracleUrl = normalizeUrl(teeOracleUrl);
   const [recipient, setRecipient] = useState("");
   const [targetOracleUrl, setTargetOracleUrl] = useState(sourceOracleUrl);
@@ -190,8 +190,10 @@ export function TransferForm({
                   };
                 }
 
-                await switchChain();
-                const { publicClient, walletClient } = await getViemClients();
+                const walletClient = await getWalletClient();
+                if (!walletClient) {
+                  return { error: "Connect your wallet" };
+                }
                 const from = walletClient.account!.address;
 
                 const nftHash = await walletClient.writeContract({
@@ -202,7 +204,7 @@ export function TransferForm({
                   chain: walletClient.chain,
                   account: walletClient.account!,
                 });
-                await publicClient.waitForTransactionReceipt({
+                await walletClient.waitForTransactionReceipt({
                   hash: nftHash,
                 });
 
@@ -216,7 +218,7 @@ export function TransferForm({
                       chain: walletClient.chain,
                       account: walletClient.account!,
                     });
-                    await publicClient.waitForTransactionReceipt({
+                    await walletClient.waitForTransactionReceipt({
                       hash: identityHash,
                     });
                   } catch (err) {
@@ -315,8 +317,11 @@ export function TransferForm({
                 }
                 setTargetOracleUrl(nextTargetOracleUrl);
 
-                await switchChain();
-                const { publicClient, walletClient } = await getViemClients();
+                const walletClient = await getWalletClient();
+                if (!walletClient) {
+                  return { error: "Connect your wallet" };
+                }
+
                 const owner = walletClient.account!.address;
 
                 const [sourceOracle, targetOracle] = await Promise.all([
@@ -330,7 +335,7 @@ export function TransferForm({
                   return { error: "Target oracle /address missing publicKey." };
                 }
 
-                const chainId = await publicClient.getChainId();
+                const chainId = await walletClient.getChainId();
                 const deadline = Math.floor(Date.now() / 1000) + 3600;
                 const typedData = buildReencryptTypedData({
                   oracleAddress: sourceOracle.address,
@@ -346,6 +351,7 @@ export function TransferForm({
                 });
 
                 const offer = await prepareTransferOfferAgent({
+                  chainId: clientCfg.chain.id,
                   tokenId,
                   to: owner,
                   oracleUrl: sourceOracleUrl,
@@ -355,24 +361,36 @@ export function TransferForm({
                 });
                 if ("error" in offer) return { error: offer.error };
 
-                const acceptance = await acceptTransferOffer(offer, (digest) =>
-                  walletClient.signMessage({
-                    account: walletClient.account!,
-                    message: digest,
-                  }),
+                const signatureRequests =
+                  getTransferAccessPayloadsToSign(offer);
+                const accessSignatures = await Promise.all(
+                  signatureRequests.map(async ({ index, digest }) => ({
+                    index,
+                    proof: await walletClient.signMessage({
+                      account: walletClient.account!,
+                      message: digest,
+                    }),
+                  })),
+                );
+                const acceptance = buildTransferAcceptance(
+                  offer,
+                  accessSignatures,
                 );
 
                 const erc8004TokenId = BigInt(linkedErc8004AgentId);
-                const identityRegistry = new IdentityRegistry({
-                  address: identityRegistryAddress,
-                  publicClient,
-                });
                 const [approvedAddress, approvedForAll] = await Promise.all([
-                  identityRegistry.getApproved(erc8004TokenId),
-                  identityRegistry.isApprovedForAll(
-                    owner,
-                    offer.contractAddress,
-                  ),
+                  walletClient.readContract({
+                    address: identityRegistryAddress,
+                    abi: IDENTITY_REGISTRY_ABI,
+                    functionName: "getApproved",
+                    args: [erc8004TokenId],
+                  }),
+                  walletClient.readContract({
+                    address: identityRegistryAddress,
+                    abi: IDENTITY_REGISTRY_ABI,
+                    functionName: "isApprovedForAll",
+                    args: [owner, offer.contractAddress],
+                  }),
                 ]);
                 const hasIdentityApproval =
                   approvedForAll ||
@@ -387,7 +405,7 @@ export function TransferForm({
                     chain: walletClient.chain,
                     account: walletClient.account!,
                   });
-                  await publicClient.waitForTransactionReceipt({
+                  await walletClient.waitForTransactionReceipt({
                     hash: approvalHash,
                   });
                 }
@@ -398,11 +416,12 @@ export function TransferForm({
                   chain: walletClient.chain,
                   account: walletClient.account!,
                 });
-                await publicClient.waitForTransactionReceipt({
+                await walletClient.waitForTransactionReceipt({
                   hash: publishHash,
                 });
 
                 const metadataUpdate = await prepareTeeOracleServiceUpdate({
+                  chainId: clientCfg.chain.id,
                   erc8004AgentId: linkedErc8004AgentId,
                   teeOracleUrl: nextTargetOracleUrl,
                 });
@@ -424,7 +443,7 @@ export function TransferForm({
                   chain: walletClient.chain,
                   account: walletClient.account!,
                 });
-                await publicClient.waitForTransactionReceipt({
+                await walletClient.waitForTransactionReceipt({
                   hash: updateHash,
                 });
 

@@ -286,7 +286,7 @@ Sender side:
 Receiver side:
 
 - chooses the destination oracle / public key
-- signs the acceptance proofs
+- signs the returned access payload digests
 - sends the acceptance back to the sender
 
 The current oracle re-wraps encrypted 0G content keys for the receiver's oracle
@@ -297,7 +297,9 @@ key inside the TEE. Plaintext skills/models are not exposed to either wallet.
 const offer = await createTransferOffer(config, transferParams);
 
 // receiver
-const acceptance = await acceptTransferOffer(offer, recipientSign);
+const toSign = getTransferAccessPayloadsToSign(offer);
+const signatures = await wallet.signMessages(toSign);
+const acceptance = buildTransferAcceptance(offer, signatures);
 
 // sender
 await walletClient.writeContract(buildTransferTxArgs(acceptance));
@@ -412,13 +414,16 @@ Main SDK subpaths:
 ```text
 @tee-agent/agent/network
 @tee-agent/agent/registry
-@tee-agent/agent/mint
-@tee-agent/agent/transfer
-@tee-agent/agent/services
-@tee-agent/agent/feedback
-@tee-agent/agent/validate
+@tee-agent/agent/ops/mint
+@tee-agent/agent/ops/transfer
+@tee-agent/agent/ops/transfer-acceptance
+@tee-agent/agent/ops/services
+@tee-agent/agent/ops/feedback
+@tee-agent/agent/ops/validate
 @tee-agent/agent/typed-data
 ```
+
+TODO: Move remaining `writeContract` helpers into the package registry clients.
 
 ---
 

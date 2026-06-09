@@ -446,11 +446,11 @@ function ensureFreshOracleImage(dryRun) {
   const currentDeploymentsSha = fileSha256(deploymentsPath);
   const currentSourceSha = sourceSha256();
   const imageState = readImageState();
-  const oracleImage = process.env.ORACLE_IMAGE?.trim() || imageState?.image;
+  const oracleImage = imageState?.image || process.env.ORACLE_IMAGE?.trim();
   const imageDeploymentsSha =
-    process.env.ORACLE_DEPLOYMENTS_SHA?.trim() || imageState?.deploymentsSha;
+    imageState?.deploymentsSha || process.env.ORACLE_DEPLOYMENTS_SHA?.trim();
   const imageSourceSha =
-    process.env.ORACLE_IMAGE_SOURCE_SHA?.trim() || imageState?.sourceSha;
+    imageState?.sourceSha || process.env.ORACLE_IMAGE_SOURCE_SHA?.trim();
 
   if (
     oracleImage &&
@@ -495,13 +495,13 @@ function ensureFreshOracleImage(dryRun) {
   loadRootEnv({ override: true });
   const refreshedImageState = readImageState();
   const refreshedOracleImage =
-    process.env.ORACLE_IMAGE?.trim() || refreshedImageState?.image;
+    refreshedImageState?.image || process.env.ORACLE_IMAGE?.trim();
   const refreshedDeploymentsSha =
-    process.env.ORACLE_DEPLOYMENTS_SHA?.trim() ||
-    refreshedImageState?.deploymentsSha;
+    refreshedImageState?.deploymentsSha ||
+    process.env.ORACLE_DEPLOYMENTS_SHA?.trim();
   const refreshedSourceSha =
-    process.env.ORACLE_IMAGE_SOURCE_SHA?.trim() ||
-    refreshedImageState?.sourceSha;
+    refreshedImageState?.sourceSha ||
+    process.env.ORACLE_IMAGE_SOURCE_SHA?.trim();
   if (!refreshedOracleImage) {
     fail(
       `oracle image build finished without saving image state to ${path.relative(repoRoot, imageStatePath)}.`,

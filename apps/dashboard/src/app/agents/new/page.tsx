@@ -6,7 +6,8 @@ import {
   AGENT_REGISTRY_ABI,
   IDENTITY_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
-import { useWallet } from "@/components/wallet/WalletProvider";
+import { NETWORK_CONFIG } from "@tee-agent/agent/network";
+import { useWallet } from "@/providers/WalletProvider";
 import {
   prepareCreateAgent,
   fetchAgentServices,
@@ -91,11 +92,12 @@ const STEPS = ["Identity", "Services", "Private Data", "Review"];
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function NewAgentPage() {
-  const { address, connect, getViemClients, switchChain } = useWallet();
+  const { address, chainId, connect, getWalletClient } = useWallet();
   const [isPending, startTransition] = useTransition();
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<{
     tokenId?: bigint;
+    chainId?: number;
     txHash?: string;
     error?: string;
   } | null>(null);
@@ -226,8 +228,12 @@ export default function NewAgentPage() {
 
     startTransition(async () => {
       try {
-        await switchChain();
-        const { publicClient, walletClient } = await getViemClients();
+        const walletClient = await getWalletClient();
+        if (!walletClient) {
+          setResult({ error: "Wallet client not available." });
+          return;
+        }
+        const chainId = await walletClient.getChainId();
 
         const isImport =
           serviceMode === "import" && importTokenId.trim() !== "";
@@ -242,6 +248,7 @@ export default function NewAgentPage() {
             return;
           }
           const preparedImport = await prepareTeeOracleServiceUpdate({
+            chainId,
             erc8004AgentId: importTokenId.trim(),
             teeOracleUrl,
           });
@@ -253,6 +260,7 @@ export default function NewAgentPage() {
         }
 
         const prepared = await prepareCreateAgent({
+          chainId,
           name,
           description,
           imageUrl: imageUrl || undefined,
@@ -284,7 +292,7 @@ export default function NewAgentPage() {
             chain: walletClient.chain,
             account: walletClient.account!,
           });
-          await publicClient.waitForTransactionReceipt({ hash: updateHash });
+          await walletClient.waitForTransactionReceipt({ hash: updateHash });
         }
 
         const mintRequest = isImport
@@ -314,13 +322,13 @@ export default function NewAgentPage() {
               chain: walletClient.chain,
               account: walletClient.account!,
             };
-        const mintGas = await publicClient.estimateContractGas(mintRequest);
+        const mintGas = await walletClient.estimateContractGas(mintRequest);
         const mintHash = await walletClient.writeContract({
           ...mintRequest,
           gas: (mintGas * 120n) / 100n,
         });
 
-        const receipt = await publicClient.waitForTransactionReceipt({
+        const receipt = await walletClient.waitForTransactionReceipt({
           hash: mintHash,
         });
 
@@ -340,6 +348,7 @@ export default function NewAgentPage() {
 
         setResult({
           tokenId: mintedTokenId,
+          chainId,
           txHash: mintHash,
         });
       } catch (err) {
@@ -353,6 +362,11 @@ export default function NewAgentPage() {
   // ── Success screen ──────────────────────────────────────────────────────────
 
   if (result?.tokenId !== undefined && !result.error) {
+    const networkKey =
+      Object.entries(NETWORK_CONFIG).find(
+        ([, network]) => network.chain.id === result.chainId,
+      )?.[0] ?? "baseSepolia";
+
     return (
       <div className="max-w-lg mx-auto text-center py-16 space-y-4">
         <div className="text-5xl">🎉</div>
@@ -370,7 +384,7 @@ export default function NewAgentPage() {
         )}
         <div className="flex gap-3 justify-center pt-2">
           <a
-            href={`/agents/${result.tokenId.toString()}`}
+            href={`/agents/${networkKey}/${result.tokenId.toString()}`}
             className="px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold"
           >
             View Agent
@@ -568,6 +582,7 @@ export default function NewAgentPage() {
                       const res = await fetchAgentServices(
                         importTokenId.trim(),
                         address,
+                        chainId,
                       );
                       setImportPending(false);
                       if ("error" in res) {

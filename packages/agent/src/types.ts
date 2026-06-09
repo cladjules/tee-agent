@@ -3,7 +3,7 @@
  * All blockchain types use viem's primitives for consistency and type safety.
  */
 
-import type { Address, Chain, Hex, PublicClient } from "viem";
+import type { Address, Chain, Hex } from "viem";
 
 // ─── Agent Identity / Registry (ERC-8004) ────────────────────────────────────
 
@@ -157,19 +157,11 @@ export interface IpfsClientOptions {
 
 export interface IpfsUploadResult {
   /** IPFS CID */
-  readonly cid: string;
+  readonly chainId: string;
   /** Canonical `ipfs://` URI */
   readonly url: string;
   /** Pinned byte size */
   readonly size: number;
-}
-
-// ─── AgentRegistry config ─────────────────────────────────────────────────────
-
-/** Shared config shape for IdentityRegistry, ReputationRegistry, and ValidationRegistry. */
-export interface RegistryConfig {
-  address: Address;
-  publicClient: PublicClient;
 }
 
 // ─── AgentConfig (shared by SDK, CLI, and any consumer) ──────────────────────
@@ -308,6 +300,15 @@ export type TransferAcceptance = {
   version: 1;
   offer: TransferOffer;
   proofs: TransferProofJson[];
+};
+
+export type TransferAccessSignatureRequest = TransferAccessPayload & {
+  index: number;
+};
+
+export type TransferAccessSignature = {
+  index: number;
+  proof: Hex;
 };
 
 // ─── Services ─────────────────────────────────────────────────────────────────

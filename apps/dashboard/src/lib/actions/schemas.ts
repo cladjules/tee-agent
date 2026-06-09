@@ -21,6 +21,7 @@ export const oracleUrlSchema = z
 
 export const recordOracleRunParamsSchema = z
   .object({
+    chainId: z.number().int().positive().optional(),
     agentId: z.string().trim().min(1, "agentId is required."),
     erc8004AgentId: z
       .string()
@@ -46,6 +47,7 @@ const agentServiceSchema = z
 
 export const agentPublicMetadataParamsSchema = z
   .object({
+    chainId: z.number().int().positive().optional(),
     tokenId: z.string().trim().min(1, "Token ID is required."),
     name: z.string().trim().min(1, "Name is required."),
     description: z.string().trim().min(1, "Description is required."),

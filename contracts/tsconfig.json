@@ -13,17 +13,30 @@
     "types": ["node"],
     "paths": {
       "@tee-agent/agent/types": ["../packages/agent/dist/types.d.ts"],
-      "@tee-agent/agent/encryption": ["../packages/agent/dist/crypto.d.ts"],
+      "@tee-agent/agent/crypto": ["../packages/agent/dist/crypto.d.ts"],
       "@tee-agent/agent/abis": ["../packages/agent/dist/abis.d.ts"],
       "@tee-agent/agent/registry": [
         "../packages/agent/dist/registry/index.d.ts"
       ],
-      "@tee-agent/agent/zero-g": ["../packages/agent/dist/storage/zero-g.d.ts"],
-      "@tee-agent/agent/mint": ["../packages/agent/dist/ops/mint.d.ts"],
-      "@tee-agent/agent/transfer": ["../packages/agent/dist/ops/transfer.d.ts"],
-      "@tee-agent/agent/services": ["../packages/agent/dist/ops/services.d.ts"],
-      "@tee-agent/agent/feedback": ["../packages/agent/dist/ops/feedback.d.ts"],
-      "@tee-agent/agent/validate": ["../packages/agent/dist/ops/validate.d.ts"],
+      "@tee-agent/agent/storage/zero-g": [
+        "../packages/agent/dist/storage/zero-g.d.ts"
+      ],
+      "@tee-agent/agent/ops/mint": ["../packages/agent/dist/ops/mint.d.ts"],
+      "@tee-agent/agent/ops/transfer": [
+        "../packages/agent/dist/ops/transfer.d.ts"
+      ],
+      "@tee-agent/agent/ops/transfer-acceptance": [
+        "../packages/agent/dist/ops/transfer-acceptance.d.ts"
+      ],
+      "@tee-agent/agent/ops/services": [
+        "../packages/agent/dist/ops/services.d.ts"
+      ],
+      "@tee-agent/agent/ops/feedback": [
+        "../packages/agent/dist/ops/feedback.d.ts"
+      ],
+      "@tee-agent/agent/ops/validate": [
+        "../packages/agent/dist/ops/validate.d.ts"
+      ],
       "@tee-agent/agent/typed-data": ["../packages/agent/dist/typed-data.d.ts"]
     }
   },

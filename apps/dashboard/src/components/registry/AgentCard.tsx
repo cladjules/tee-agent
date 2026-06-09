@@ -1,13 +1,19 @@
 import type { CachedAgentIndexRow } from "@/lib/agent-cache";
+import { NETWORK_CONFIG } from "@tee-agent/agent/network";
 
 interface AgentCardProps {
   agent: CachedAgentIndexRow;
 }
 
 export default function AgentCard({ agent }: AgentCardProps) {
+  const networkKey =
+    Object.entries(NETWORK_CONFIG).find(
+      ([, network]) => network.chain.id === agent.chainId,
+    )?.[0] ?? "baseSepolia";
+
   return (
     <a
-      href={`/agents/${agent.tokenId}`}
+      href={`/agents/${networkKey}/${agent.tokenId}`}
       className="group block rounded-xl glass-card overflow-hidden"
     >
       {agent.imageUrl ? (

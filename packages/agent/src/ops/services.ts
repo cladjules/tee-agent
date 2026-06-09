@@ -19,7 +19,6 @@ import type {
   PrepareTeeOracleServiceUpdateResult,
   VerifyTeeOracleResult,
 } from "../types.js";
-import { createPublicClient, http } from "viem";
 import { AgentRegistry } from "../registry/agent.js";
 import { IdentityRegistry } from "../registry/identity.js";
 
@@ -190,10 +189,8 @@ export async function prepareUpdateServices(
 
   const registry = new AgentRegistry({
     address: config.registryAddress!,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+    chainId: config.chain.id,
+    rpcUrl: config.rpcUrl,
   });
   const numericTokenId = BigInt(tokenId);
 
@@ -301,11 +298,8 @@ export async function prepareTeeOracleServiceUpdate(
 
   const oracle = await verifyTeeOracleEndpoint(teeOracleUrl);
   const identityRegistry = new IdentityRegistry({
-    address: config.identityRegistryAddress,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+    chainId: config.chain.id,
+    rpcUrl: config.rpcUrl,
   });
   const tokenId = BigInt(erc8004AgentId.trim());
   const currentUri = await identityRegistry.tokenURI(tokenId);
@@ -342,11 +336,8 @@ export async function fetchAgentServices(
   }
 
   const identityRegistry = new IdentityRegistry({
-    address: config.identityRegistryAddress!,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+    chainId: config.chain.id,
+    rpcUrl: config.rpcUrl,
   });
 
   const numericId = BigInt(tokenId.trim());

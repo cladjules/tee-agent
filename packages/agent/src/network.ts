@@ -1,5 +1,7 @@
-import { base, baseSepolia } from "viem/chains";
+import { baseSepolia, hardhat } from "viem/chains";
 import type { Address } from "viem";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const IDENTITY_REGISTRY = {
   mainnet: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
@@ -12,19 +14,19 @@ const REPUTATION_REGISTRY = {
 } as const satisfies Record<string, Address>;
 
 export const NETWORK_CONFIG = {
-  base: {
-    chain: base,
-    chainId: 8453n,
-    isTestnet: false,
-    label: "Base",
-    identityRegistryAddress: IDENTITY_REGISTRY.mainnet,
-    reputationRegistryAddress: REPUTATION_REGISTRY.mainnet,
-    explorerUrl: "https://basescan.org",
-    erc8004ScanUrl: "https://8004scan.io",
-    erc8004ChainSlug: "base",
-    openseaUrl: "https://opensea.io/assets/base",
-    rpcEnvVar: "RPC_URL_BASE",
-  },
+  // base: {
+  //   chain: base,
+  //   chainId: 8453n,
+  //   isTestnet: false,
+  //   label: "Base",
+  //   identityRegistryAddress: IDENTITY_REGISTRY.mainnet,
+  //   reputationRegistryAddress: REPUTATION_REGISTRY.mainnet,
+  //   explorerUrl: "https://basescan.org",
+  //   erc8004ScanUrl: "https://8004scan.io",
+  //   erc8004ChainSlug: "base",
+  //   openseaUrl: "https://opensea.io/assets/base",
+  //   rpcEnvVar: "RPC_URL_BASE",
+  // },
   baseSepolia: {
     chain: baseSepolia,
     chainId: 84532n,
@@ -40,24 +42,44 @@ export const NETWORK_CONFIG = {
   },
 } as const;
 
-export type NetworkName = keyof typeof NETWORK_CONFIG;
-export type NetworkConfig = (typeof NETWORK_CONFIG)[NetworkName];
+export const LOCAL_NETWORK_CONFIG = {
+  local: {
+    chain: hardhat,
+    chainId: 31337n,
+    isTestnet: true,
+    label: "Local Hardhat",
+    identityRegistryAddress: ZERO_ADDRESS,
+    reputationRegistryAddress: ZERO_ADDRESS,
+    explorerUrl: "",
+    erc8004ScanUrl: "",
+    erc8004ChainSlug: "local",
+    openseaUrl: "",
+    rpcEnvVar: "LOCAL_RPC_URL",
+  },
+} as const;
+
+const RUNTIME_NETWORK_CONFIG = {
+  ...NETWORK_CONFIG,
+  ...LOCAL_NETWORK_CONFIG,
+} as const;
+
+export type NetworkName = keyof typeof RUNTIME_NETWORK_CONFIG;
+export type NetworkConfig = (typeof RUNTIME_NETWORK_CONFIG)[NetworkName];
 
 export const DEFAULT_NETWORK = NETWORK_CONFIG.baseSepolia;
 
 export function getNetworkConfig(network: string): NetworkConfig {
-  const net = NETWORK_CONFIG[network as NetworkName];
+  const net = RUNTIME_NETWORK_CONFIG[network as NetworkName];
   if (!net) throw new Error(`Unsupported network: ${network}.`);
   return net;
 }
 
 export function getNetworkConfigByChainId(
   chainId: number | bigint,
-): NetworkConfig {
+): NetworkConfig | undefined {
   const id = Number(chainId);
-  const network = Object.values(NETWORK_CONFIG).find(
+  const network = Object.values(RUNTIME_NETWORK_CONFIG).find(
     (item) => item.chain.id === id,
   );
-  if (!network) throw new Error(`Unsupported chain ID: ${chainId}.`);
   return network;
 }

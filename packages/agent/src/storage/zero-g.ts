@@ -115,7 +115,7 @@ async function uploadBytes(
   rpcUrl: string,
   indexerUrl: string,
   privateKey: string,
-): Promise<{ cid: string; url: string; size: number }> {
+): Promise<{ chainId: string; url: string; size: number }> {
   let lastErr: unknown;
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -136,7 +136,7 @@ async function uploadBytes(
             ? (tx as { rootHash: string }).rootHash
             : (tx as { rootHashes: string[] }).rootHashes[0];
         return {
-          cid: rootHash,
+          chainId: rootHash,
           url: `zerog://${rootHash}`,
           size: bytes.length,
         };

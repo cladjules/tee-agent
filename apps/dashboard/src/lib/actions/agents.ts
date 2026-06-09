@@ -1,14 +1,14 @@
 "use server";
 
-import { prepareMint } from "@tee-agent/agent/mint";
-import { preparePublicMetadataUpdate } from "@tee-agent/agent/metadata";
-import { createTransferOffer } from "@tee-agent/agent/transfer";
+import { prepareMint } from "@tee-agent/agent/ops/mint";
+import { preparePublicMetadataUpdate } from "@tee-agent/agent/ops/metadata";
+import { createTransferOffer } from "@tee-agent/agent/ops/transfer";
 import {
   prepareUpdateServices,
   fetchAgentServices as sdkFetchAgentServices,
   prepareRegisterErc8004 as sdkPrepareRegisterErc8004,
   prepareTeeOracleServiceUpdate as sdkPrepareTeeOracleServiceUpdate,
-} from "@tee-agent/agent/services";
+} from "@tee-agent/agent/ops/services";
 import type {
   FetchAgentServicesResult,
   UpdateServicesResult,
@@ -19,7 +19,7 @@ import type {
   PrepareTeeOracleServiceUpdateParams,
   PrepareTeeOracleServiceUpdateResult,
 } from "@tee-agent/agent/types";
-import { getActiveChainId, getServerConfigForChain } from "@/lib/config";
+import { getAvailableChainId, getServerConfigForChain } from "@/lib/config";
 import {
   addCachedOracleRun,
   getCachedOracleRuns,
@@ -40,13 +40,14 @@ import {
 } from "./schemas";
 
 export type ValidationResponse = IndexedValidationResponse;
+type ChainScoped<T> = T & { chainId?: number };
 
 // ─── Write ────────────────────────────────────────────────────────────────────
 
-export async function prepareCreateAgent(params: MintParams) {
-  const cid = await getActiveChainId();
+export async function prepareCreateAgent(params: ChainScoped<MintParams>) {
+  const chainId = getAvailableChainId(params.chainId);
   try {
-    return await prepareMint(getServerConfigForChain(cid), params);
+    return await prepareMint(getServerConfigForChain(chainId), params);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Create preparation failed.",
@@ -57,11 +58,11 @@ export async function prepareCreateAgent(params: MintParams) {
 export async function prepareUpdateAgentPublicMetadata(
   params: AgentPublicMetadataParams,
 ) {
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(params.chainId);
   try {
     const parsed = agentPublicMetadataParamsSchema.parse(params);
     return await preparePublicMetadataUpdate(
-      getServerConfigForChain(cid),
+      getServerConfigForChain(chainId),
       parsed,
     );
   } catch (err) {
@@ -71,12 +72,14 @@ export async function prepareUpdateAgentPublicMetadata(
   }
 }
 
-export async function prepareTransferOfferAgent(params: TransferParams) {
+export async function prepareTransferOfferAgent(
+  params: ChainScoped<TransferParams>,
+) {
   if (!params.tokenId) return { error: "Token ID is required." };
   if (!params.to) return { error: "Recipient address is required." };
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(params.chainId);
   try {
-    return await createTransferOffer(getServerConfigForChain(cid), params);
+    return await createTransferOffer(getServerConfigForChain(chainId), params);
   } catch (err) {
     return {
       error:
@@ -88,12 +91,15 @@ export async function prepareTransferOfferAgent(params: TransferParams) {
 }
 
 export async function prepareUpdateAgentServices(
-  params: UpdateServicesParams,
+  params: ChainScoped<UpdateServicesParams>,
 ): Promise<UpdateServicesResult | { error: string }> {
   if (!params.tokenId) return { error: "Token ID is required." };
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(params.chainId);
   try {
-    return await prepareUpdateServices(getServerConfigForChain(cid), params);
+    return await prepareUpdateServices(
+      getServerConfigForChain(chainId),
+      params,
+    );
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "Updating services failed.",
@@ -107,15 +113,15 @@ export async function prepareUpdateAgentServices(
  * Returns an `UpdateServicesResult` ready for `buildUpdateServicesTxArgs`.
  */
 export async function preparePostMintRegistration(
-  params: PrepareRegisterErc8004Params,
+  params: ChainScoped<PrepareRegisterErc8004Params>,
 ): Promise<UpdateServicesResult | { error: string }> {
   if (!params.erc8004AgentId) return { error: "erc8004AgentId is required." };
   if (!params.agentMetadataUri)
     return { error: "agentMetadataUri is required." };
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(params.chainId);
   try {
     return await sdkPrepareRegisterErc8004(
-      getServerConfigForChain(cid),
+      getServerConfigForChain(chainId),
       params,
     );
   } catch (err) {
@@ -127,16 +133,16 @@ export async function preparePostMintRegistration(
 }
 
 export async function prepareTeeOracleServiceUpdate(
-  params: PrepareTeeOracleServiceUpdateParams,
+  params: ChainScoped<PrepareTeeOracleServiceUpdateParams>,
 ): Promise<PrepareTeeOracleServiceUpdateResult | { error: string }> {
   if (!params.erc8004AgentId.trim())
     return { error: "ERC-8004 token ID is required." };
   if (!params.teeOracleUrl.trim())
     return { error: "teeOracle URL is required." };
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(params.chainId);
   try {
     return await sdkPrepareTeeOracleServiceUpdate(
-      getServerConfigForChain(cid),
+      getServerConfigForChain(chainId),
       params,
     );
   } catch (err) {
@@ -152,10 +158,11 @@ export async function prepareTeeOracleServiceUpdate(
 export async function fetchAgentServices(
   tokenId: string,
   expectedOwner?: `0x${string}`,
+  _chainId?: number,
 ): Promise<FetchAgentServicesResult | { error: string }> {
-  const cid = await getActiveChainId();
+  const chainId = getAvailableChainId(_chainId);
   try {
-    return await sdkFetchAgentServices(getServerConfigForChain(cid), {
+    return await sdkFetchAgentServices(getServerConfigForChain(chainId), {
       tokenId,
       expectedOwner,
     });
@@ -171,18 +178,18 @@ export async function fetchAgentServices(
 export async function recordOracleRun(
   params: RecordOracleRunParams,
 ): Promise<{ ok: true; run: CachedOracleRun } | { ok: false; error: string }> {
-  const cid = await getActiveChainId();
-  const { registryAddress } = getServerConfigForChain(cid);
-  if (!registryAddress) {
-    return { ok: false, error: "AgentRegistry is not configured." };
-  }
+  const chainId = getAvailableChainId(params.chainId);
+  const { registryAddress } = getServerConfigForChain(chainId);
   try {
     const parsedParams = recordOracleRunParamsSchema.parse(params);
 
     const oracleUrl = parsedParams.teeOracleUrl;
-    const services = await sdkFetchAgentServices(getServerConfigForChain(cid), {
-      tokenId: parsedParams.erc8004AgentId,
-    });
+    const services = await sdkFetchAgentServices(
+      getServerConfigForChain(chainId),
+      {
+        tokenId: parsedParams.erc8004AgentId,
+      },
+    );
     const registeredOracleUrl = services.teeOracleUrl
       ? oracleUrlSchema.parse(services.teeOracleUrl)
       : "";
@@ -239,7 +246,7 @@ export async function recordOracleRun(
       payload: parsedParams.payload,
     };
     await addCachedOracleRun(
-      cid,
+      chainId,
       registryAddress,
       BigInt(parsedParams.agentId),
       run,
@@ -255,13 +262,14 @@ export async function recordOracleRun(
 
 export async function fetchValidationResponsesForAgent(
   agentId: string,
+  _chainId?: number,
 ): Promise<ValidationResponse[]> {
-  const cid = await getActiveChainId();
-  const cfg = getServerConfigForChain(cid);
+  const chainId = getAvailableChainId(_chainId);
+  const cfg = getServerConfigForChain(chainId);
   try {
     if (!cfg.validationRegistryAddress) return [];
     return await getCachedValidationResponses(
-      cid,
+      chainId,
       cfg.validationRegistryAddress,
       BigInt(agentId),
     );
@@ -270,12 +278,12 @@ export async function fetchValidationResponsesForAgent(
   }
 }
 
-export async function getOracleRunHistory(agentId: string) {
-  const cid = await getActiveChainId();
-  const { registryAddress } = getServerConfigForChain(cid);
+export async function getOracleRunHistory(agentId: string, _chainId?: number) {
+  const chainId = getAvailableChainId(_chainId);
+  const { registryAddress } = getServerConfigForChain(chainId);
   try {
     const runs = await getCachedOracleRuns(
-      cid,
+      chainId,
       registryAddress,
       BigInt(agentId),
     );

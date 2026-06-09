@@ -74,10 +74,8 @@ export async function prepareMint(
   // ── Chain reads ───────────────────────────────────────────────────────────
   const registry = new AgentRegistry({
     address: config.registryAddress!,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+    chainId: config.chain.id,
+    rpcUrl: config.rpcUrl,
   });
   const predictedAgentId = await registry.totalSupply();
   const mintFee = 0n;

@@ -1,14 +1,19 @@
-import type { RegistryConfig } from "../types.js";
-import type { Address, Hex, PublicClient } from "viem";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 import { VALIDATION_REGISTRY_ABI, VALIDATION_STATUS_ABI } from "../abis.js";
+import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class ValidationRegistry {
   private readonly _addr: Address;
-  private readonly _pc: PublicClient;
+  private readonly _pc;
 
-  constructor(config: RegistryConfig) {
-    this._addr = config.address;
-    this._pc = config.publicClient;
+  constructor(params: { address: Address; chainId: number; rpcUrl?: string }) {
+    const network =
+      getNetworkConfigByChainId(params.chainId) ?? DEFAULT_NETWORK;
+    this._addr = params.address;
+    this._pc = createPublicClient({
+      chain: network.chain,
+      transport: http(params.rpcUrl),
+    });
   }
 
   async getAgentValidations(agentId: bigint): Promise<Hex[]> {
@@ -29,12 +34,12 @@ export class ValidationRegistry {
     lastUpdate: bigint;
   }> {
     const [validatorAddress, agentId, response, responseHash, tag, lastUpdate] =
-      (await this._pc.readContract({
+      await this._pc.readContract({
         address: this._addr,
         abi: VALIDATION_STATUS_ABI,
         functionName: "getValidationStatus",
         args: [requestHash],
-      })) as [Address, bigint, number, Hex, string, bigint];
+      });
 
     return {
       validatorAddress,

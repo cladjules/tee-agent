@@ -14,6 +14,7 @@
 import { Redis } from "@upstash/redis";
 
 export type CachedAgentIndexRow = {
+  chainId: number;
   tokenId: string;
   name: string;
   imageUrl?: string;
@@ -23,6 +24,8 @@ export type CachedAgentIndexRow = {
   metadataUri?: string;
   tags: string[];
 };
+
+export type CachedAgentsByChainId = Record<number, CachedAgentIndexRow[]>;
 
 export type IndexedValidationResponse = {
   requestHash: `0x${string}`;

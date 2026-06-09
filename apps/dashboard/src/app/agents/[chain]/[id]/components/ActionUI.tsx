@@ -68,36 +68,6 @@ export function BackgroundActionModal({
   );
 }
 
-export function Field({
-  label,
-  name,
-  placeholder,
-  required,
-  defaultValue,
-  type = "text",
-}: {
-  label: string;
-  name: string;
-  placeholder?: string;
-  required?: boolean;
-  defaultValue?: string;
-  type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs text-gray-400 mb-1">{label}</label>
-      <input
-        name={name}
-        type={type}
-        placeholder={placeholder}
-        required={required}
-        defaultValue={defaultValue}
-        className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-600 text-sm"
-      />
-    </div>
-  );
-}
-
 export function SubmitButton({
   isPending,
   label,
@@ -116,14 +86,4 @@ export function SubmitButton({
       {isPending ? "Submitting..." : label}
     </button>
   );
-}
-
-export function validateJsonInput(input: string): string | null {
-  if (!input.trim()) return null;
-  try {
-    JSON.parse(input);
-    return null;
-  } catch {
-    return "Invalid JSON.";
-  }
 }

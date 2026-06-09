@@ -1,20 +1,23 @@
 "use server";
 
-import { getCachedAgents, type CachedAgentIndexRow } from "@/lib/agent-cache";
-import { getActiveChainId, getServerConfigForChain } from "@/lib/config";
+import { getCachedAgents, type CachedAgentsByChainId } from "@/lib/agent-cache";
+import {
+  getAvailableChainId,
+  getConfiguredChainIds,
+  getServerConfigForChain,
+} from "@/lib/config";
 import { AgentRegistry } from "@tee-agent/agent/registry";
-import { createPublicClient, http } from "viem";
 import {
   fetchFeedbackOverview as sdkFetchFeedbackOverview,
   prepareFeedback as sdkPrepareFeedback,
-} from "@tee-agent/agent/feedback";
+} from "@tee-agent/agent/ops/feedback";
 import type {
   ResolvedAgentProofData,
   PrepareFeedbackParams,
   PrepareFeedbackResult,
 } from "@tee-agent/agent/types";
-import type { FeedbackOverview } from "@tee-agent/agent/feedback";
-export type { FeedbackOverview as AgentFeedbackOverview } from "@tee-agent/agent/feedback";
+import type { FeedbackOverview } from "@tee-agent/agent/ops/feedback";
+export type { FeedbackOverview as AgentFeedbackOverview } from "@tee-agent/agent/ops/feedback";
 import {
   getOracleRunHistory,
   fetchValidationResponsesForAgent,
@@ -40,32 +43,34 @@ async function fetchFeedbackOverview(
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-export async function getRegisteredAgents(): Promise<CachedAgentIndexRow[]> {
-  const cid = await getActiveChainId();
-  const cfg = getServerConfigForChain(cid);
-  if (!cfg.registryAddress) return [];
-
-  try {
-    const cached = await getCachedAgents(cid, cfg.registryAddress);
-    return (cached?.agents ?? []).slice().reverse();
-  } catch (err) {
-    console.error("[registry] getRegisteredAgents failed:", err);
-    return [];
-  }
+export async function getRegisteredAgents(): Promise<CachedAgentsByChainId> {
+  const entries = await Promise.all(
+    getConfiguredChainIds().map(async (chainId) => {
+      const cfg = getServerConfigForChain(chainId);
+      try {
+        const cached = await getCachedAgents(chainId, cfg.registryAddress);
+        return [chainId, (cached?.agents ?? []).slice().reverse()] as const;
+      } catch (err) {
+        throw new Error(
+          `[registry] getRegisteredAgents failed chain=${chainId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }),
+  );
+  return Object.fromEntries(entries) as CachedAgentsByChainId;
 }
 
-export async function getAgentPageData(id: string) {
-  const cid = await getActiveChainId();
-  const cfg = getServerConfigForChain(cid);
-  if (!cfg.rpcUrl || !cfg.registryAddress)
-    throw new Error("Registry not configured");
+export async function getAgentPageData(id: string, _chainId?: number) {
+  const chainId = getAvailableChainId(_chainId);
+  const cfg = getServerConfigForChain(chainId);
+  if (!cfg.rpcUrl) throw new Error(`RPC not configured for chain ${chainId}.`);
   const agentId = BigInt(id);
   const registry = new AgentRegistry({
     address: cfg.registryAddress,
-    publicClient: createPublicClient({
-      chain: cfg.chain,
-      transport: http(cfg.rpcUrl),
-    }),
+    chainId: chainId,
+    rpcUrl: cfg.rpcUrl,
   });
   const [agent, intelligentDataInfo] = await Promise.all([
     registry.resolve(agentId).catch(() => null),
@@ -87,9 +92,9 @@ export async function getAgentPageData(id: string) {
 
   const [oracleRunsResult, validationResponses, feedbackOverview] =
     await Promise.all([
-      getOracleRunHistory(id),
+      getOracleRunHistory(id, chainId),
       erc8004Id
-        ? fetchValidationResponsesForAgent(erc8004Id)
+        ? fetchValidationResponsesForAgent(erc8004Id, chainId)
         : Promise.resolve([]),
       fetchFeedbackOverview(cfg, erc8004Id),
     ]);
@@ -106,7 +111,7 @@ export async function getAgentPageData(id: string) {
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 export async function prepareFeedback(
-  params: PrepareFeedbackParams,
+  params: PrepareFeedbackParams & { chainId?: number },
 ): Promise<PreparedFeedbackResult> {
   if (!params.agentId) return { error: "Agent ID is required." };
   if (params.value === undefined || params.value === null)
@@ -116,7 +121,7 @@ export async function prepareFeedback(
 
   try {
     return await sdkPrepareFeedback(
-      getServerConfigForChain(await getActiveChainId()),
+      getServerConfigForChain(params.chainId),
       params,
     );
   } catch (err) {

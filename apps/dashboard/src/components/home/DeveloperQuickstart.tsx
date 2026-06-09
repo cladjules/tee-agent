@@ -136,7 +136,9 @@ await fetch(\`\${oracleUrl}/validate\`, {
 });`;
 
 const TRANSFER_SNIPPET = `const offer = await createTransferOffer(config, transferParams);
-const acceptance = await acceptTransferOffer(offer, recipientSign);
+const toSign = getTransferAccessPayloadsToSign(offer);
+const signatures = await wallet.signMessages(toSign);
+const acceptance = buildTransferAcceptance(offer, signatures);
 await walletClient.writeContract(buildTransferTxArgs(acceptance));`;
 
 function QuickstartStep({

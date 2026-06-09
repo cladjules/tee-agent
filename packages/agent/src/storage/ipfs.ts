@@ -14,10 +14,15 @@ import type { IpfsClientOptions, IpfsUploadResult } from "../types.js";
 // ─── Pinata V3 response shape ─────────────────────────────────────────────────
 
 interface PinataV3Response {
-  data: {
+  IpfsHash?: string;
+  cid?: string;
+  data?: {
     id: string;
     name: string;
-    cid: string;
+    chainId?: string;
+    cid?: string;
+    IpfsHash?: string;
+    hash?: string;
     created_at: string;
     size: number;
     mime_type: string;
@@ -79,10 +84,23 @@ export async function uploadJSONToIPFS(
   }
 
   const result = (await response.json()) as PinataV3Response;
-  const cid = result.data.cid;
+  const cid =
+    result.data?.cid ??
+    result.data?.IpfsHash ??
+    result.data?.chainId ??
+    result.data?.hash ??
+    result.cid ??
+    result.IpfsHash;
+  if (!cid) {
+    throw new RegistryError(
+      "STORAGE_ERROR",
+      `Pinata upload response did not include an IPFS CID: ${JSON.stringify(result).slice(0, 500)}`,
+    );
+  }
+
   return {
-    cid,
+    chainId: cid,
     url: `ipfs://${cid}`,
-    size: result.data.size,
+    size: result.data?.size ?? json.length,
   };
 }

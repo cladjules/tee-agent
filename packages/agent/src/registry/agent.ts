@@ -1,25 +1,26 @@
 import type {
   AgentIdentity,
   AgentRegistrationFile,
-  RegistryConfig,
   ResolvedAgentProofData,
 } from "../types.js";
-import type { Address, Hex } from "viem";
+import { createPublicClient, http, type Address, type Hex } from "viem";
 import { AGENT_REGISTRY_ABI } from "../abis.js";
 import { readJsonFromUri } from "../crypto.js";
+import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class AgentRegistry {
-  private readonly _cfg: RegistryConfig;
-  private get _pc() {
-    return this._cfg.publicClient;
-  }
-  private get _addr() {
-    return this._cfg.address;
-  }
+  private readonly _addr: Address;
+  private readonly _pc;
 
-  constructor(config: RegistryConfig) {
-    this._cfg = config;
-    console.debug("initialised agentRegistry=%s", config.address);
+  constructor(params: { address: Address; chainId: number; rpcUrl?: string }) {
+    const network =
+      getNetworkConfigByChainId(params.chainId) ?? DEFAULT_NETWORK;
+    this._addr = params.address;
+    this._pc = createPublicClient({
+      chain: network.chain,
+      transport: http(params.rpcUrl),
+    });
+    console.debug("initialised agentRegistry=%s", this._addr);
   }
 
   // ─── Raw contract getters ──────────────────────────────────────────────────

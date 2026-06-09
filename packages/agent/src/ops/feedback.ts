@@ -7,7 +7,7 @@ import type {
   PrepareFeedbackParams,
   PrepareFeedbackResult,
 } from "../types.js";
-import { createPublicClient, http, type Address } from "viem";
+import type { Address } from "viem";
 import { ReputationRegistry } from "../registry/reputation.js";
 
 export type FeedbackView = {
@@ -114,11 +114,8 @@ export async function fetchFeedbackOverview(
   }
 
   const registry = new ReputationRegistry({
-    address: config.reputationRegistryAddress,
-    publicClient: createPublicClient({
-      chain: config.chain,
-      transport: http(config.rpcUrl),
-    }),
+    chainId: config.chain.id,
+    rpcUrl: config.rpcUrl,
   });
   const agentId =
     typeof erc8004AgentId === "bigint"

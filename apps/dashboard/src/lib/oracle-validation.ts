@@ -1,7 +1,7 @@
 import "server-only";
 
 import { buildValidateTypedData } from "@tee-agent/agent/typed-data";
-import { fetchAgentServices as sdkFetchAgentServices } from "@tee-agent/agent/services";
+import { fetchAgentServices as sdkFetchAgentServices } from "@tee-agent/agent/ops/services";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { getServerConfigForChain } from "@/lib/config";
