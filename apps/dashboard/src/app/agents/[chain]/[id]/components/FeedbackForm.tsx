@@ -95,12 +95,22 @@ export function FeedbackForm({
   return (
     <form
       onSubmit={async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.currentTarget);
+        const valueStr = String(formData.get("value") ?? "");
+        const tag1 = String(formData.get("tag1") ?? "").trim();
+        const tag2 = String(formData.get("tag2") ?? "").trim();
+        const feedbackFileEntry = formData.get("feedbackFile");
+        const feedbackFile =
+          feedbackFileEntry instanceof File && feedbackFileEntry.size > 0
+            ? feedbackFileEntry
+            : null;
+
         const walletClient = await getWalletClient();
         if (!walletClient) {
           return { error: "Connect your wallet" };
         }
 
-        e.preventDefault();
         run(async () => {
           if (!canSubmitFeedback) {
             return {
@@ -119,19 +129,6 @@ export function FeedbackForm({
             };
           }
 
-          const form = e.currentTarget;
-          const valueStr = (
-            form.elements.namedItem("value") as HTMLInputElement
-          ).value;
-          const tag1 = (
-            (form.elements.namedItem("tag1") as HTMLInputElement)?.value ?? ""
-          ).trim();
-          const tag2 = (
-            (form.elements.namedItem("tag2") as HTMLInputElement)?.value ?? ""
-          ).trim();
-          const feedbackFile =
-            (form.elements.namedItem("feedbackFile") as HTMLInputElement)
-              ?.files?.[0] ?? null;
           const prepared = await prepareFeedback({
             chainId: clientCfg.chain.id,
             agentId: erc8004AgentId,
@@ -152,27 +149,31 @@ export function FeedbackForm({
           }
 
           setShowBackgroundNotice(true);
-
-          const hash = await walletClient.writeContract({
-            address: clientCfg.reputationRegistryAddress,
-            abi: REPUTATION_REGISTRY_ABI,
-            functionName: "giveFeedback",
-            args: [
-              BigInt(erc8004AgentId),
-              BigInt(prepared.value),
-              Number(prepared.valueDecimals),
-              prepared.tag1 ?? "",
-              prepared.tag2 ?? "",
-              "",
-              prepared.feedbackURI,
-              "0x0000000000000000000000000000000000000000000000000000000000000000",
-            ],
-            chain: walletClient.chain,
-            account: walletClient.account!,
-          });
-          await walletClient.waitForTransactionReceipt({ hash });
-          router.refresh();
-          return { txHash: hash };
+          try {
+            const hash = await walletClient.writeContract({
+              address: clientCfg.reputationRegistryAddress,
+              abi: REPUTATION_REGISTRY_ABI,
+              functionName: "giveFeedback",
+              args: [
+                BigInt(erc8004AgentId),
+                BigInt(prepared.value),
+                Number(prepared.valueDecimals),
+                prepared.tag1 ?? "",
+                prepared.tag2 ?? "",
+                "",
+                prepared.feedbackURI,
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+              ],
+              chain: walletClient.chain,
+              account: walletClient.account!,
+            });
+            await walletClient.waitForTransactionReceipt({ hash });
+            router.refresh();
+            return { txHash: hash };
+          } catch (error: any) {
+            console.error("Error submitting feedback:", error);
+            return { error: error?.message ?? "An unknown error occurred." };
+          }
         });
       }}
       className="space-y-3"
