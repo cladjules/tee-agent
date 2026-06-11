@@ -383,10 +383,6 @@ function validationResponsesFromLogs(
       responseURI: res.args.responseURI,
       responseHash: res.args.responseHash,
       tag: res.args.tag,
-      reasoning:
-        typeof evidence?.reasoning === "string"
-          ? evidence.reasoning
-          : undefined,
       evidence,
     };
   });
@@ -592,8 +588,8 @@ export async function syncEvents(chainId: number): Promise<IndexResult> {
     } catch (err) {
       const failedBlock = log.blockNumber ?? fromBlock;
       if (
-        (earliestFailedBlock === undefined ||
-          failedBlock < earliestFailedBlock)
+        earliestFailedBlock === undefined ||
+        failedBlock < earliestFailedBlock
       ) {
         earliestFailedBlock = failedBlock;
       }

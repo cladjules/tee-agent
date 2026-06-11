@@ -37,7 +37,6 @@ export type IndexedValidationResponse = {
   responseURI?: string;
   responseHash?: `0x${string}`;
   tag?: string;
-  reasoning?: string;
   evidence?: Record<string, unknown>;
 };
 
@@ -46,6 +45,13 @@ export type TdxProof = {
   quote: string;
   event_log: string;
   vm_config: string;
+  measurements?: {
+    mrtd: string;
+    rtmr0: string;
+    rtmr1: string;
+    rtmr2: string;
+    rtmr3: string;
+  };
 };
 
 let _redis: Redis | null = null;
@@ -249,11 +255,16 @@ export async function getCachedValidationResponses(
   const redis = getRedis();
   if (!redis) return [];
   try {
-    return (
+    const responses =
       (await redis.get<IndexedValidationResponse[]>(
         validationResponsesKey(chainId, validationRegistryAddress, agentId),
-      )) ?? []
-    );
+      )) ?? [];
+    return responses.map((item) => {
+      const clean = { ...item };
+      delete (clean as IndexedValidationResponse & { reasoning?: string })
+        .reasoning;
+      return clean;
+    });
   } catch (err) {
     console.error("[agent-cache] validation response read failed:", err);
     return [];
@@ -287,10 +298,16 @@ export async function addCachedValidationResponses(
           (await redis.get<IndexedValidationResponse[]>(key)) ?? [];
         const merged = new Map<string, IndexedValidationResponse>();
         for (const item of existing) {
-          merged.set(item.requestHash.toLowerCase(), item);
+          const clean = { ...item };
+          delete (clean as IndexedValidationResponse & { reasoning?: string })
+            .reasoning;
+          merged.set(item.requestHash.toLowerCase(), clean);
         }
         for (const item of agentResponses) {
-          merged.set(item.requestHash.toLowerCase(), item);
+          const clean = { ...item };
+          delete (clean as IndexedValidationResponse & { reasoning?: string })
+            .reasoning;
+          merged.set(item.requestHash.toLowerCase(), clean);
         }
         const ordered = [...merged.values()]
           .sort((a, b) => b.timestamp - a.timestamp)

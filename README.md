@@ -24,11 +24,9 @@ Use these contracts by default. You should not redeploy contracts unless you are
 changing the protocol, testing a local simulator, or intentionally running your
 own contract set.
 
-| Network      | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           | From block |
-| ------------ | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------: |
-| Base Sepolia |  `84532` | `0x09a9e28adfB46240EE4D53FAe0Dd0083944C35e9` | `0xbd40dcc5d4fCC224B77344Cc8CA4abBEcc83F6cE` | `0x528E0999B5db42783d08B577F5beb8637bA9e792` | `42524093` |
-
-Base mainnet addresses will be added after deployment.
+| Network          | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           | From block |
+| ---------------- | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------: |
+| Arbitrum Sepolia |  `84532` | `0x09a9e28adfB46240EE4D53FAe0Dd0083944C35e9` | `0xbd40dcc5d4fCC224B77344Cc8CA4abBEcc83F6cE` | `0x528E0999B5db42783d08B577F5beb8637bA9e792` | `42524093` |
 
 Keep these values in root `deployments.json`; the SDK, oracle image, and hosted
 dashboard/indexer read from it.
@@ -101,9 +99,9 @@ cp apps/oracle/.env.example apps/oracle/.env
 
 Fill the required oracle values:
 
-| Scope  | Required                                                                                                                                                                                 |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Oracle | `NETWORK`, `PRIVATE_KEY`, `RPC_URL_BASE_SEPOLIA` or `RPC_URL_BASE`, `RPC_URL_ZERO_G`, `INDEXER_URL_ZERO_G`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_VALIDATION_MODEL`, `DSTACK_VERIFIER_URL` |
+| Scope  | Required                                                                                                                                                                                                                                                                               |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Oracle | `NETWORK`, `PRIVATE_KEY`, matching network RPC (`RPC_URL_BASE_SEPOLIA`, `RPC_URL_ARBITRUM_SEPOLIA`, or `RPC_URL_BASE`), `RPC_URL_ZERO_G`, `INDEXER_URL_ZERO_G`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_VALIDATION_MODEL`, `DSTACK_VERIFIER_URL`; `TAVILY_API_KEY` when using web research |
 
 `PRIVATE_KEY` on the oracle is the gas / validation signer for the oracle
 process. It is not the wallet that owns every agent. Agent owners still sign
@@ -144,7 +142,7 @@ Run, verify, validate, and transfer at https://teeagent.xyz.
 Mint from your app with `@tee-agent/agent`.
 
 ```typescript
-const network = getNetworkConfig("baseSepolia");
+const network = getNetworkConfig("arbitrumSepolia");
 const contracts = deployments[String(network.chainId)].contracts;
 
 const config = {
@@ -195,7 +193,11 @@ private data inside the CVM, runs your handler, and returns a TDX proof bundle.
 const oracleInfo = await fetch(`${oracleUrl}/address`).then((res) =>
   res.json(),
 );
-const payload = { prompt: "Resolve this market." };
+const payload = {
+  question: "Will ETH close above $4,000 on May 30, 2026?",
+  url: "https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=1780099200&to=1780185600",
+};
+// Omit url to let the prediction oracle research the web with Tavily.
 const deadline = Math.floor(Date.now() / 1000) + 300;
 const typedData = buildRunTypedData({
   oracleAddress: oracleInfo.address,
@@ -227,6 +229,20 @@ const verified = await fetch(`${oracleUrl}/verify`, {
   body: JSON.stringify({ proof: run.proof }),
 }).then((res) => res.json());
 ```
+
+`/verify` also compares the proof measurements against the current oracle
+environment when both proofs expose RTMRs:
+
+| Measurement | What it represents                              |
+| ----------- | ----------------------------------------------- |
+| `RTMR0`     | CVM virtual hardware / firmware configuration   |
+| `RTMR1`     | Linux kernel measurement                        |
+| `RTMR2`     | Kernel parameters, initrd, and rootfs integrity |
+| `RTMR3`     | dstack app compose hash and runtime events      |
+
+Matching RTMRs means the run proof and verification proof came from the same
+measured TDX environment. A mismatch means the quote may still be a real TDX
+quote, but it was not produced by the same measured hardware / OS / app stack.
 
 **Request A Run Validation**
 
@@ -393,6 +409,9 @@ for (const event of events) {
 
 Remote trust is not the URL. The URL is how clients find the oracle. Trust comes
 from Intel TDX quotes verified through TeeVerifier and Automata DCAP.
+RTMR checks make that trust inspectable: RTMR0-2 identify the measured platform
+and OS path, while RTMR3 identifies the dstack application compose/runtime path
+that actually ran the oracle code.
 
 ---
 
@@ -451,7 +470,7 @@ npm run dev
 ### E2E
 
 ```bash
-npm run e2e:baseSepolia
+npm run e2e:arbitrumSepolia
 ```
 
 ---
@@ -463,13 +482,14 @@ development or simulator-specific contract sets.
 
 ```bash
 npm --workspace @tee-agent/contracts run test
-npm --workspace @tee-agent/contracts run deploy:baseSepolia:remoteOracle
+npm --workspace @tee-agent/contracts run deploy:arbitrumSepolia:remoteOracle
+npm --workspace @tee-agent/contracts run deploy:arbitrumSepolia
 ```
 
 For local tappd simulator contracts:
 
 ```bash
-npm --workspace @tee-agent/contracts run deploy:baseSepolia:localOracle
+npm --workspace @tee-agent/contracts run deploy:arbitrumSepolia:localOracle
 ```
 
 To rewrite root `deployments.json` from existing Ignition deployments:
@@ -497,45 +517,49 @@ manually.
 
 ### `apps/oracle/.env.example`
 
-| Name                   | Required                 | Description                                             |
-| ---------------------- | ------------------------ | ------------------------------------------------------- |
-| `NETWORK`              | Yes                      | `base` or `baseSepolia`                                 |
-| `RPC_URL_BASE`         | If `NETWORK=base`        | Base mainnet RPC                                        |
-| `RPC_URL_BASE_SEPOLIA` | If `NETWORK=baseSepolia` | Base Sepolia RPC                                        |
-| `PRIVATE_KEY`          | Yes                      | Oracle gas / validation signer; not the agent owner key |
-| `LLM_API_KEY`          | Yes                      | LLM provider key for example handlers and `/validate`   |
-| `LLM_API_BASE`         | Yes                      | OpenAI-compatible API base                              |
-| `LLM_VALIDATION_MODEL` | Yes                      | Model used by `/validate`                               |
-| `RPC_URL_ZERO_G`       | Yes                      | 0G Storage EVM RPC                                      |
-| `INDEXER_URL_ZERO_G`   | Yes                      | 0G Storage indexer                                      |
-| `PORT`                 | Yes                      | Oracle HTTP port; Phala compose uses `3001`             |
-| `DSTACK_VERIFIER_URL`  | Yes                      | dstack verifier sidecar URL used by `/verify`           |
+| Name                       | Required                     | Description                                             |
+| -------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `NETWORK`                  | Yes                          | `arbitrumSepolia`, `baseSepolia`, or `base`             |
+| `RPC_URL_BASE`             | If `NETWORK=base`            | Base mainnet RPC                                        |
+| `RPC_URL_BASE_SEPOLIA`     | If `NETWORK=baseSepolia`     | Base Sepolia RPC                                        |
+| `RPC_URL_ARBITRUM_SEPOLIA` | If `NETWORK=arbitrumSepolia` | Arbitrum Sepolia RPC                                    |
+| `PRIVATE_KEY`              | Yes                          | Oracle gas / validation signer; not the agent owner key |
+| `LLM_API_KEY`              | Yes                          | LLM provider key for example handlers and `/validate`   |
+| `LLM_API_BASE`             | Yes                          | OpenAI-compatible API base                              |
+| `LLM_VALIDATION_MODEL`     | Yes                          | Model used by `/validate`                               |
+| `TAVILY_API_KEY`           | Web research                 | Tavily key for prediction questions without url         |
+| `RPC_URL_ZERO_G`           | Yes                          | 0G Storage EVM RPC                                      |
+| `INDEXER_URL_ZERO_G`       | Yes                          | 0G Storage indexer                                      |
+| `PORT`                     | Yes                          | Oracle HTTP port; Phala compose uses `3001`             |
+| `DSTACK_VERIFIER_URL`      | Yes                          | dstack verifier sidecar URL used by `/verify`           |
 
 ### `apps/dashboard/.env.example` (optional local dashboard)
 
-| Name                                   | Required      | Description                                              |
-| -------------------------------------- | ------------- | -------------------------------------------------------- |
-| `PORT`                                 | Yes           | Local dashboard port                                     |
-| `RPC_URL_BASE`                         | Network       | Server-side Base RPC for actions, indexing, cron         |
-| `RPC_URL_BASE_SEPOLIA`                 | Network       | Server-side Base Sepolia RPC for actions, indexing, cron |
-| `PRIVATE_KEY`                          | Yes           | Backend signer for uploads and validation automation     |
-| `VALIDATION_ORACLE_URLS`               | Validation    | Comma-separated `teeOracle` URLs this worker owns        |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect | WalletConnect project id                                 |
-| `PINATA_JWT`                           | Yes           | Pinata JWT for IPFS agent metadata uploads               |
-| `RPC_URL_ZERO_G`                       | Yes           | 0G Storage EVM RPC                                       |
-| `INDEXER_URL_ZERO_G`                   | Yes           | 0G Storage indexer                                       |
-| `UPSTASH_REDIS_REST_URL`               | No            | Optional Redis cache URL                                 |
-| `UPSTASH_REDIS_REST_TOKEN`             | No            | Optional Redis cache token                               |
-| `CRON_SECRET`                          | No            | Optional Vercel cron bearer token                        |
+| Name                                   | Required      | Description                                               |
+| -------------------------------------- | ------------- | --------------------------------------------------------- |
+| `PORT`                                 | Yes           | Local dashboard port                                      |
+| `RPC_URL_BASE`                         | Network       | Server-side Base RPC for actions, indexing, cron          |
+| `RPC_URL_BASE_SEPOLIA`                 | Network       | Server-side Base Sepolia RPC for actions, indexing, cron  |
+| `RPC_URL_ARBITRUM_SEPOLIA`             | Network       | Server-side Arbitrum Sepolia RPC for actions and indexing |
+| `PRIVATE_KEY`                          | Yes           | Backend signer for uploads and validation automation      |
+| `VALIDATION_ORACLE_URLS`               | Validation    | Comma-separated `teeOracle` URLs this worker owns         |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect | WalletConnect project id                                  |
+| `PINATA_JWT`                           | Yes           | Pinata JWT for IPFS agent metadata uploads                |
+| `RPC_URL_ZERO_G`                       | Yes           | 0G Storage EVM RPC                                        |
+| `INDEXER_URL_ZERO_G`                   | Yes           | 0G Storage indexer                                        |
+| `UPSTASH_REDIS_REST_URL`               | No            | Optional Redis cache URL                                  |
+| `UPSTASH_REDIS_REST_TOKEN`             | No            | Optional Redis cache token                                |
+| `CRON_SECRET`                          | No            | Optional Vercel cron bearer token                         |
 
 ### `contracts/.env.example` (optional contract deployment)
 
-| Name                   | Required | Description                   |
-| ---------------------- | -------- | ----------------------------- |
-| `PRIVATE_KEY`          | Yes      | Deployer key                  |
-| `RPC_URL_BASE_SEPOLIA` | Network  | Base Sepolia deployment RPC   |
-| `RPC_URL_BASE`         | Network  | Base mainnet deployment RPC   |
-| `EXPLORER_API_KEY`     | No       | Basescan verification API key |
+| Name                       | Required | Description                     |
+| -------------------------- | -------- | ------------------------------- |
+| `PRIVATE_KEY`              | Yes      | Deployer key                    |
+| `RPC_URL_BASE_SEPOLIA`     | Network  | Base Sepolia deployment RPC     |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Network  | Arbitrum Sepolia deployment RPC |
+| `RPC_URL_BASE`             | Network  | Base mainnet deployment RPC     |
+| `EXPLORER_API_KEY`         | No       | Basescan verification API key   |
 
 ---
 

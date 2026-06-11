@@ -5,6 +5,16 @@ const hexStringSchema = z
   .trim()
   .regex(/^0x[0-9a-fA-F]+$/, "Expected a hex string.");
 
+const hexBytesSchema = z
+  .string()
+  .trim()
+  .regex(/^(0x)?[0-9a-fA-F]+$/, "Expected a hex string.")
+  .transform((value) =>
+    value.startsWith("0x") || value.startsWith("0X")
+      ? (`0x${value.slice(2)}` as `0x${string}`)
+      : (`0x${value}` as `0x${string}`),
+  );
+
 export const oracleUrlSchema = z
   .string()
   .trim()
@@ -85,9 +95,18 @@ export const oracleAddressResponseSchema = z
 const tdxProofSchema = z
   .object({
     type: z.literal("dstack-tdx"),
-    quote: hexStringSchema,
+    quote: hexBytesSchema,
     event_log: z.string().trim().min(1),
     vm_config: z.string().trim().min(1),
+    measurements: z
+      .object({
+        mrtd: z.string().trim().min(1),
+        rtmr0: z.string().trim().min(1),
+        rtmr1: z.string().trim().min(1),
+        rtmr2: z.string().trim().min(1),
+        rtmr3: z.string().trim().min(1),
+      })
+      .optional(),
   })
   .strict();
 
@@ -103,7 +122,7 @@ export const oracleRunResponseSchema = z
 export const oracleValidationResponseSchema = z
   .object({
     score: z.number().int().min(0).max(100),
-    reasoning: z.string().optional(),
+    evidence: z.record(z.string(), z.unknown()).optional(),
     responseURI: z.string().trim().min(1),
     responseHash: hexStringSchema,
     tag: z.string().optional(),

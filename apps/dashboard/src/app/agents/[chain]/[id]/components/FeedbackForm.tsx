@@ -71,10 +71,9 @@ export function FeedbackForm({
             responseHash: prefillValidation.responseHash,
             score: prefillValidation.score,
             reasoning:
-              prefillValidation.reasoning ??
-              (typeof prefillValidation.evidence?.reasoning === "string"
+              typeof prefillValidation.evidence?.reasoning === "string"
                 ? prefillValidation.evidence.reasoning
-                : undefined),
+                : undefined,
             txHash: prefillValidation.txHash,
           },
         },

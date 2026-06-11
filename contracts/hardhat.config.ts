@@ -36,6 +36,14 @@ export default defineConfig({
         },
       },
     },
+    421614: {
+      name: "Arbitrum Sepolia",
+      blockExplorers: {
+        etherscan: {
+          url: "https://sepolia.arbiscan.io",
+        },
+      },
+    },
   },
   solidity: {
     profiles: {
@@ -75,21 +83,28 @@ export default defineConfig({
       chainType: "l1",
       chainId: 31337,
       url: configVariable("LOCAL_RPC_URL"),
-      accounts: [configVariable("PRIVATE_KEY")],
+      accounts: [configVariable("TESTNET_PRIVATE_KEY")],
     },
     baseSepolia: {
       type: "http",
       chainType: "op",
       chainId: 84532,
       url: configVariable("RPC_URL_BASE_SEPOLIA"),
-      accounts: [configVariable("PRIVATE_KEY")],
+      accounts: [configVariable("TESTNET_PRIVATE_KEY")],
     },
     base: {
       type: "http",
       chainType: "op",
       chainId: 8453,
       url: configVariable("RPC_URL_BASE"),
-      accounts: [configVariable("PRIVATE_KEY")],
+      accounts: [configVariable("MAINNET_PRIVATE_KEY")],
+    },
+    arbitrumSepolia: {
+      type: "http",
+      chainType: "generic",
+      chainId: 421614,
+      url: configVariable("RPC_URL_ARBITRUM_SEPOLIA"),
+      accounts: [configVariable("TESTNET_PRIVATE_KEY")],
     },
   },
 });

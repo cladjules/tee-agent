@@ -119,7 +119,8 @@ export async function submitOracleValidation(
       );
     }
     const parsed = oracleValidationResponseSchema.parse(data);
-    const evidence = decodeJsonDataUri(parsed.responseURI);
+    const responseUriEvidence = decodeJsonDataUri(parsed.responseURI);
+    const evidence = parsed.evidence ?? responseUriEvidence;
     await addCachedValidationResponses(
       chainId,
       params.validationRegistryAddress,
@@ -134,11 +135,6 @@ export async function submitOracleValidation(
           responseURI: parsed.responseURI,
           responseHash: parsed.responseHash as `0x${string}`,
           tag: parsed.tag,
-          reasoning:
-            parsed.reasoning ??
-            (typeof evidence?.reasoning === "string"
-              ? evidence.reasoning
-              : undefined),
           evidence,
         },
       ],

@@ -1,8 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./__tests__/dist",
-    "rootDir": "./__tests__",
+    "noEmit": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "composite": false

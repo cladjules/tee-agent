@@ -10,7 +10,7 @@
  *   iData[1]  config    — { model: string, temperature: number }
  *                          API keys are NOT stored here; set LLM_API_KEY on the oracle.
  * Payload (caller-supplied at run time):
- *   { claim: string, evidence?: string }
+ *   { question: string, url?: string }
  *
  * Base Sepolia dev:
  *   npm run dev:prediction-market     # from apps/oracle/
@@ -20,7 +20,11 @@
  */
 
 import { z } from "zod";
-import { startOracle, type AgentHandler } from "@tee-agent/server";
+import {
+  startOracle,
+  type AgentHandler,
+  type OracleRunResult,
+} from "@tee-agent/server";
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
 
 // ─── Config schema ───────────────────────────────────────────────────────────
@@ -33,7 +37,7 @@ import deploymentsJson from "../../../../deployments.json" with { type: "json" }
 // Get an API key at https://red-pill.ai
 //
 // Notable models:
-//   phala/gemma-4-26b-a4b-uncensored  Gemma-4 26B-A4B Uncensored (default)
+//   google/gemma-4-31b-it             Gemma-4 26B-A4B Uncensored (default)
 //   phala/deepseek-v3.2               DeepSeek V3.2, TEE-attested
 //   phala/gpt-oss-20b                 OpenAI GPT OSS 20B, TEE-attested
 //   phala/glm-4.7-flash               Z.AI GLM 4.7 Flash, TEE-attested
@@ -47,9 +51,39 @@ const configSchema = z.object({
 });
 
 const payloadSchema = z.object({
-  claim: z.string(),
-  evidence: z.string().optional(),
+  question: z.string(),
+  url: z.string().url().optional(),
 });
+
+const MAX_EVIDENCE_CHARS = 24_000;
+const EVIDENCE_FETCH_TIMEOUT_MS = 15_000;
+const MAX_RESEARCH_SOURCES = 3;
+
+type EvidenceDocument = {
+  url: string;
+  text: string;
+};
+
+type PredictionOutcome = {
+  verdict: "YES" | "NO" | "INVALID";
+  confidence: number;
+  reasoning: string;
+  sourceURLs: string[];
+};
+
+type LlmSignature = {
+  text: string;
+  signature: string;
+  signingAddress: string;
+  signingAlgo: string;
+};
+
+type PredictionResult = OracleRunResult<
+  PredictionOutcome,
+  {
+    llmSignature: LlmSignature | null;
+  }
+>;
 
 function normalizeVerdict(value: unknown): "YES" | "NO" | "INVALID" {
   if (typeof value === "boolean") return value ? "YES" : "NO";
@@ -62,9 +96,127 @@ function normalizeVerdict(value: unknown): "YES" | "NO" | "INVALID" {
   throw new Error(`Unexpected verdict: ${String(value)}`);
 }
 
+async function fetchUrlEvidence(url: string): Promise<EvidenceDocument> {
+  const parsedUrl = new URL(url);
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    throw new Error("url must use http or https.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    EVIDENCE_FETCH_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetch(parsedUrl, {
+      headers: {
+        Accept: "application/json,text/plain,text/html;q=0.8,*/*;q=0.5",
+      },
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `Evidence fetch failed ${response.status}: ${body.slice(0, 500)}`,
+      );
+    }
+
+    const contentType = response.headers.get("content-type") ?? "unknown";
+    let evidenceText = body;
+    if (contentType.includes("application/json")) {
+      try {
+        evidenceText = JSON.stringify(JSON.parse(body), null, 2);
+      } catch {
+        evidenceText = body;
+      }
+    }
+
+    return {
+      url: parsedUrl.toString(),
+      text: evidenceText.slice(0, MAX_EVIDENCE_CHARS),
+    };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(
+        `Evidence fetch timed out after ${EVIDENCE_FETCH_TIMEOUT_MS}ms.`,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const tavilySearchResponseSchema = z.object({
+  results: z.array(
+    z.object({
+      url: z.string().url(),
+      title: z.string().optional(),
+      content: z.string().optional(),
+      raw_content: z.string().optional(),
+    }),
+  ),
+});
+
+async function tavilySearch(body: object) {
+  const apiKey = requiredEnv("TAVILY_API_KEY");
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Tavily /search failed ${response.status}: ${raw}`);
+  }
+  return raw ? (JSON.parse(raw) as unknown) : {};
+}
+
+async function researchEvidence(question: string): Promise<EvidenceDocument[]> {
+  const searchJson = await tavilySearch({
+    query: question,
+    search_depth: "basic",
+    include_raw_content: "markdown",
+    include_answer: false,
+    max_results: MAX_RESEARCH_SOURCES,
+    topic: "general",
+  });
+  const search = tavilySearchResponseSchema.parse(searchJson);
+  const searchResults = search.results.slice(0, MAX_RESEARCH_SOURCES);
+  if (searchResults.length === 0) {
+    throw new Error("Tavily returned no sourceURLs for the question.");
+  }
+
+  const documents: EvidenceDocument[] = [];
+  for (const result of searchResults) {
+    const content = result.raw_content?.trim() || result.content?.trim();
+    if (!content) continue;
+    documents.push({
+      url: result.url,
+      text: content.slice(0, MAX_EVIDENCE_CHARS),
+    });
+  }
+
+  if (documents.length === 0) {
+    throw new Error("Tavily returned no raw content for the question.");
+  }
+  return documents;
+}
+
+async function resolveEvidence(
+  question: string,
+  url: string | undefined,
+): Promise<EvidenceDocument[]> {
+  if (url) return [await fetchUrlEvidence(url)];
+  return researchEvidence(question);
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
-const predictionVerifier: AgentHandler = {
+const predictionVerifier: AgentHandler<PredictionResult> = {
   async run(rawPayload, ctx) {
     const skillContent = ctx.blobs[0] as string;
     const rawConfig = ctx.blobs[1];
@@ -72,19 +224,22 @@ const predictionVerifier: AgentHandler = {
       "Received prediction verification request with config:",
       rawConfig,
     );
-    console.log(
-      "Received prediction verification request with payload:",
-      rawPayload,
-    );
     const cfg = configSchema.parse(rawConfig);
-    const { claim, evidence } = payloadSchema.parse(rawPayload);
+    const { question, url } = payloadSchema.parse(rawPayload);
+    const evidenceDocuments = await resolveEvidence(question, url);
 
     const apiKey = requiredEnv("LLM_API_KEY");
     const apiBase = requiredEnv("LLM_API_BASE");
 
-    const userContent = evidence
-      ? `Claim: ${claim}\n\nEvidence URL: ${evidence}`
-      : `Claim: ${claim}`;
+    const currentDate = new Date().toISOString().slice(0, 10);
+    const userContent = [
+      `Current UTC date: ${currentDate}`,
+      `Question: ${question}`,
+      "Answer using only the source evidence below.",
+      evidenceDocuments.map((document) => document.text).join("\n\n---\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     const response = await fetch(`${apiBase}/chat/completions`, {
       method: "POST",
@@ -129,12 +284,7 @@ const predictionVerifier: AgentHandler = {
     // "model_name:sha256(request):sha256(response)" signed by the TEE's key.
     // Pair with GET /v1/attestation/report to get full on-chain-verifiable
     // proof that the inference ran inside a genuine TDX + GPU TEE.
-    let llmSignature: {
-      text: string;
-      signature: string;
-      signingAddress: string;
-      signingAlgo: string;
-    } | null = null;
+    let llmSignature: LlmSignature | null = null;
 
     if (json.id) {
       try {
@@ -164,10 +314,10 @@ const predictionVerifier: AgentHandler = {
     return {
       outcome: {
         verdict,
-        confidence:
-          typeof parsed.confidence === "number" ? parsed.confidence : 0,
+        confidence: parsed.confidence ?? 0,
         reasoning: parsed.reasoning ?? "",
-      },
+        sourceURLs: evidenceDocuments.map((document) => document.url),
+      } satisfies PredictionOutcome,
       extra: {
         llmSignature,
       },

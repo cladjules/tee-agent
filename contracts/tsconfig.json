@@ -1,16 +1,8 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2023"],
-    "module": "node16",
-    "target": "es2022",
-    "strict": true,
-    "noImplicitAny": false,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "moduleResolution": "node16",
-    "outDir": "dist",
-    "resolveJsonModule": true,
-    "types": ["node"],
+    "lib": ["ES2022"],
+    "noEmit": true,
     "paths": {
       "@tee-agent/agent/types": ["../packages/agent/dist/types.d.ts"],
       "@tee-agent/agent/crypto": ["../packages/agent/dist/crypto.d.ts"],

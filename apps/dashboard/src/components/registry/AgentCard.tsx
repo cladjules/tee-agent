@@ -9,7 +9,7 @@ export default function AgentCard({ agent }: AgentCardProps) {
   const networkKey =
     Object.entries(NETWORK_CONFIG).find(
       ([, network]) => network.chain.id === agent.chainId,
-    )?.[0] ?? "baseSepolia";
+    )?.[0] ?? "arbitrumSepolia";
 
   return (
     <a

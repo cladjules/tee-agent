@@ -17,17 +17,23 @@ type OracleRunResult = {
 };
 
 const runPayloadPresets = {
-  prediction: {
-    label: "Prediction",
-    fieldLabel: "Prediction input JSON",
-    hint: "Use this with the prediction-market oracle example.",
-    json: '{\n  "claim": "Will ETH close above $4,000 on May 30, 2026?",\n  "evidence": "https://example.com/market-resolution-source"\n}',
+  evidence: {
+    label: "Prediction with evidence",
+    fieldLabel: "Evidence-backed question JSON",
+    hint: "Fetch the evidence URL inside the TEE, then answer the question from that source.",
+    json: '{\n  "question": "Will ETH close above $4,000 on May 30, 2026?",\n  "url": "https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=1780099200&to=1780185600"\n}',
+  },
+  research: {
+    label: "Prediction with web research",
+    fieldLabel: "Prediction research JSON",
+    hint: "No evidence URL: the prediction oracle searches the web, reads the top results, then answers.",
+    json: '{\n  "question": "Will Donald Trump still be president of the United States on May 24, 2026?"\n}',
   },
   web: {
-    label: "Web Solver",
-    fieldLabel: "Web solver input JSON",
-    hint: "LLM analysis comes from the encrypted web oracle config; /run only needs the URL and optional selector.",
-    json: '{\n  "url": "https://api.github.com/repos/Phala-Network/dstack",\n  "selector": "description"\n}',
+    label: "Simple Web Oracle",
+    fieldLabel: "Web oracle input JSON",
+    hint: "Use this with the web-data-oracle example to fetch JSON and extract a dot-path selector.",
+    json: '{\n  "url": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",\n  "selector": "ethereum.usd"\n}',
   },
 } as const;
 
@@ -52,9 +58,9 @@ export function RunOracleForm({
 }) {
   const { getWalletClient, chainId } = useWallet();
   const [payloadPreset, setPayloadPreset] =
-    useState<RunPayloadPreset>("prediction");
+    useState<RunPayloadPreset>("evidence");
   const [payloadJson, setPayloadJson] = useState<string>(
-    runPayloadPresets.prediction.json,
+    runPayloadPresets.evidence.json,
   );
   const [isPending, setIsPending] = useState(false);
   const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
@@ -254,7 +260,7 @@ export function RunOracleForm({
       </div>
       <p className="text-xs text-gray-600">
         Your wallet signs an EIP-712 message proving ownership of agent #
-        {agentId}. The oracle runs the claim and stores the run so you can
+        {agentId}. The oracle runs the payload and stores the run so you can
         validate it on demand.
       </p>
       <SubmitButton

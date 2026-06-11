@@ -76,7 +76,7 @@ export default function AgentDetailActions({
 
         <ProcessActionStep
           step="1"
-          title="Run your oracle with a claim"
+          title="Run your oracle with a question"
           accessLabel="Owner only"
           status={
             isOwner

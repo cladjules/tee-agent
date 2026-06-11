@@ -20,6 +20,7 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *                                 Use 0 for Automata standard().
  *
  * Run:
+ *   npm run deploy:arbitrumSepolia
  *   npm run deploy:baseSepolia
  *   npm run deploy:base
  */

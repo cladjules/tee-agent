@@ -3,12 +3,6 @@ export default function HomeHero() {
     <div className="relative pt-8 pb-4">
       <div className="absolute -left-10 top-0 w-[500px] h-[350px] bg-violet-900/10 blur-[100px] rounded-full pointer-events-none" />
       <div className="relative space-y-6 max-w-3xl">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-xs font-mono text-violet-400 bg-violet-950/50 border border-violet-800/40 px-3 py-1 rounded-full">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
-            Live on Base Sepolia
-          </span>
-        </div>
         <h1 className="text-6xl md:text-7xl font-bold tracking-tight leading-[1.05]">
           <span className="gradient-text-animated">Tee</span>{" "}
           <span className="text-slate-200">Agent</span>

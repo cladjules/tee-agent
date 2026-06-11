@@ -1,4 +1,4 @@
-import { baseSepolia, hardhat } from "viem/chains";
+import { arbitrumSepolia, hardhat } from "viem/chains";
 import type { Address } from "viem";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -14,6 +14,19 @@ const REPUTATION_REGISTRY = {
 } as const satisfies Record<string, Address>;
 
 export const NETWORK_CONFIG = {
+  arbitrumSepolia: {
+    chain: arbitrumSepolia,
+    chainId: 421614n,
+    isTestnet: true,
+    label: "Arbitrum Sepolia",
+    identityRegistryAddress: IDENTITY_REGISTRY.testnet,
+    reputationRegistryAddress: REPUTATION_REGISTRY.testnet,
+    explorerUrl: "https://sepolia.arbiscan.io",
+    erc8004ScanUrl: "https://testnet.8004scan.io",
+    erc8004ChainSlug: "arbitrum-sepolia",
+    openseaUrl: "https://testnets.opensea.io/assets/arbitrum-sepolia",
+    rpcEnvVar: "RPC_URL_ARBITRUM_SEPOLIA",
+  },
   // base: {
   //   chain: base,
   //   chainId: 8453n,
@@ -27,19 +40,19 @@ export const NETWORK_CONFIG = {
   //   openseaUrl: "https://opensea.io/assets/base",
   //   rpcEnvVar: "RPC_URL_BASE",
   // },
-  baseSepolia: {
-    chain: baseSepolia,
-    chainId: 84532n,
-    isTestnet: true,
-    label: "Base Sepolia",
-    identityRegistryAddress: IDENTITY_REGISTRY.testnet,
-    reputationRegistryAddress: REPUTATION_REGISTRY.testnet,
-    explorerUrl: "https://sepolia.basescan.org",
-    erc8004ScanUrl: "https://testnet.8004scan.io",
-    erc8004ChainSlug: "base-sepolia",
-    openseaUrl: "https://testnets.opensea.io/assets/base-sepolia",
-    rpcEnvVar: "RPC_URL_BASE_SEPOLIA",
-  },
+  // baseSepolia: {
+  //   chain: baseSepolia,
+  //   chainId: 84532n,
+  //   isTestnet: true,
+  //   label: "Base Sepolia",
+  //   identityRegistryAddress: IDENTITY_REGISTRY.testnet,
+  //   reputationRegistryAddress: REPUTATION_REGISTRY.testnet,
+  //   explorerUrl: "https://sepolia.basescan.org",
+  //   erc8004ScanUrl: "https://testnet.8004scan.io",
+  //   erc8004ChainSlug: "base-sepolia",
+  //   openseaUrl: "https://testnets.opensea.io/assets/base-sepolia",
+  //   rpcEnvVar: "RPC_URL_BASE_SEPOLIA",
+  // },
 } as const;
 
 export const LOCAL_NETWORK_CONFIG = {
@@ -66,7 +79,7 @@ const RUNTIME_NETWORK_CONFIG = {
 export type NetworkName = keyof typeof RUNTIME_NETWORK_CONFIG;
 export type NetworkConfig = (typeof RUNTIME_NETWORK_CONFIG)[NetworkName];
 
-export const DEFAULT_NETWORK = NETWORK_CONFIG.baseSepolia;
+export const DEFAULT_NETWORK = NETWORK_CONFIG.arbitrumSepolia;
 
 export function getNetworkConfig(network: string): NetworkConfig {
   const net = RUNTIME_NETWORK_CONFIG[network as NetworkName];

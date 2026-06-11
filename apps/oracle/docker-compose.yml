@@ -30,10 +30,12 @@ services:
       - NETWORK
       - RPC_URL_BASE
       - RPC_URL_BASE_SEPOLIA
+      - RPC_URL_ARBITRUM_SEPOLIA
       - PRIVATE_KEY
       - LLM_API_KEY
       - LLM_API_BASE
       - LLM_VALIDATION_MODEL
+      - TAVILY_API_KEY
       - DSTACK_VERIFIER_URL=http://verifier:8080
       # 0G Storage
       - RPC_URL_ZERO_G

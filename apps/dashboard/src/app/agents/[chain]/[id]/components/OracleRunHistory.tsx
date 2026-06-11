@@ -42,6 +42,43 @@ function formatInlineValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function RtmrMatch({
+  label,
+  value,
+}: {
+  label: string;
+  value: boolean | undefined;
+}) {
+  if (value === undefined) return null;
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 ${
+        value
+          ? "border-green-900/70 bg-green-950/40 text-green-400"
+          : "border-red-900/70 bg-red-950/40 text-red-400"
+      }`}
+    >
+      {label} {value ? "match" : "mismatch"}
+    </span>
+  );
+}
+
+function hasRtmrResult(
+  result: {
+    isRtmr0Valid?: boolean;
+    isRtmr1Valid?: boolean;
+    isRtmr2Valid?: boolean;
+    isRtmr3Valid?: boolean;
+  } | null,
+): boolean {
+  return (
+    result?.isRtmr0Valid !== undefined ||
+    result?.isRtmr1Valid !== undefined ||
+    result?.isRtmr2Valid !== undefined ||
+    result?.isRtmr3Valid !== undefined
+  );
+}
+
 function OracleRunCard({
   run,
   erc8004AgentId,
@@ -63,7 +100,11 @@ function OracleRunCard({
   const [showBackgroundNotice, setShowBackgroundNotice] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [verifyResult, setVerifyResult] = useState<{
-    is_valid?: boolean;
+    isValid?: boolean;
+    isRtmr0Valid?: boolean;
+    isRtmr1Valid?: boolean;
+    isRtmr2Valid?: boolean;
+    isRtmr3Valid?: boolean;
     unavailable?: boolean;
     error?: string;
   } | null>(null);
@@ -123,7 +164,12 @@ function OracleRunCard({
         body: JSON.stringify({ proof: run.proof }),
       });
       const data = (await res.json()) as {
+        isValid?: boolean;
         is_valid?: boolean;
+        isRtmr0Valid?: boolean;
+        isRtmr1Valid?: boolean;
+        isRtmr2Valid?: boolean;
+        isRtmr3Valid?: boolean;
         unavailable?: boolean;
         detail?: unknown;
         error?: string;
@@ -134,7 +180,11 @@ function OracleRunCard({
         });
       } else {
         setVerifyResult({
-          is_valid: data.is_valid,
+          isValid: data.isValid ?? data.is_valid,
+          isRtmr0Valid: data.isRtmr0Valid,
+          isRtmr1Valid: data.isRtmr1Valid,
+          isRtmr2Valid: data.isRtmr2Valid,
+          isRtmr3Valid: data.isRtmr3Valid,
           unavailable: data.unavailable,
         });
       }
@@ -246,29 +296,51 @@ function OracleRunCard({
           </div>
         </div>
       </button>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-800 px-3 py-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-          <span className={validationStatusColor}>{validationStatus}</span>
-          {verifyResult && (
-            <span
-              className={`font-semibold ${
-                verifyResult.unavailable
-                  ? "text-gray-500"
+      <div className="flex flex-wrap items-start justify-between gap-2 border-t border-gray-800 px-3 py-2">
+        <div className="min-w-0 space-y-1 text-xs font-mono">
+          <div className={validationStatusColor}>
+            Validation: {validationStatus}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {verifyResult && (
+              <span
+                className={`font-semibold ${
+                  verifyResult.unavailable
+                    ? "text-gray-500"
+                    : verifyResult.error
+                      ? "text-red-400"
+                      : verifyResult.isValid
+                        ? "text-green-400"
+                        : "text-yellow-400"
+                }`}
+              >
+                {verifyResult.unavailable
+                  ? "verify unavailable"
                   : verifyResult.error
-                    ? "text-red-400"
-                    : verifyResult.is_valid
-                      ? "text-green-400"
-                      : "text-yellow-400"
-              }`}
-            >
-              {verifyResult.unavailable
-                ? "verify unavailable"
-                : verifyResult.error
-                  ? verifyResult.error
-                  : verifyResult.is_valid
-                    ? "proof valid"
-                    : "proof invalid"}
-            </span>
+                    ? verifyResult.error
+                    : verifyResult.isValid
+                      ? "Proof valid"
+                      : "Proof invalid"}
+              </span>
+            )}
+            {verifyResult &&
+              !verifyResult.error &&
+              !verifyResult.unavailable && (
+                <>
+                  <RtmrMatch label="RTMR0" value={verifyResult.isRtmr0Valid} />
+                  <RtmrMatch label="RTMR1" value={verifyResult.isRtmr1Valid} />
+                  <RtmrMatch label="RTMR2" value={verifyResult.isRtmr2Valid} />
+                  <RtmrMatch label="RTMR3" value={verifyResult.isRtmr3Valid} />
+                </>
+              )}
+          </div>
+          {hasRtmrResult(verifyResult) && (
+            <p className="max-w-3xl text-[11px] leading-4 text-gray-500">
+              RTMR0 checks the CVM hardware/firmware setup, RTMR1 the Linux
+              kernel, RTMR2 kernel parameters and initrd/rootfs, and RTMR3 the
+              dstack app compose/runtime events. Mismatches mean the proof was
+              not produced by the same measured environment.
+            </p>
           )}
         </div>
         <div className="flex flex-wrap justify-end gap-2">

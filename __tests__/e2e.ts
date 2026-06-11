@@ -4,12 +4,12 @@
  *
  * Usage:
  *   npm run e2e:local          # against local Hardhat node (chain 31337)
- *   npm run e2e:baseSepolia    # against Base Sepolia (chain 84532)
+ *   npm run e2e:arbitrumSepolia     # against Arbitrum Sepolia (chain 421614)
  *
  * Environment variables:
  *   PRIVATE_KEY          — sender key
  *   LOCAL_RPC_URL        — local RPC
- *   RPC_URL_BASE_SEPOLIA — Base Sepolia RPC
+ *   RPC_URL_ARBITRUM_SEPOLIA  — Arbitrum Sepolia RPC
  *   ORACLE_URL           — unused by e2e; tests run a localhost oracle
  *   PINATA_JWT           — Pinata JWT for IPFS metadata
  *   RPC_URL_ZERO_G       — 0G Storage RPC for encrypted blobs
@@ -28,7 +28,7 @@ import {
 } from "viem";
 import type { Address, Hex } from "viem";
 import type { EncryptedBlob } from "../packages/agent/dist/types.js";
-import { baseSepolia, hardhat } from "viem/chains";
+import { arbitrumSepolia, hardhat } from "viem/chains";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -99,22 +99,27 @@ function requiredEnv(name: string): string {
 }
 
 const NETWORK = process.argv[2];
-if (NETWORK !== "local" && NETWORK !== "baseSepolia") {
-  throw new Error("Usage: npm run e2e:local or npm run e2e:baseSepolia");
+if (NETWORK !== "local" && NETWORK !== "arbitrumSepolia") {
+  throw new Error("Usage: npm run e2e:local or npm run e2e:arbitrumSepolia");
 }
 const isLocal = NETWORK === "local";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const CHAIN_ID = isLocal ? 31337 : 84532;
-const RPC_URL = requiredEnv(isLocal ? "LOCAL_RPC_URL" : "RPC_URL_BASE_SEPOLIA");
+const CHAIN_ID = isLocal ? 31337 : 421614;
+const RPC_URL = requiredEnv(
+  isLocal ? "LOCAL_RPC_URL" : "RPC_URL_ARBITRUM_SEPOLIA",
+);
 const PRIVATE_KEY = requiredEnv("PRIVATE_KEY") as `0x${string}`;
 const ORACLE_URL = "http://localhost:3001";
 const NORMALIZED_ORACLE_URL = ORACLE_URL.replace(/\/+$/, "");
 
 const chain = isLocal
   ? ({ ...hardhat, rpcUrls: { default: { http: [RPC_URL] } } } as const)
-  : ({ ...baseSepolia, rpcUrls: { default: { http: [RPC_URL] } } } as const);
+  : ({
+      ...arbitrumSepolia,
+      rpcUrls: { default: { http: [RPC_URL] } },
+    } as const);
 
 // ── Local node setup ────────────────────────────────────────────────────────
 if (isLocal) {
@@ -169,16 +174,11 @@ if (isLocal) {
   );
 } else {
   runRequiredCommand(
-    "setup-env:baseSepolia:localOracle",
+    "setup-env",
     "npm",
-    [
-      "--workspace",
-      "@tee-agent/contracts",
-      "run",
-      "setup-env:baseSepolia:localOracle",
-    ],
-    { BASE_SEPOLIA_ORACLE: "local" },
-    "Deploy the Base Sepolia local-oracle contract set first: npm --workspace @tee-agent/contracts run deploy:baseSepolia:localOracle",
+    ["--workspace", "@tee-agent/contracts", "run", "setup-env"],
+    {},
+    "Deploy the Arbitrum Sepolia remote-oracle contract set first: npm --workspace @tee-agent/contracts run deploy:arbitrumSepolia",
   );
 }
 
@@ -224,15 +224,15 @@ const VALIDATION_REGISTRY_ADDRESS =
 /**
  * Official ERC-8004 singletons.
  * Mainnet (Base):          identity 0x8004A169…  reputation 0x8004BAa1…
- * Testnets (Base Sepolia): identity 0x8004A818…  reputation 0x8004B663…
+ * Testnets: identity 0x8004A818…  reputation 0x8004B663…
  * Not present on local Hardhat nodes.
  */
 const identityRegistryAddress = isLocal
   ? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
-  : NETWORK_CONFIG.baseSepolia.identityRegistryAddress;
+  : NETWORK_CONFIG.arbitrumSepolia.identityRegistryAddress;
 
 const REPUTATION_REGISTRY_ADDRESS = (
-  isLocal ? undefined : NETWORK_CONFIG.baseSepolia.reputationRegistryAddress
+  isLocal ? undefined : NETWORK_CONFIG.arbitrumSepolia.reputationRegistryAddress
 ) as `0x${string}` | undefined;
 
 // ── Clients ───────────────────────────────────────────────────────────────────
@@ -900,7 +900,7 @@ async function testIntelligentTransfer() {
   const instructions =
     "You are a market-resolution agent. Return a JSON verdict with evidence.";
   const runtimeConfig = {
-    model: "phala/gemma-4-26b-a4b-uncensored",
+    model: "google/gemma-4-31b-it",
     temperature: 0,
     top_p: 1,
     outputSchema: {
@@ -1041,7 +1041,7 @@ async function testEncryptDecryptPrivateEntries() {
   const instructions =
     "Resolve claims with cited evidence and return a structured verdict.";
   const runtimeConfig = {
-    model: "phala/gemma-4-26b-a4b-uncensored",
+    model: "google/gemma-4-31b-it",
     temperature: 0,
     allowedDomains: ["example.com"],
   };
@@ -1120,7 +1120,7 @@ async function testValidationRegistry() {
       {
         name: "runtime-config",
         data: JSON.stringify({
-          model: "phala/gemma-4-26b-a4b-uncensored",
+          model: "google/gemma-4-31b-it",
           temperature: 0,
           top_p: 1,
         }),
@@ -1188,12 +1188,13 @@ async function testValidationRegistry() {
     `  ✔ validation requested — hash: ${preparedValidation.requestHash.slice(0, 10)}...`,
   );
 
-  const responsePayload = {
+  const evidence = {
     score: 92,
     reasoning:
       "The run outcome matches the historical ETH price for the requested date.",
+    evaluatedAt: new Date().toISOString(),
   };
-  const responseJson = JSON.stringify(responsePayload);
+  const responseJson = JSON.stringify(evidence);
   const responseURI = `data:application/json;base64,${Buffer.from(
     responseJson,
   ).toString("base64")}`;
@@ -1278,7 +1279,7 @@ async function testReputationFeedback() {
     console.log(
       `  ⚠ SKIPPED — ERC-8004 singletons not present on chain ${CHAIN_ID}`,
     );
-    console.log(`    (Run on baseSepolia or Base mainnet to test)`);
+    console.log(`    (Run on arbitrumSepolia or Base mainnet to test)`);
     return;
   }
   console.log(`  IdentityRegistry:   ${identityRegistryAddress}`);
@@ -1557,9 +1558,9 @@ async function startLocalOracle(): Promise<void> {
   const port = oracleUrl.port || "3001";
   const oracleEnv = {
     ...process.env,
-    NETWORK: isLocal ? "local" : "baseSepolia",
+    NETWORK: isLocal ? "local" : "arbitrumSepolia",
     LOCAL_RPC_URL: RPC_URL,
-    RPC_URL_BASE_SEPOLIA: RPC_URL,
+    RPC_URL_ARBITRUM_SEPOLIA: RPC_URL,
     PORT: port,
     DSTACK_SIMULATOR_ENDPOINT: "http://localhost:8090",
     DSTACK_VERIFIER_URL:

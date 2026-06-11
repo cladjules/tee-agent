@@ -14,19 +14,19 @@ const ROOT = join(__dirname, "../..");
 
 const deploymentsRoot = join(ROOT, "contracts/ignition/deployments");
 const localOracleMode = process.env.LOCAL_ORACLE?.trim();
-const baseSepoliaOracleMode = process.env.BASE_SEPOLIA_ORACLE?.trim();
+const arbitrumSepoliaOracleMode = process.env.ARBITRUM_SEPOLIA_ORACLE?.trim();
 const LOCAL_DEPLOYMENT_IDS = {
   local: "chain-31337-local-oracle",
 };
-const BASE_SEPOLIA_DEPLOYMENT_IDS = {
-  local: "base-sepolia-local-oracle",
-  remote: "base-sepolia-remote-oracle",
+const ARBITRUM_SEPOLIA_DEPLOYMENT_IDS = {
+  local: "arbitrum-sepolia-local-oracle",
+  remote: "arbitrum-sepolia-remote-oracle",
 };
 const selectedLocalDeploymentId = localOracleMode
   ? LOCAL_DEPLOYMENT_IDS[localOracleMode]
   : undefined;
-const selectedBaseSepoliaDeploymentId = baseSepoliaOracleMode
-  ? BASE_SEPOLIA_DEPLOYMENT_IDS[baseSepoliaOracleMode]
+const selectedArbitrumSepoliaDeploymentId = arbitrumSepoliaOracleMode
+  ? ARBITRUM_SEPOLIA_DEPLOYMENT_IDS[arbitrumSepoliaOracleMode]
   : undefined;
 
 if (localOracleMode && !Object.hasOwn(LOCAL_DEPLOYMENT_IDS, localOracleMode)) {
@@ -35,17 +35,20 @@ if (localOracleMode && !Object.hasOwn(LOCAL_DEPLOYMENT_IDS, localOracleMode)) {
 }
 
 if (
-  baseSepoliaOracleMode &&
-  !Object.hasOwn(BASE_SEPOLIA_DEPLOYMENT_IDS, baseSepoliaOracleMode)
+  arbitrumSepoliaOracleMode &&
+  !Object.hasOwn(ARBITRUM_SEPOLIA_DEPLOYMENT_IDS, arbitrumSepoliaOracleMode)
 ) {
-  console.error("BASE_SEPOLIA_ORACLE must be local or remote when provided.");
+  console.error(
+    "ARBITRUM_SEPOLIA_ORACLE must be local or remote when provided.",
+  );
   process.exit(1);
 }
 
 const chainNames = {
   31337: "local",
+  421614: "arbitrumSepolia",
   8453: "base",
-  84532: "baseSepolia",
+  84532: "arbitrumSepolia",
 };
 
 // Map Ignition module keys → shared deployment contract keys
@@ -166,38 +169,38 @@ function selectDeployments(entries) {
     ];
   }
 
-  if (selectedBaseSepoliaDeploymentId) {
-    const selected = readDeploymentId(selectedBaseSepoliaDeploymentId);
+  if (selectedArbitrumSepoliaDeploymentId) {
+    const selected = readDeploymentId(selectedArbitrumSepoliaDeploymentId);
     if (!selected) {
       throw new Error(
-        `Missing Ignition deployment id: ${selectedBaseSepoliaDeploymentId}`,
+        `Missing Ignition deployment id: ${selectedArbitrumSepoliaDeploymentId}`,
       );
     }
     return [
       ...selectedEntries.filter((entry) => entry.chainId !== "84532"),
-      { id: selectedBaseSepoliaDeploymentId, ...selected },
+      { id: selectedArbitrumSepoliaDeploymentId, ...selected },
     ];
   }
 
-  const hasChainBaseSepolia = selectedEntries.some(
+  const hasChainArbitrumSepolia = selectedEntries.some(
     (entry) => entry.chainId === "84532" && entry.id === "chain-84532",
   );
-  const baseSepoliaNamed = selectedEntries.filter(
+  const arbitrumSepoliaNamed = selectedEntries.filter(
     (entry) =>
       entry.chainId === "84532" &&
-      Object.values(BASE_SEPOLIA_DEPLOYMENT_IDS).includes(entry.id),
+      Object.values(ARBITRUM_SEPOLIA_DEPLOYMENT_IDS).includes(entry.id),
   );
 
-  if (!hasChainBaseSepolia && baseSepoliaNamed.length > 1) {
+  if (!hasChainArbitrumSepolia && arbitrumSepoliaNamed.length > 1) {
     throw new Error(
-      "BASE_SEPOLIA_ORACLE must be local or remote when both Base Sepolia deployment modes exist.",
+      "ARBITRUM_SEPOLIA_ORACLE must be local or remote when both Base Sepolia deployment modes exist.",
     );
   }
 
   return selectedEntries.filter((entry) => {
     if (entry.chainId !== "84532") return true;
     if (entry.id === "chain-84532") return true;
-    return !hasChainBaseSepolia && baseSepoliaNamed.length === 1;
+    return !hasChainArbitrumSepolia && arbitrumSepoliaNamed.length === 1;
   });
 }
 
@@ -211,9 +214,9 @@ try {
 
 if (foundDeployments.length === 0) {
   console.error("\nERROR: No Ignition deployments found.\n");
-  if (selectedBaseSepoliaDeploymentId) {
+  if (selectedArbitrumSepoliaDeploymentId) {
     console.error(
-      `Missing Ignition deployment id: ${selectedBaseSepoliaDeploymentId}\n`,
+      `Missing Ignition deployment id: ${selectedArbitrumSepoliaDeploymentId}\n`,
     );
   } else if (selectedLocalDeploymentId) {
     console.error(
@@ -268,8 +271,8 @@ for (const {
   if (localOracleMode && chainId === "31337") {
     console.log(`    localOracle=${localOracleMode}`);
   }
-  if (baseSepoliaOracleMode) {
-    console.log(`    baseSepoliaOracle=${baseSepoliaOracleMode}`);
+  if (arbitrumSepoliaOracleMode) {
+    console.log(`    arbitrumSepoliaOracle=${arbitrumSepoliaOracleMode}`);
   }
   for (const [k, v] of Object.entries(resolvedContracts)) {
     console.log(`    ${k}=${v}`);

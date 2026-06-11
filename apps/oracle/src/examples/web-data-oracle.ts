@@ -4,13 +4,10 @@
  * Starts a TEE oracle that exposes only the "web-fetcher" skill.
  * The handler fetches a URL inside the enclave and returns a TEE-attested
  * content hash + optional JSON value extracted via a dot-path selector.
- * If the skill blob includes `llm` config, it also runs an LLM analysis and
- * returns the LLM's ECDSA response signature (Phala Red Pill).
  *
  * Two encrypted iData blobs are stored on-chain at mint time:
- *   iData[0]  SKILL.md  — system prompt markdown (used as LLM system message when llm is set)
- *   iData[1]  config    — { allowedDomains?: string[], llm?: { model: string, temperature: number } }
- *                          API keys are NOT stored here; set LLM_API_KEY on the oracle.
+ *   iData[0]  SKILL.md  — notes for the operator / agent metadata
+ *   iData[1]  config    — { allowedDomains?: string[] }
  * Payload (caller-supplied at run time):
  *   { url: string, selector?: string }
  *
@@ -23,27 +20,19 @@
 
 import { ethers } from "ethers";
 import { z } from "zod";
-import { startOracle, type AgentHandler } from "@tee-agent/server";
+import {
+  startOracle,
+  type AgentHandler,
+  type OracleRunResult,
+} from "@tee-agent/server";
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
 
 // ─── Config schema ────────────────────────────────────────────────────────────
 // Shape of data encrypted into the agent's ERC-7857 config blob (iData[1]).
-// API keys are configured on the oracle server via LLM_API_KEY / LLM_API_BASE.
 
 const configSchema = z.object({
   /** Optional list of allowed domains. If set, any URL not matching is rejected. */
   allowedDomains: z.array(z.string()).optional(),
-  /**
-   * Optional Phala Confidential AI config. When present the oracle runs an
-   * LLM analysis on the fetched content and includes the LLM's ECDSA response
-   * signature in the result. Get an API key at https://red-pill.ai
-   */
-  llm: z
-    .object({
-      model: z.string(),
-      temperature: z.number(),
-    })
-    .optional(),
 });
 
 const payloadSchema = z.object({
@@ -66,9 +55,14 @@ function resolveDotPath(obj: unknown, path: string): string | null {
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
-const webFetcher: AgentHandler = {
+type WebFetcherResult = OracleRunResult<{
+  statusCode: number;
+  contentHash: string;
+  value: string | null;
+}>;
+
+const webFetcher: AgentHandler<WebFetcherResult> = {
   async run(rawPayload, ctx) {
-    const skillContent = ctx.blobs[0] as string;
     const rawConfig = ctx.blobs[1];
     const config = configSchema.parse(rawConfig);
     const { allowedDomains } = config;
@@ -101,104 +95,15 @@ const webFetcher: AgentHandler = {
       }
     }
 
-    // ── Confidential AI API: optional LLM analysis with response signature ──
-    let llmAnalysis: {
-      content: string;
-      llmSignature: {
-        text: string;
-        signature: string;
-        signingAddress: string;
-        signingAlgo: string;
-      } | null;
-    } | null = null;
-
-    if (config.llm) {
-      const { model } = config.llm;
-      const apiKey = requiredEnv("LLM_API_KEY");
-      const apiBase = requiredEnv("LLM_API_BASE");
-
-      const llmRes = await fetch(`${apiBase}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: skillContent },
-            {
-              role: "user",
-              content: `URL: ${url}\n\nContent:\n${body.slice(0, 8000)}`,
-            },
-          ],
-          temperature: config.llm.temperature,
-        }),
-      });
-
-      if (llmRes.ok) {
-        const llmJson = (await llmRes.json()) as {
-          id?: string;
-          choices: Array<{ message: { content: string } }>;
-        };
-        const analysis = llmJson.choices[0]?.message?.content ?? "";
-
-        let llmSignature: {
-          text: string;
-          signature: string;
-          signingAddress: string;
-          signingAlgo: string;
-        } | null = null;
-
-        if (llmJson.id) {
-          try {
-            const sigRes = await fetch(
-              `${apiBase}/signature/${encodeURIComponent(llmJson.id)}?model=${encodeURIComponent(model)}`,
-              { headers: { Authorization: `Bearer ${apiKey}` } },
-            );
-            if (sigRes.ok) {
-              const sigJson = (await sigRes.json()) as {
-                text: string;
-                signature: string;
-                signing_address: string;
-                signing_algo: string;
-              };
-              llmSignature = {
-                text: sigJson.text,
-                signature: sigJson.signature,
-                signingAddress: sigJson.signing_address,
-                signingAlgo: sigJson.signing_algo,
-              };
-            }
-          } catch {
-            // Signature fetch failed — analysis still included, just not LLM-attested.
-          }
-        }
-
-        llmAnalysis = { content: analysis, llmSignature };
-      }
-    }
-
     return {
       outcome: {
         statusCode: response.status,
         contentHash,
         value,
       },
-      extra: {
-        llmAnalysis,
-      },
     };
   },
 };
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`${name} is required.`);
-  }
-  return value;
-}
 
 // ─── Start oracle ─────────────────────────────────────────────────────────────
 

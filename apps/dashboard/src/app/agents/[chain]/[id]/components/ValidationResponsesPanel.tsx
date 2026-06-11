@@ -46,16 +46,15 @@ export function ValidationResponsesPanel({
               );
             })
           : undefined;
-        const claim =
-          matchedRun?.payload?.claim === undefined
+        const question =
+          matchedRun?.payload?.question === undefined
             ? null
-            : String(matchedRun.payload.claim);
+            : String(matchedRun.payload.question);
         const llmOutcome = matchedRun?.result.outcome;
         const validationReasoning =
-          response.reasoning ??
-          (typeof response.evidence?.reasoning === "string"
+          typeof response.evidence?.reasoning === "string"
             ? response.evidence.reasoning
-            : undefined);
+            : undefined;
         const scoreColor =
           response.score >= 70
             ? "text-green-400"
@@ -75,13 +74,13 @@ export function ValidationResponsesPanel({
                 {response.score}/100
               </span>
             </div>
-            {claim && (
+            {question && (
               <div className="rounded bg-gray-900/60 p-2">
                 <p className="text-[11px] font-semibold text-gray-500 mb-1">
-                  Claim
+                  Question
                 </p>
                 <p className="text-xs text-gray-300 whitespace-pre-wrap break-words">
-                  {claim}
+                  {question}
                 </p>
               </div>
             )}

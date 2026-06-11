@@ -1,11 +1,11 @@
 {
-  "84532": {
-    "name": "baseSepolia",
+  "421614": {
+    "name": "arbitrumSepolia",
     "contracts": {
-      "agentRegistry": "0x09a9e28adfB46240EE4D53FAe0Dd0083944C35e9",
-      "teeVerifier": "0xbd40dcc5d4fCC224B77344Cc8CA4abBEcc83F6cE",
-      "validationRegistry": "0x528E0999B5db42783d08B577F5beb8637bA9e792"
+      "agentRegistry": "0x6F92CAD52c3786FE4ec0b0F4a07DEB65094f00a1",
+      "teeVerifier": "0x2f2b0b4cbda3069c1BBf894a0e4b3807a20bB0cf",
+      "validationRegistry": "0x2d2c758DA36110AC137c2c8b333db94D4D5ae66E"
     },
-    "fromBlock": "42524093"
+    "fromBlock": "275691630"
   }
 }

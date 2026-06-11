@@ -2,13 +2,13 @@
 
 ## Overview
 
-Full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base** or **Base Sepolia** with private encrypted data managed through a Phala Cloud TDX TEE oracle. Implements ERC-8004 (Trustless Agent Registry + Reputation) and ERC-7857 (Intelligent Digital Assets with encrypted private metadata).
+Full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent is an ERC-721 NFT on **Base**, **Base Sepolia**, or **Arbitrum Sepolia** with private encrypted data managed through a Phala Cloud TDX TEE oracle. Implements ERC-8004 (Trustless Agent Registry + Reputation) and ERC-7857 (Intelligent Digital Assets with encrypted private metadata).
 
 ## Tech Stack
 
 - **Monorepo**: Turborepo + npm workspaces
 - **Smart Contracts**: Solidity 0.8.35, Hardhat 3.x, Hardhat Ignition, viaIR enabled
-- **Chains**: Base (8453) + Base Sepolia (84532) — the only two supported chains
+- **Chains**: Base (8453), Base Sepolia (84532), Arbitrum Sepolia (421614)
 - **SDK packages**: TypeScript 6.x, NodeNext module resolution (`.js` extensions in imports)
 - **Dashboard**: Next.js 16 App Router, React 19, Tailwind CSS 4, viem 2.x
 - **Oracle server**: Express 4.x, Phala `@phala/dstack-sdk`, Intel TDX enclave
@@ -35,34 +35,35 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 ## Architecture Decisions
 
-| Decision                                              | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Date     |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Base / Base Sepolia only                              | Single well-supported L2; old 0G chain (chainId 16602) removed                                                                                                                                                                                                                                                                                                                                                                                                                        | May 2026 |
-| Explicit config only                                  | Do not add runtime fallbacks/defaults for RPC URLs, contract addresses, private keys, oracle URLs, chain selection, or deployment addresses. Missing required config should fail fast.                                                                                                                                                                                                                                                                                                | May 2026 |
-| 0G Storage for encrypted blobs only                   | 0G is used exclusively for ERC-7857 encrypted intelligent data blobs (`zerog://` URIs). Agent metadata (ERC-8004 registration JSON) is pinned to IPFS via Pinata (`ipfs://` URIs`) — content-addressed and publicly readable without a storage-layer key.                                                                                                                                                                                                                             | May 2026 |
-| Use official ERC-8004 singletons                      | Mainnet: Identity `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` / Reputation `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`. Testnet: Identity `0x8004A818BFB912233c491871b3d84c89A494BD9e` / Reputation `0x8004B663056A597Dffe9eCcC1965A193B7388713`. The Identity Registry address is passed to the `AgentRegistry` constructor (immutable); `erc8004AgentId` is used for reputation.                                                                                                  | May 2026 |
-| Deploy our own ValidationRegistry                     | No confirmed global singleton exists for ValidationRegistry. `ValidationRegistry` is deployed alongside `AgentRegistry`; its address is stored in root `deployments.json`.                                                                                                                                                                                                                                                                                                            | May 2026 |
-| Single data verifier interface                        | `TeeVerifier` implements `IAgentDataVerifier`. `AgentRegistry` stores the verifier address, calls it for ERC-7857 transfers, and passes oracle registration through it. Keep future verifier implementations behind the same interface.                                                                                                                                                                                                                                               | May 2026 |
-| Remote TEE trust is verified on-chain                 | Remote oracle deployments use Automata DCAP from `TeeVerifier` to verify Intel TDX quotes on-chain. `initValidator` quotes bind `reportData` to the TEE-derived oracle key; validation quotes bind the agent id, request hash, and score. Base Sepolia remote params use Automata DCAP v1.0 (`0x95175096a9B74165BE0ac84260cc14Fc1c0EF5FF`) because a real Phala Cloud TDX quote that fails with `TCBR` on v1.1 succeeds on v1.0. Dashboard/oracle URLs are not trusted by themselves. | Jun 2026 |
-| ABI exports as JSON                                   | `packages/agent/src/abis/*.json` are the source of truth; `abis.ts` is a thin re-exporter. `gen-abis.mjs` writes the JSON files; `ReputationRegistry.json` is maintained manually from upstream.                                                                                                                                                                                                                                                                                      | May 2026 |
-| Server Actions only, no API routes                    | Next.js best practice for internal mutations/fetches                                                                                                                                                                                                                                                                                                                                                                                                                                  | May 2026 |
-| Browser wallet RPC for client flows                   | Client-side reads, gas estimates, receipt polling, and writes should use the connected wallet provider. Do not add `NEXT_PUBLIC_RPC_URL_*` or route browser wallet operations through Alchemy/app RPC. Server Actions/indexers still use server-side `RPC_URL_*` env because there is no wallet provider on the server.                                                                                                                                                               | Jun 2026 |
-| Separate Base Sepolia local/remote oracle deployments | `remoteOracle` uses real Automata/DCAP for Phala CVMs. `localOracle` deploys a separate `MockDcapAttestation` contract for tappd simulator development. Root `deployments.json` has one active Base Sepolia contract set; switch manually with `BASE_SEPOLIA_ORACLE=remote` or `BASE_SEPOLIA_ORACLE=local`. No runtime profiles.                                                                                                                                                      | Jun 2026 |
-| Homepage is explorer-first                            | Homepage order is hero, contract addresses, three feature boxes, registered agents, and a compact animated deploy teaser. Put full documentation components on `/docs`, not on the homepage. Agent cards stay compact: image, name, and `AgentRegistry #<tokenId>` only; do not show IPFS/metadata URIs, owner address, tags, or ERC-8004 ids on the homepage card.                                                                                                                   | Jun 2026 |
-| Raw `fetch` to oracle, no `PhalaOracleClient` wrapper | Wrapper package (`packages/compute`) deleted — dashboard calls oracle directly                                                                                                                                                                                                                                                                                                                                                                                                        | May 2026 |
-| `packages/core` deleted                               | Types moved into `packages/agent/src/types.ts`; network utils unused and removed                                                                                                                                                                                                                                                                                                                                                                                                      | May 2026 |
-| `AgentNFTClient` deleted                              | Never called from any app; registry reads go through `AgentRegistry`                                                                                                                                                                                                                                                                                                                                                                                                                  | May 2026 |
+| Decision                                              | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Date     |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Base + Arbitrum network set                           | Supported chains live in `NETWORK_CONFIG`; old 0G chain (chainId 16602) removed. Arbitrum Sepolia uses the same remote oracle path as Base Sepolia, with no local-oracle deployment mode.                                                                                                                                                                                                                                                                                                                  | Jun 2026 |
+| Explicit config only                                  | Do not add runtime fallbacks/defaults for RPC URLs, contract addresses, private keys, oracle URLs, chain selection, or deployment addresses. Missing required config should fail fast.                                                                                                                                                                                                                                                                                                                     | May 2026 |
+| 0G Storage for encrypted blobs only                   | 0G is used exclusively for ERC-7857 encrypted intelligent data blobs (`zerog://` URIs). Agent metadata (ERC-8004 registration JSON) is pinned to IPFS via Pinata (`ipfs://` URIs`) — content-addressed and publicly readable without a storage-layer key.                                                                                                                                                                                                                                                  | May 2026 |
+| Use official ERC-8004 singletons                      | Mainnet: Identity `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` / Reputation `0x8004BAa17C55a88189AE136b182e5fdA19dE9b63`. Testnet: Identity `0x8004A818BFB912233c491871b3d84c89A494BD9e` / Reputation `0x8004B663056A597Dffe9eCcC1965A193B7388713`. The Identity Registry address is passed to the `AgentRegistry` constructor (immutable); `erc8004AgentId` is used for reputation.                                                                                                                       | May 2026 |
+| Deploy our own ValidationRegistry                     | No confirmed global singleton exists for ValidationRegistry. `ValidationRegistry` is deployed alongside `AgentRegistry`; its address is stored in root `deployments.json`.                                                                                                                                                                                                                                                                                                                                 | May 2026 |
+| Single data verifier interface                        | `TeeVerifier` implements `IAgentDataVerifier`. `AgentRegistry` stores the verifier address, calls it for ERC-7857 transfers, and passes oracle registration through it. Keep future verifier implementations behind the same interface.                                                                                                                                                                                                                                                                    | May 2026 |
+| Remote TEE trust is verified on-chain                 | Remote oracle deployments use Automata DCAP from `TeeVerifier` to verify Intel TDX quotes on-chain. `initValidator` quotes bind `reportData` to the TEE-derived oracle key; validation quotes bind the agent id, request hash, and score. Base Sepolia and Arbitrum Sepolia remote params use Automata DCAP v1.0 (`0x95175096a9B74165BE0ac84260cc14Fc1c0EF5FF`) because a real Phala Cloud TDX quote that fails with `TCBR` on v1.1 succeeds on v1.0. Dashboard/oracle URLs are not trusted by themselves. | Jun 2026 |
+| ABI exports as JSON                                   | `packages/agent/src/abis/*.json` are the source of truth; `abis.ts` is a thin re-exporter. `gen-abis.mjs` writes the JSON files; `ReputationRegistry.json` is maintained manually from upstream.                                                                                                                                                                                                                                                                                                           | May 2026 |
+| Server Actions only, no API routes                    | Next.js best practice for internal mutations/fetches                                                                                                                                                                                                                                                                                                                                                                                                                                                       | May 2026 |
+| Browser wallet RPC for client flows                   | Client-side reads, gas estimates, receipt polling, and writes should use the connected wallet provider. Do not add `NEXT_PUBLIC_RPC_URL_*` or route browser wallet operations through Alchemy/app RPC. Server Actions/indexers still use server-side `RPC_URL_*` env because there is no wallet provider on the server.                                                                                                                                                                                    | Jun 2026 |
+| Separate Base Sepolia local/remote oracle deployments | `remoteOracle` uses real Automata/DCAP for Phala CVMs. `localOracle` deploys a separate `MockDcapAttestation` contract for tappd simulator development. Root `deployments.json` has one active Base Sepolia contract set; switch manually with `ARBITRUM_SEPOLIA_ORACLE=remote` or `ARBITRUM_SEPOLIA_ORACLE=local`. No runtime profiles.                                                                                                                                                                   | Jun 2026 |
+| Homepage is explorer-first                            | Homepage order is hero, contract addresses, three feature boxes, registered agents, and a compact animated deploy teaser. Put full documentation components on `/docs`, not on the homepage. Agent cards stay compact: image, name, and `AgentRegistry #<tokenId>` only; do not show IPFS/metadata URIs, owner address, tags, or ERC-8004 ids on the homepage card.                                                                                                                                        | Jun 2026 |
+| Raw `fetch` to oracle, no `PhalaOracleClient` wrapper | Wrapper package (`packages/compute`) deleted — dashboard calls oracle directly                                                                                                                                                                                                                                                                                                                                                                                                                             | May 2026 |
+| `packages/core` deleted                               | Types moved into `packages/agent/src/types.ts`; network utils unused and removed                                                                                                                                                                                                                                                                                                                                                                                                                           | May 2026 |
+| `AgentNFTClient` deleted                              | Never called from any app; registry reads go through `AgentRegistry`                                                                                                                                                                                                                                                                                                                                                                                                                                       | May 2026 |
 
 ## Environment Variables
 
 ### Shared
 
-| Variable / file        | Required | Description                                                                                                                                                          |
-| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deployments.json`     | Yes      | Public contract addresses and first deployment blocks for deployed networks                                                                                          |
-| `PRIVATE_KEY`          | Yes      | Deployer / server-side transaction signer. For dashboard automatic validation, dashboard and oracle `PRIVATE_KEY` must resolve to the same validation signer address |
-| `RPC_URL_BASE`         | Network  | EVM RPC for Base mainnet                                                                                                                                             |
-| `RPC_URL_BASE_SEPOLIA` | Network  | EVM RPC for Base Sepolia                                                                                                                                             |
+| Variable / file            | Required | Description                                                                                                                                                          |
+| -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deployments.json`         | Yes      | Public contract addresses and first deployment blocks for deployed networks                                                                                          |
+| `PRIVATE_KEY`              | Yes      | Deployer / server-side transaction signer. For dashboard automatic validation, dashboard and oracle `PRIVATE_KEY` must resolve to the same validation signer address |
+| `RPC_URL_BASE`             | Network  | EVM RPC for Base mainnet                                                                                                                                             |
+| `RPC_URL_BASE_SEPOLIA`     | Network  | EVM RPC for Base Sepolia                                                                                                                                             |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Network  | EVM RPC for Arbitrum Sepolia                                                                                                                                         |
 
 ### Dashboard
 
@@ -82,7 +83,7 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 
 | Variable               | Required | Description                                                                                                                                                                                                                                           |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NETWORK`              | Yes      | `base` or `baseSepolia`                                                                                                                                                                                                                               |
+| `NETWORK`              | Yes      | `base`, `baseSepolia`, or `arbitrumSepolia`                                                                                                                                                                                                           |
 | `RPC_URL_ZERO_G`       | Yes      | 0G Storage EVM RPC                                                                                                                                                                                                                                    |
 | `INDEXER_URL_ZERO_G`   | Yes      | 0G Indexer URL                                                                                                                                                                                                                                        |
 | `LLM_API_KEY`          | Yes      | LLM provider key for example oracle handlers and `/validate`                                                                                                                                                                                          |
@@ -100,8 +101,10 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 Production docs should prioritize deployability over app architecture. The most
 important path is:
 
-1. Deploy contracts on Base or Base Sepolia. For Base Sepolia, choose either
-   `deploy:baseSepolia:remoteOracle` or `deploy:baseSepolia:localOracle`.
+1. Deploy contracts on Base, Base Sepolia, or Arbitrum Sepolia. For Base
+   Sepolia, choose either `deploy:arbitrumSepolia:remoteOracle` or
+   `deploy:arbitrumSepolia:localOracle`. For Arbitrum Sepolia, use
+   `deploy:baseSepolia`; it is remote-oracle only.
 2. Run `contracts/setup-env` so root `deployments.json` contains
    `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks.
 3. Implement a production oracle entry under `apps/oracle/src` using
@@ -141,11 +144,12 @@ Package roles:
 
 ### Contracts
 
-| Variable               | Required | Description                              |
-| ---------------------- | -------- | ---------------------------------------- |
-| `RPC_URL_BASE_SEPOLIA` | Network  | RPC for Base Sepolia deployments         |
-| `RPC_URL_BASE`         | Network  | RPC for Base mainnet deployments         |
-| `EXPLORER_API_KEY`     | No       | Basescan API key for source verification |
+| Variable                   | Required | Description                              |
+| -------------------------- | -------- | ---------------------------------------- |
+| `RPC_URL_BASE_SEPOLIA`     | Network  | RPC for Base Sepolia deployments         |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Network  | RPC for Arbitrum Sepolia deployments     |
+| `RPC_URL_BASE`             | Network  | RPC for Base mainnet deployments         |
+| `EXPLORER_API_KEY`         | No       | Basescan API key for source verification |
 
 ### Root E2E
 
@@ -153,21 +157,21 @@ Root E2E tests live in `__tests__/` and load `__tests__/.env`.
 `npm run e2e:local` expects a running Hardhat node and an existing local
 Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 
-| Variable               | Required | Description                                                    |
-| ---------------------- | -------- | -------------------------------------------------------------- |
-| `PRIVATE_KEY`          | Yes      | E2E signer for minting, transfer, validation, feedback, and 0G |
-| `LOCAL_RPC_URL`        | Local    | RPC for `npm run e2e:local`                                    |
-| `RPC_URL_BASE_SEPOLIA` | Network  | RPC for `npm run e2e:baseSepolia`                              |
-| `ORACLE_URL`           | Yes      | Running oracle URL used by E2E tests                           |
-| `PINATA_JWT`           | Yes      | Pinata JWT used by SDK minting for IPFS metadata               |
-| `RPC_URL_ZERO_G`       | Yes      | 0G Storage EVM RPC used by encrypted blob uploads              |
-| `INDEXER_URL_ZERO_G`   | Yes      | 0G Storage indexer used by encrypted blob storage              |
+| Variable                   | Required | Description                                                    |
+| -------------------------- | -------- | -------------------------------------------------------------- |
+| `PRIVATE_KEY`              | Yes      | E2E signer for minting, transfer, validation, feedback, and 0G |
+| `LOCAL_RPC_URL`            | Local    | RPC for `npm run e2e:local`                                    |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Network  | RPC for `npm run e2e:arbitrumSepolia`                          |
+| `ORACLE_URL`               | Yes      | Running oracle URL used by E2E tests                           |
+| `PINATA_JWT`               | Yes      | Pinata JWT used by SDK minting for IPFS metadata               |
+| `RPC_URL_ZERO_G`           | Yes      | 0G Storage EVM RPC used by encrypted blob uploads              |
+| `INDEXER_URL_ZERO_G`       | Yes      | 0G Storage indexer used by encrypted blob storage              |
 
 ## Requirements
 
 ### Implemented
 
-- [x] ERC-721 agent NFT mint on Base / Base Sepolia
+- [x] ERC-721 agent NFT mint on configured EVM networks
 - [x] ERC-8004 on-chain registry, reputation, and validation
 - [x] ERC-7857 encrypted intelligent data (AES-256-GCM + ECIES key wrapping)
 - [x] Inline data URI blobs for public metadata (on-chain)
@@ -184,11 +188,12 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 ### Pending / In Progress
 
 - [ ] Deploy production oracle CVMs and point agent `teeOracle` services at them
+- [ ] Deploy Arbitrum Sepolia contract set and publish addresses in root `deployments.json`
 - [ ] Dedicated oracle key rotation flow for changing an agent's `teeOracle`
 - [ ] Add `forge test` step to CI — `contracts` already has `npm run test:foundry`, but `.github/workflows/pr-checks.yml` does not run it yet
-- [ ] Validate Basescan source verification for deployed Base Sepolia/Base addresses — deploy scripts pass `--verify`, but deployed-address verification still needs confirmation
+- [ ] Validate explorer source verification for deployed Base Sepolia/Base/Arbitrum Sepolia addresses — deploy scripts pass `--verify`, but deployed-address verification still needs confirmation
 - [ ] Support [`zaryab2000/create-8004-TAP-agent`](https://github.com/zaryab2000/create-8004-TAP-agent)
-- [ ] Support more networks — currently blocked by the Base/Base Sepolia-only architecture decision
+- [ ] Support additional networks beyond Base and Arbitrum
 - [ ] Add standalone approval flow — transfer/e2e covers the ERC-8004 approval needed for combined transfer, but dashboard allowance approval/revoke UI is still placeholder-only
 
 ## Known Issues & Follow-ups

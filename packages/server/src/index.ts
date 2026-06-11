@@ -40,7 +40,7 @@
 
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { TappdClient, TdxQuoteResponse } from "@phala/dstack-sdk";
+import { TappdClient, TappdInfoResponse } from "@phala/dstack-sdk";
 import { encrypt } from "eciesjs";
 import crypto from "node:crypto";
 import { ethers } from "ethers";
@@ -63,7 +63,7 @@ import {
   VALIDATION_REGISTRY_ABI,
 } from "@tee-agent/agent/abis";
 import { getNetworkConfig } from "@tee-agent/agent/network";
-import { scoreWithLLM } from "./llm-scorer.js";
+import validateRun from "./validateRun.js";
 
 type RawDeployments = Record<
   string,
@@ -107,6 +107,15 @@ const verifyBodySchema = z.object({
     quote: z.string().startsWith("0x"),
     event_log: z.string(),
     vm_config: z.union([z.string(), z.record(z.string(), z.unknown())]),
+    measurements: z
+      .object({
+        mrtd: z.string(),
+        rtmr0: z.string(),
+        rtmr1: z.string(),
+        rtmr2: z.string(),
+        rtmr3: z.string(),
+      })
+      .optional(),
   }),
 });
 
@@ -117,11 +126,9 @@ const validateRequestBodySchema = z.object({
    * and TDX attestation commitment. Must match record.agentId in ValidationRegistry.
    */
   erc8004AgentId: z.union([z.string(), z.number()]),
-  /** The claim / input to validate — oracle runs the skill handler on this. */
+  /** The run metadata to validate. */
   payload: z.record(z.string(), z.unknown()),
   validationRegistryAddress: z.string(),
-  responseURI: z.string().optional().default(""),
-  responseHash: z.string().optional().default(ethers.ZeroHash),
   tag: z.string().optional().default(""),
   signature: z.string(),
   deadline: z.number().int().positive(),
@@ -135,10 +142,6 @@ const runBodySchema = z.object({
   deadline: z.number().int().positive(),
 });
 
-type NormalizedTdxQuoteResponse = Omit<TdxQuoteResponse, "quote"> & {
-  quote: `0x${string}`;
-};
-
 type VerifierEventLogEntry = {
   imr: number;
   event_type: number;
@@ -150,30 +153,35 @@ type VerifierEventLogEntry = {
 const DSTACK_RUNTIME_EVENT_TYPE = 0x08000001;
 const SHA384_HEX_LENGTH = 96;
 
-type TappdInfoWithVmConfig = Awaited<ReturnType<TappdClient["info"]>> & {
-  vm_config?: unknown;
-};
-
 type TdxProof = {
   type: "dstack-tdx";
   quote: `0x${string}`;
   event_log: string;
   vm_config: string;
+  measurements?: {
+    mrtd: string;
+    rtmr0: string;
+    rtmr1: string;
+    rtmr2: string;
+    rtmr3: string;
+  };
 };
 
-function normalizeHexBytes(
-  value: string | Uint8Array,
-  label: string,
-): `0x${string}` {
-  const hex =
-    typeof value === "string"
-      ? value.trim().replace(/^0x/i, "")
-      : ethers.hexlify(value).slice(2);
-  const prefixed = `0x${hex}` as `0x${string}`;
-  if (!ethers.isHexString(prefixed)) {
-    throw new Error(`${label} must be hex bytes.`);
-  }
-  return prefixed;
+function compareMeasurements(
+  a: NonNullable<TdxProof["measurements"]>,
+  b: NonNullable<TdxProof["measurements"]>,
+): {
+  isRtmr0Valid: boolean;
+  isRtmr1Valid: boolean;
+  isRtmr2Valid: boolean;
+  isRtmr3Valid: boolean;
+} {
+  return {
+    isRtmr0Valid: a.rtmr0.toLowerCase() === b.rtmr0.toLowerCase(),
+    isRtmr1Valid: a.rtmr1.toLowerCase() === b.rtmr1.toLowerCase(),
+    isRtmr2Valid: a.rtmr2.toLowerCase() === b.rtmr2.toLowerCase(),
+    isRtmr3Valid: a.rtmr3.toLowerCase() === b.rtmr3.toLowerCase(),
+  };
 }
 
 function normalizeVerifierHexField(value: unknown, label: string): string {
@@ -297,44 +305,6 @@ function normalizeVerifierEventLog(eventLog: string): {
   };
 }
 
-function normalizeVerifierVmConfig(value: unknown): string {
-  const vmConfig =
-    typeof value === "string"
-      ? value.trim() || "{}"
-      : value && typeof value === "object"
-        ? JSON.stringify(value)
-        : "{}";
-  JSON.parse(vmConfig);
-  return vmConfig;
-}
-
-function getVmConfigFromInfo(appInfo: TappdInfoWithVmConfig | null): string {
-  return normalizeVerifierVmConfig(appInfo?.vm_config);
-}
-
-function buildTdxProof(
-  quoteResult: TdxQuoteResponse,
-  vmConfig: string,
-): TdxProof {
-  const normalized = normalizeTdxQuoteResult(quoteResult);
-  return {
-    type: "dstack-tdx",
-    quote: normalized.quote,
-    event_log: normalized.event_log,
-    vm_config: normalizeVerifierVmConfig(vmConfig),
-  };
-}
-
-function normalizeTdxQuoteResult(
-  quoteResult: TdxQuoteResponse,
-): NormalizedTdxQuoteResponse {
-  return {
-    ...quoteResult,
-    quote: normalizeHexBytes(quoteResult.quote, "TDX quote"),
-    event_log: quoteResult.event_log,
-  };
-}
-
 function revertData(err: unknown): string | undefined {
   const data = (err as { data?: unknown })?.data;
   if (typeof data === "string") return data;
@@ -439,9 +409,16 @@ export interface HandlerContext {
   blobs: unknown[];
 }
 
+export type OracleRunResult<
+  TOutcome extends Record<string, unknown> = Record<string, unknown>,
+  TExtra extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  outcome: TOutcome;
+  extra?: TExtra;
+};
+
 export interface AgentHandler<
-  TPayload extends Record<string, unknown> = Record<string, unknown>,
-  TResult extends Record<string, unknown> = Record<string, unknown>,
+  TResult extends OracleRunResult = OracleRunResult,
 > {
   /**
    * Process an agent request.
@@ -450,12 +427,14 @@ export interface AgentHandler<
    *              ctx.blobs[0] is typically the skill/prompt, ctx.blobs[1] the
    *              config object — but handlers decide the exact interpretation.
    */
-  run(payload: TPayload, ctx: HandlerContext): Promise<TResult>;
+  run(payload: Record<string, unknown>, ctx: HandlerContext): Promise<TResult>;
 }
 
-export interface OracleConfig {
+export interface OracleConfig<
+  TResult extends OracleRunResult = OracleRunResult,
+> {
   /** The single agent handler for this oracle deployment. */
-  handler: AgentHandler;
+  handler: AgentHandler<TResult>;
   /** Deployed contract addresses. Import deployments.json from the app root and pass here. */
   deployments?: RawDeployments;
 }
@@ -470,7 +449,9 @@ function requiredEnv(name: string): string {
 
 // ─── Oracle server factory ────────────────────────────────────────────────────
 
-export async function startOracle(config: OracleConfig): Promise<void> {
+export async function startOracle<
+  TResult extends OracleRunResult = OracleRunResult,
+>(config: OracleConfig<TResult>): Promise<void> {
   const portRaw = requiredEnv("PORT");
   const PORT = parseInt(portRaw, 10);
   if (!Number.isInteger(PORT) || PORT <= 0) {
@@ -508,7 +489,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
   console.log(`[oracle] transaction signer address: ${txSignerAddress}`);
 
   // ─── Network configuration ────────────────────────────────────────────────────
-  // Set NETWORK=base (mainnet) or NETWORK=baseSepolia (testnet).
+  // Set NETWORK=arbitrumSepolia, baseSepolia, or base.
   // chainId and Identity Registry address are derived statically — no RPC call needed.
   const { chainId, isTestnet } = networkConfig;
   const identityRegistryAddress = networkConfig.identityRegistryAddress;
@@ -535,12 +516,6 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     registered: false,
     error: "registration has not run yet",
   };
-
-  function oracleAddressReportData(): Uint8Array {
-    const reportData = new Uint8Array(64);
-    reportData.set(ethers.getBytes(wallet.address), 0);
-    return reportData;
-  }
 
   async function registerAttestedOracle(): Promise<void> {
     if (!configuredTeeVerifierAddress) {
@@ -569,16 +544,17 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     console.log(
       `[oracle] registering TEE oracle ${wallet.address} in TeeVerifier ${configuredTeeVerifierAddress}`,
     );
-    const quoteResult = normalizeTdxQuoteResult(
-      await tappd.tdxQuote(oracleAddressReportData(), "raw"),
-    );
+    const { proof } = await tdxAttestation(wallet.address);
+
+    const quote = `0x${proof.quote.trim().replace(/^0x/i, "")}`;
+
     const tx = await submitContractTx(
       "initValidator",
       teeVerifier.interface,
       () =>
         teeVerifier.initValidator(
           wallet.address,
-          quoteResult.quote,
+          quote,
         ) as Promise<ethers.ContractTransactionResponse>,
     );
     console.log(`[oracle] initValidator tx submitted: ${tx.hash}`);
@@ -616,25 +592,37 @@ export async function startOracle(config: OracleConfig): Promise<void> {
    * caller-supplied commitment so on-chain verifiers can confirm the exact value
    * without trusting any pre-registered signing key.
    */
-  async function tdxQuoteWithCommitment(
-    commitment: string,
-  ): Promise<NormalizedTdxQuoteResponse> {
+  async function tdxAttestation(reportDataCommitment: string): Promise<{
+    proof: TdxProof;
+    appInfo: TappdInfoResponse | null;
+  }> {
     const reportData = new Uint8Array(64);
-    reportData.set(ethers.getBytes(commitment), 0);
-    const tdxResult = await tappd.tdxQuote(reportData, "raw");
-    return normalizeTdxQuoteResult(tdxResult);
-  }
+    reportData.set(ethers.getBytes(reportDataCommitment), 0);
+    const quoteResult = await tappd.tdxQuote(reportData, "raw");
+    const appInfo = IS_SIMULATOR ? null : await tappd.info();
 
-  async function currentVmConfig(): Promise<string> {
-    if (IS_SIMULATOR) return "{}";
-    return getVmConfigFromInfo((await tappd.info()) as TappdInfoWithVmConfig);
-  }
+    if (appInfo) {
+      delete (appInfo.tcb_info as any).app_compose; // redundant
+    }
 
-  async function tdxProofWithCommitment(commitment: string): Promise<TdxProof> {
-    return buildTdxProof(
-      await tdxQuoteWithCommitment(commitment),
-      await currentVmConfig(),
-    );
+    return {
+      proof: {
+        type: "dstack-tdx",
+        quote: quoteResult.quote,
+        event_log: quoteResult.event_log,
+        vm_config: (appInfo as any)?.vm_config,
+        measurements: !appInfo?.tcb_info
+          ? undefined
+          : {
+              mrtd: appInfo.tcb_info.mrtd,
+              rtmr0: appInfo.tcb_info.rtmr0,
+              rtmr1: appInfo.tcb_info.rtmr1,
+              rtmr2: appInfo.tcb_info.rtmr2,
+              rtmr3: appInfo.tcb_info.rtmr3,
+            },
+      },
+      appInfo,
+    };
   }
 
   // ─── Blob fetching ────────────────────────────────────────────────────────────
@@ -916,7 +904,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       return;
     }
     try {
-      const appInfo = await tappd.info();
+      const { appInfo } = await tdxAttestation(wallet.address);
       res.json({
         ...appInfo,
         transactionSignerAddress: txSignerAddress,
@@ -953,18 +941,13 @@ export async function startOracle(config: OracleConfig): Promise<void> {
     try {
       // Embed oracle address at reportData[0:20] so on-chain TeeVerifier and
       // external verifiers can bind the signing key to this quote.
-      const quoteResult = normalizeTdxQuoteResult(
-        await tappd.tdxQuote(oracleAddressReportData(), "raw"),
-      );
-      const appInfo = IS_SIMULATOR
-        ? null
-        : ((await tappd.info()) as TappdInfoWithVmConfig);
+      const { proof, appInfo } = await tdxAttestation(wallet.address);
       res.json({
-        proof: buildTdxProof(quoteResult, getVmConfigFromInfo(appInfo)),
+        proof,
+        ...(IS_SIMULATOR ? { simulator: true } : {}),
         ...(appInfo ? { tcb_info: appInfo.tcb_info } : {}),
         address: wallet.address,
         publicKey: signingKey.compressedPublicKey,
-        ...(IS_SIMULATOR ? { simulator: true } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1001,7 +984,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       const verifierUrl = `${DSTACK_VERIFIER_URL}/verify`;
       const verifierQuote = proof.quote.replace(/^0x/i, "");
       const verifierEventLog = normalizeVerifierEventLog(proof.event_log);
-      const verifierVmConfig = normalizeVerifierVmConfig(proof.vm_config);
+      const verifierVmConfig = proof.vm_config;
       console.log(
         `[oracle] /verify quoteBytes=${Math.max(0, proof.quote.length - 2) / 2} eventLogEvents=${verifierEventLog.eventCount} runtimeEvents=${verifierEventLog.runtimeEventCount} paddedDigests=${verifierEventLog.paddedDigestCount} recomputedRuntimeDigests=${verifierEventLog.recomputedRuntimeDigestCount} eventLogChars=${verifierEventLog.eventLog.length} vmConfigChars=${verifierVmConfig.length} verifier=${verifierUrl}`,
       );
@@ -1042,9 +1025,14 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         res.json({ is_valid: false, status: fetchRes.status });
         return;
       }
+
+      const { proof: newProof } = await tdxAttestation(wallet.address);
+
       res.status(fetchRes.status).json({
-        is_valid: (result as { is_valid?: boolean }).is_valid ?? false,
-        detail: result,
+        isValid: (result as { is_valid?: boolean }).is_valid ?? false,
+        ...(proof.measurements && newProof.measurements
+          ? compareMeasurements(proof.measurements, newProof.measurements)
+          : {}),
       });
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -1123,7 +1111,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       }
 
       // body.payload is the runMeta encoded in the on-chain requestURI:
-      // { outcome, payload (original claim), proof, timestamp, agentId }
+      // { outcome, payload (original question/input), proof, timestamp, agentId }
       const runMeta = body.payload as {
         outcome?: Record<string, unknown>;
         payload?: Record<string, unknown>;
@@ -1131,26 +1119,26 @@ export async function startOracle(config: OracleConfig): Promise<void> {
       const originalOutcome = runMeta.outcome ?? {};
       const originalPayload = runMeta.payload ?? {};
 
-      // Ask the LLM to re-verify the original claim and rate the accuracy of
-      // the recorded result on a scale of 0–100.
-      const { score, reasoning } = await scoreWithLLM(
-        originalPayload,
-        originalOutcome,
+      const validation = await validateRun(originalPayload, originalOutcome);
+      const score = Math.max(
+        0,
+        Math.min(100, Math.round(Number(validation.score))),
       );
+      const reasoning = validation.reasoning;
 
       console.log(
         `[oracle] /validate LLM score=${score} reasoning=${reasoning.slice(0, 100)}…`,
       );
 
-      const validationResult: Record<string, unknown> = { score, reasoning };
-      const responseJson = JSON.stringify(validationResult);
-      const responseURI =
-        body.responseURI ||
-        `data:application/json;base64,${Buffer.from(responseJson, "utf8").toString("base64")}`;
-      const responseHash =
-        body.responseHash === ethers.ZeroHash && !body.responseURI
-          ? ethers.keccak256(ethers.toUtf8Bytes(responseJson))
-          : body.responseHash;
+      const evidence = {
+        score,
+        reasoning,
+        evaluatedAt: new Date().toISOString(),
+        ...(validation.evidence ?? {}),
+      };
+      const responseJson = JSON.stringify(evidence);
+      const responseURI = `data:application/json;base64,${Buffer.from(responseJson, "utf8").toString("base64")}`;
+      const responseHash = ethers.keccak256(ethers.toUtf8Bytes(responseJson));
 
       // Generate a quote for on-chain TeeVerifier.verifyValidation().
       // Local simulator quotes pass only against the local MockDcapAttestation deployment.
@@ -1160,7 +1148,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           [erc8004AgentId, body.requestHash, score],
         ),
       );
-      const proof = await tdxProofWithCommitment(commitment);
+      const { proof } = await tdxAttestation(commitment);
+      const quote = `0x${proof.quote.trim().replace(/^0x/i, "")}`;
 
       let txHash: string | undefined;
       if (RPC_URL) {
@@ -1183,7 +1172,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
               responseURI,
               responseHash,
               body.tag,
-              proof.quote,
+              quote,
             ) as Promise<ethers.ContractTransactionResponse>,
         );
         const receipt = await tx.wait();
@@ -1194,8 +1183,8 @@ export async function startOracle(config: OracleConfig): Promise<void> {
         `[oracle] /validate ok erc8004AgentId=${erc8004AgentId} score=${score}${txHash ? ` txHash=${txHash}` : ""}`,
       );
       res.json({
-        ...validationResult,
         score,
+        evidence,
         proof,
         responseURI,
         responseHash,
@@ -1264,7 +1253,7 @@ export async function startOracle(config: OracleConfig): Promise<void> {
           [agentId, resultHash, BigInt(timestamp)],
         ),
       );
-      const proof = await tdxProofWithCommitment(commitment);
+      const { proof } = await tdxAttestation(commitment);
 
       console.log(
         `[oracle] /run ok agentId=${agentIdStr} result=${resultJson}`,

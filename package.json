@@ -22,7 +22,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,sol,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,sol,json,md}\"",
     "e2e:local": "node --import tsx __tests__/e2e.ts local",
-    "e2e:baseSepolia": "node --import tsx __tests__/e2e.ts baseSepolia",
+    "e2e:arbitrumSepolia": "node --import tsx __tests__/e2e.ts arbitrumSepolia",
     "oracle:image": "node scripts/push-oracle-image.mjs",
     "oracle:deploy": "node scripts/deploy-cvm.mjs"
   },

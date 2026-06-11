@@ -213,6 +213,13 @@ export default function ProcessDiagram() {
                   TEE-derived key, and validation quotes bind the agent id,
                   request hash, and score before on-chain verification.
                 </p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  RTMR0 identifies the measured CVM hardware/firmware setup,
+                  RTMR1 the Linux kernel, RTMR2 kernel parameters plus
+                  initrd/rootfs, and RTMR3 the dstack app compose and runtime
+                  events. Matching RTMRs prove a run and verification came from
+                  the same measured environment.
+                </p>
               </div>
               <ProcessTag>On-chain DCAP</ProcessTag>
             </div>

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import CopyButton from "./CopyButton";
 
 const TEASER_LINES = [
-  "npm run deploy:baseSepolia --workspace=contracts",
+  "npm run deploy:arbitrumSepolia --workspace=contracts",
   "npm run setup-env --workspace=contracts",
   "npm run oracle:image",
   "npm run oracle:deploy -- src/examples/prediction-market.ts",

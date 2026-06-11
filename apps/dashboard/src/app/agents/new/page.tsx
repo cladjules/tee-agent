@@ -39,14 +39,17 @@ const SKILL_TEMPLATES = [
         data:
           "# Prediction Market Resolver\n" +
           "You are an objective prediction market resolver.\n" +
-          "Given a claim and optional evidence, determine whether the claim is true (YES), false (NO), or cannot be determined (INVALID).\n" +
+          "The oracle will provide the current UTC date with each request. Use it when deciding whether a dated question is past or future.\n" +
+          "If the payload includes url, the oracle fetches that URL before calling you. If not, the oracle researches the web and provides extracted sources.\n" +
+          "Answer the original question using only the source evidence provided by the oracle.\n" +
+          "Return YES when the question resolves true, NO when it resolves false, or INVALID when the fetched evidence is insufficient.\n" +
           'Respond with valid JSON only: { \"verdict\": \"YES\" | \"NO\" | \"INVALID\", \"confidence\": 0-100, \"reasoning\": \"...\" }',
       },
       {
         name: "parameters.json",
         data: JSON.stringify(
           {
-            model: "phala/gemma-4-26b-a4b-uncensored",
+            model: "google/gemma-4-31b-it",
             temperature: 0.2,
             top_p: 0.9,
           },
@@ -60,24 +63,19 @@ const SKILL_TEMPLATES = [
     id: "web-fetcher",
     label: "Web Data Oracle",
     icon: "🌐",
-    description: "Fetch a URL and optionally analyse the content with an LLM",
+    description: "Fetch JSON and extract a value with a selector",
     entries: [
       {
         name: "SKILL.md",
         data:
-          "# Web Data Analyst\n" +
-          "You are a web data analyst. Extract and summarise the key information from the provided web page content.",
+          "# Web Data Oracle\n" +
+          "Fetch an allowed JSON endpoint inside the TEE and return the content hash plus an optional dot-path selector value.",
       },
       {
         name: "parameters.json",
         data: JSON.stringify(
           {
-            allowedDomains: ["api.github.com"],
-            llm: {
-              model: "phala/gemma-4-26b-a4b-uncensored",
-              temperature: 0.3,
-              top_p: 0.9,
-            },
+            allowedDomains: ["api.coingecko.com"],
           },
           null,
           2,
@@ -168,31 +166,39 @@ export default function NewAgentPage() {
     }
     setServiceStepVerifying(true);
     setServiceStepError(null);
+    const normalizedUrl = teeOracleUrl.trim().replace(/\/+$/, "");
     try {
-      const normalizedUrl = teeOracleUrl.trim().replace(/\/+$/, "");
-      const res = await fetch(`${normalizedUrl}/address`, {
+      const addressUrl = new URL("/address", normalizedUrl).toString();
+      const res = await fetch(addressUrl, {
         cache: "no-store",
       });
       if (!res.ok) {
-        throw new Error(`teeOracle /address returned ${res.status}.`);
+        throw new Error(
+          `teeOracle /address returned HTTP ${res.status}. Check that ${normalizedUrl} is the oracle HTTPS endpoint printed by oracle:deploy.`,
+        );
       }
-      const body = (await res.json()) as {
+      let body: {
         address?: string;
         publicKey?: string;
       };
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        throw new Error(
+          `teeOracle /address did not return JSON. Check that ${normalizedUrl} points to the oracle server, not the dashboard or another service.`,
+        );
+      }
       if (
         !body.address?.startsWith("0x") ||
         !body.publicKey?.startsWith("0x")
       ) {
         throw new Error(
-          "teeOracle /address must return address and publicKey.",
+          "teeOracle /address must return both address and publicKey as 0x values.",
         );
       }
       return true;
     } catch (err) {
-      setServiceStepError(
-        err instanceof Error ? err.message : "teeOracle verification failed.",
-      );
+      setServiceStepError(formatTeeOracleAddressError(normalizedUrl, err));
       return false;
     } finally {
       setServiceStepVerifying(false);
@@ -365,7 +371,7 @@ export default function NewAgentPage() {
     const networkKey =
       Object.entries(NETWORK_CONFIG).find(
         ([, network]) => network.chain.id === result.chainId,
-      )?.[0] ?? "baseSepolia";
+      )?.[0] ?? "arbitrumSepolia";
 
     return (
       <div className="max-w-lg mx-auto text-center py-16 space-y-4">
@@ -905,6 +911,19 @@ function teeOracleUrlFromServices(
   services: readonly ServiceEditorEntry[],
 ): string | undefined {
   return services.find((service) => service.name === "teeOracle")?.endpoint;
+}
+
+function formatTeeOracleAddressError(url: string, err: unknown): string {
+  if (err instanceof Error) {
+    if (err.message.includes("Invalid URL")) {
+      return "teeOracle URL is invalid. Paste a full http:// or https:// URL.";
+    }
+    if (err instanceof TypeError) {
+      return `Could not reach teeOracle at ${url}/address. Check the URL, make sure the oracle is running, and use the Phala HTTPS endpoint printed by oracle:deploy.`;
+    }
+    return err.message;
+  }
+  return `Could not verify teeOracle at ${url}/address.`;
 }
 
 function validateJson(input: string): string | null {

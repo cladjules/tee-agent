@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { CodeBlock, ProcessTag } from "./HomePrimitives";
 
 const DEPLOY_SNIPPET = `# Deploy contracts and write deployments.json
-npm run deploy:baseSepolia --workspace=contracts
+npm run deploy:arbitrumSepolia --workspace=contracts
 npm run setup-env --workspace=contracts
 
 # Copy an example oracle or create your own handler
@@ -31,7 +31,7 @@ const ORACLE_HANDLER_SNIPPET = `const handler = {
 
 await startOracle({ handler, deployments });`;
 
-const MINT_SNIPPET = `const network = getNetworkConfig("baseSepolia");
+const MINT_SNIPPET = `const network = getNetworkConfig("arbitrumSepolia");
 
 const deployment = deployments[String(network.chainId)];
 const contracts = deployment.contracts;
@@ -70,7 +70,11 @@ await walletClient.writeContract({
   ],
 });`;
 
-const ORACLE_HTTP_SNIPPET = `const payload = { question: "Who won this market?" };
+const ORACLE_HTTP_SNIPPET = `const payload = {
+  question: "Will ETH close above $4,000 on May 30, 2026?",
+  url:
+    "https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=1780099200&to=1780185600",
+};
 const deadline = Math.floor(Date.now() / 1000) + 300;
 const typedData = buildRunTypedData({
   oracleAddress,
