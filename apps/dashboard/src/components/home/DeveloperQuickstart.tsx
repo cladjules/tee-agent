@@ -208,7 +208,7 @@ export default function DeveloperQuickstart() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <ProcessTag>@tee-agent/server</ProcessTag>
+          <ProcessTag>@tee-agent/oracle</ProcessTag>
           <ProcessTag>@tee-agent/agent</ProcessTag>
         </div>
       </div>

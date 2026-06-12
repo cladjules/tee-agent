@@ -31,8 +31,12 @@ export type DashboardClientConfig = AgentConfig & {
   validationRegistryAddress: Address;
 };
 
-export type DashboardServerConfig = DashboardClientConfig & {
+export type DashboardReadConfig = DashboardClientConfig & {
   registryFromBlock: bigint;
+  rpcUrl?: string;
+};
+
+export type DashboardServerConfig = DashboardReadConfig & {
   privateKey: string;
   zeroGRpcUrl: string;
   zeroGIndexerUrl: string;
@@ -118,11 +122,10 @@ export function getClientConfigForChain(
 }
 
 /**
- * Returns the full server-side config for the given EVM chain ID.
+ * Returns public/read-only config for routes that only verify chain state.
+ * This intentionally does not require private keys or storage credentials.
  */
-export function getServerConfigForChain(
-  chainId?: number,
-): DashboardServerConfig {
+export function getReadConfigForChain(chainId?: number): DashboardReadConfig {
   const activeChainId = getAvailableChainId(chainId);
   const clientConfig = getClientConfigForChain(activeChainId);
   const deployment = getDeploymentForChain(activeChainId);
@@ -131,6 +134,20 @@ export function getServerConfigForChain(
     ...clientConfig,
     rpcUrl: RPC_MAP[activeChainId],
     registryFromBlock: deployment.fromBlock,
+  };
+}
+
+/**
+ * Returns the full server-side config for the given EVM chain ID.
+ */
+export function getServerConfigForChain(
+  chainId?: number,
+): DashboardServerConfig {
+  const activeChainId = getAvailableChainId(chainId);
+  const readConfig = getReadConfigForChain(activeChainId);
+
+  return {
+    ...readConfig,
     privateKey: requiredEnv("PRIVATE_KEY"),
     zeroGRpcUrl: requiredEnv("RPC_URL_ZERO_G"),
     zeroGIndexerUrl: requiredEnv("INDEXER_URL_ZERO_G"),

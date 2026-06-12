@@ -1,10 +1,16 @@
-import { createPublicClient, http, type Address, type Hex } from "viem";
+import {
+  createPublicClient,
+  http,
+  PublicClient,
+  type Address,
+  type Hex,
+} from "viem";
 import { VALIDATION_REGISTRY_ABI, VALIDATION_STATUS_ABI } from "../abis.js";
 import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class ValidationRegistry {
   private readonly _addr: Address;
-  private readonly _pc;
+  private readonly _pc: PublicClient;
 
   constructor(params: { address: Address; chainId: number; rpcUrl?: string }) {
     const network =

@@ -3,6 +3,7 @@ import { getAgentPageData } from "@/lib/actions/registry";
 import { DEFAULT_NETWORK, NETWORK_CONFIG } from "@tee-agent/agent/network";
 import { getClientConfigForChain } from "@/lib/config";
 import AgentDetailActions from "./components/AgentDetailActions";
+import { FeedbackVerifyButton } from "./components/FeedbackVerifyButton";
 import type {
   AgentPublicMetadata,
   AgentIntelligentDataEntry,
@@ -329,30 +330,11 @@ export default async function AgentDetailPage({ params }: Props) {
                 />
                 <DetailRow label="Tag 1" value={feedback.tag1 || "-"} />
                 <DetailRow label="Tag 2" value={feedback.tag2 || "-"} />
-                {feedback.endpoint && (
-                  <DetailRow
-                    label="Endpoint"
-                    value={feedback.endpoint}
-                    mono
-                    truncate
-                  />
-                )}
-                {feedback.feedbackURI && (
-                  <DetailRow
-                    label="Feedback URI"
-                    value={feedback.feedbackURI}
-                    mono
-                    truncate
-                  />
-                )}
-                {feedback.feedbackHash && (
-                  <DetailRow
-                    label="Feedback Hash"
-                    value={feedback.feedbackHash}
-                    mono
-                    truncate
-                  />
-                )}
+                {feedback.feedbackURI ? (
+                  <div className="flex justify-start pt-1">
+                    <FeedbackVerifyButton feedbackURI={feedback.feedbackURI} />
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

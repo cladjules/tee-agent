@@ -21,6 +21,30 @@ export default function DocsPage() {
       </section>
 
       <ContractAddresses />
+      <section className="max-w-3xl space-y-4">
+        <div className="space-y-2">
+          <p className="font-mono text-xs uppercase tracking-wider text-cyan-400">
+            Feedback Verification
+          </p>
+          <h2 className="text-2xl font-semibold text-slate-100">
+            Verify feedback with its URI
+          </h2>
+          <p className="text-sm leading-6 text-slate-500">
+            Feedback rows can be checked against the on-chain validation
+            registry by sending the `feedbackURI` to the dashboard verifier.
+            The verifier decodes the ERC-8004 feedback JSON, reads the
+            validation response, and confirms it came from the configured TEE
+            verifier.
+          </p>
+        </div>
+        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+          <code>{`await fetch("/api/verify", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ feedbackURI }),
+});`}</code>
+        </pre>
+      </section>
       <FeatureStrip />
       <ProcessDiagram />
       <DeveloperQuickstart />

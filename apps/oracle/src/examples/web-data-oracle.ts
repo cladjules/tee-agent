@@ -24,7 +24,7 @@ import {
   startOracle,
   type AgentHandler,
   type OracleRunResult,
-} from "@tee-agent/server";
+} from "@tee-agent/oracle";
 import deploymentsJson from "../../../../deployments.json" with { type: "json" };
 
 // ─── Config schema ────────────────────────────────────────────────────────────

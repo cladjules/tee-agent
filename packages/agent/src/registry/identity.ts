@@ -1,10 +1,10 @@
-import { createPublicClient, http, type Address } from "viem";
+import { createPublicClient, http, PublicClient, type Address } from "viem";
 import { IDENTITY_REGISTRY_ABI } from "../abis.js";
 import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class IdentityRegistry {
   private readonly _addr: Address;
-  private readonly _pc;
+  private readonly _pc: PublicClient;
 
   constructor(params: { chainId: number; rpcUrl?: string }) {
     const network =

@@ -30,9 +30,9 @@ const sourceHashInputs = [
   "packages/agent/package.json",
   "packages/agent/tsconfig.json",
   "packages/agent/src",
-  "packages/server/package.json",
-  "packages/server/tsconfig.json",
-  "packages/server/src",
+  "packages/oracle/package.json",
+  "packages/oracle/tsconfig.json",
+  "packages/oracle/src",
 ];
 
 function usage() {

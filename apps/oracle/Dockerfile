@@ -7,19 +7,19 @@ RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json tsconfig.base.json turbo.json ./
 COPY deployments.json ./
 COPY packages/agent/package.json packages/agent/tsconfig.json ./packages/agent/
-COPY packages/server/package.json packages/server/tsconfig.json ./packages/server/
+COPY packages/oracle/package.json packages/oracle/tsconfig.json ./packages/oracle/
 COPY apps/oracle/package.json apps/oracle/tsconfig.json ./apps/oracle/
 RUN npm ci
 
 COPY packages/agent ./packages/agent
-COPY packages/server ./packages/server
+COPY packages/oracle ./packages/oracle
 COPY apps/oracle ./apps/oracle
 
 RUN npm run build --workspace=packages/agent \
-  && npm run build --workspace=packages/server \
+  && npm run build --workspace=packages/oracle \
   && npm run build --workspace=apps/oracle \
   && npm prune --omit=dev \
-  && mkdir -p packages/agent/node_modules packages/server/node_modules apps/oracle/node_modules
+  && mkdir -p packages/agent/node_modules packages/oracle/node_modules apps/oracle/node_modules
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
 
@@ -34,9 +34,9 @@ COPY --from=builder /app/deployments.json ./deployments.json
 COPY --from=builder /app/packages/agent/package.json ./packages/agent/package.json
 COPY --from=builder /app/packages/agent/dist ./packages/agent/dist
 COPY --from=builder /app/packages/agent/node_modules ./packages/agent/node_modules
-COPY --from=builder /app/packages/server/package.json ./packages/server/package.json
-COPY --from=builder /app/packages/server/dist ./packages/server/dist
-COPY --from=builder /app/packages/server/node_modules ./packages/server/node_modules
+COPY --from=builder /app/packages/oracle/package.json ./packages/oracle/package.json
+COPY --from=builder /app/packages/oracle/dist ./packages/oracle/dist
+COPY --from=builder /app/packages/oracle/node_modules ./packages/oracle/node_modules
 COPY --from=builder /app/apps/oracle/package.json ./apps/oracle/package.json
 COPY --from=builder /app/apps/oracle/dist ./apps/oracle/dist
 COPY --from=builder /app/apps/oracle/node_modules ./apps/oracle/node_modules

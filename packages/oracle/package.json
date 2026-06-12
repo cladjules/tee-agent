@@ -1,5 +1,5 @@
 {
-  "name": "@tee-agent/server",
+  "name": "@tee-agent/oracle",
   "version": "0.1.0",
   "type": "module",
   "description": "Reusable TEE oracle server for ERC-7857 AgentNFT — Phala Cloud TDX re-encryption, validation and agent runner",

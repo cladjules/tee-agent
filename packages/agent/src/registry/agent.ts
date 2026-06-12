@@ -3,14 +3,20 @@ import type {
   AgentRegistrationFile,
   ResolvedAgentProofData,
 } from "../types.js";
-import { createPublicClient, http, type Address, type Hex } from "viem";
+import {
+  createPublicClient,
+  http,
+  PublicClient,
+  type Address,
+  type Hex,
+} from "viem";
 import { AGENT_REGISTRY_ABI } from "../abis.js";
 import { readJsonFromUri } from "../crypto.js";
 import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
 export class AgentRegistry {
   private readonly _addr: Address;
-  private readonly _pc;
+  private readonly _pc: PublicClient;
 
   constructor(params: { address: Address; chainId: number; rpcUrl?: string }) {
     const network =

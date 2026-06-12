@@ -18,8 +18,8 @@
       "cache": false,
       "persistent": true
     },
-    "@tee-agent/oracle#dev": {
-      "dependsOn": ["@tee-agent/server#build"],
+    "@tee-agent/oracle-app#dev": {
+      "dependsOn": ["@tee-agent/oracle-app#build"],
       "cache": false,
       "persistent": true
     },

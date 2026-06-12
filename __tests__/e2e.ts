@@ -1549,7 +1549,7 @@ async function startLocalOracle(): Promise<void> {
   runRequiredCommand(
     "oracle dev services",
     "npm",
-    ["--workspace", "@tee-agent/oracle", "run", "dev:up"],
+    ["--workspace", "@tee-agent/oracle-app", "run", "dev:up"],
     {},
     "Make sure Docker is running, then retry npm run e2e:local.",
   );
@@ -1616,9 +1616,9 @@ async function stopLocalOracle(): Promise<void> {
     runRequiredCommand(
       "oracle dev services shutdown",
       "npm",
-      ["--workspace", "@tee-agent/oracle", "run", "dev:down"],
+      ["--workspace", "@tee-agent/oracle-app", "run", "dev:down"],
       {},
-      "Stop Docker dev services manually with: npm --workspace @tee-agent/oracle run dev:down",
+      "Stop Docker dev services manually with: npm --workspace @tee-agent/oracle-app run dev:down",
     );
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));

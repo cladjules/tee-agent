@@ -48,6 +48,21 @@ The chain stores pointers and hashes. IPFS stores public metadata. 0G stores the
 encrypted private payloads. Only the registered Phala CVM oracle can decrypt
 those private payloads.
 
+## Feedback Verification
+
+Use `feedbackURI` as the verifier input. `feedbackHash` is only a checksum; it
+cannot be decoded.
+
+```bash
+curl -X POST https://teeagent.xyz/api/verify \
+  -H 'content-type: application/json' \
+  -d '{"feedbackURI":"data:application/json;base64,..."}'
+```
+
+The endpoint decodes the feedback payload, recomputes its hash, reads the
+configured `ValidationRegistry` for the embedded validation request, and checks
+that the response came from the configured `TeeVerifier`.
+
 ---
 
 ## Production Path
@@ -417,13 +432,13 @@ that actually ran the oracle code.
 
 ## Package Overview
 
-| Package                | Role                                                                                                                                                  |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@tee-agent/agent`     | SDK for app/backend usage: network config, ABIs, registry reads, mint prep, transfer prep, services, validation, feedback, encryption, and 0G Storage |
-| `@tee-agent/server`    | Reusable oracle runtime: `startOracle({ handler, deployments })`, TDX key handling, quotes, decrypt, `/run`, `/validate`, `/reencrypt`, `/verify`     |
-| `@tee-agent/contracts` | Solidity contracts and deployment scripts for protocol development or optional custom deployments                                                     |
-| `@tee-agent/oracle`    | Example oracle entries and Phala CVM deploy workspace                                                                                                 |
-| `@tee-agent/dashboard` | Optional local Next.js dashboard; hosted UI is https://teeagent.xyz                                                                                   |
+| Package                 | Role                                                                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@tee-agent/agent`      | SDK for app/backend usage: network config, ABIs, registry reads, mint prep, transfer prep, services, validation, feedback, encryption, and 0G Storage |
+| `@tee-agent/oracle`     | Reusable oracle runtime: `startOracle({ handler, deployments })`, TDX key handling, quotes, decrypt, `/run`, `/validate`, `/reencrypt`, `/verify`     |
+| `@tee-agent/contracts`  | Solidity contracts and deployment scripts for protocol development or optional custom deployments                                                     |
+| `@tee-agent/oracle-app` | Example oracle entries and Phala CVM deploy workspace                                                                                                 |
+| `@tee-agent/dashboard`  | Optional local Next.js dashboard; hosted UI is https://teeagent.xyz                                                                                   |
 
 Main SDK subpaths:
 
@@ -440,6 +455,7 @@ Main SDK subpaths:
 ```
 
 TODO: Move remaining `writeContract` helpers into the package registry clients.
+TODO: Use 8004 TAP agents.
 
 ---
 
@@ -458,7 +474,7 @@ npm --workspace @tee-agent/dashboard run dev
 ### Oracle Simulator
 
 ```bash
-npm --workspace @tee-agent/oracle run dev:prediction-market
+npm --workspace @tee-agent/oracle-app run dev:prediction-market
 ```
 
 ### Full Workspace
@@ -555,7 +571,8 @@ manually.
 
 | Name                       | Required | Description                     |
 | -------------------------- | -------- | ------------------------------- |
-| `PRIVATE_KEY`              | Yes      | Deployer key                    |
+| `TESTNET_PRIVATE_KEY`      | Yes      | Deployer key on Testnet         |
+| `MAINNET_PRIVATE_KEY`      | Yes      | Deployer key on Mainnet         |
 | `RPC_URL_BASE_SEPOLIA`     | Network  | Base Sepolia deployment RPC     |
 | `RPC_URL_ARBITRUM_SEPOLIA` | Network  | Arbitrum Sepolia deployment RPC |
 | `RPC_URL_BASE`             | Network  | Base mainnet deployment RPC     |

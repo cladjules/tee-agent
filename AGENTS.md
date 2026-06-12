@@ -79,6 +79,12 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | `UPSTASH_REDIS_REST_TOKEN`             | No       | Upstash Redis REST token                                         |
 | `CRON_SECRET`                          | No       | Bearer token Vercel injects into cron requests                   |
 
+Dashboard exposes `POST /api/verify` for public feedback verification. Pass
+`{"feedbackURI":"data:application/json;base64,..."}` in the JSON body; the
+route decodes the ERC-8004 feedback file, reads the configured
+`ValidationRegistry`, and checks that the validation response came from the
+configured `TeeVerifier`.
+
 ### Oracle
 
 | Variable               | Required | Description                                                                                                                                                                                                                                           |
@@ -108,7 +114,7 @@ important path is:
 2. Run `contracts/setup-env` so root `deployments.json` contains
    `agentRegistry`, `teeVerifier`, `validationRegistry`, and scan start blocks.
 3. Implement a production oracle entry under `apps/oracle/src` using
-   `@tee-agent/server` and `startOracle({ handler, deployments })`.
+   `@tee-agent/oracle-app` and `startOracle({ handler, deployments })`.
 4. Fill `apps/oracle/.env` explicitly. Do not set
    `DSTACK_SIMULATOR_ENDPOINT` in production.
 5. Build and push the oracle Docker image with `npm run oracle:image`.
@@ -137,7 +143,7 @@ important path is:
 
 Package roles:
 
-- `@tee-agent/server`: production oracle runtime only.
+- `@tee-agent/oracle`: production oracle runtime only.
 - `@tee-agent/agent`: SDK for app/backend usage — network metadata, ABIs, mint
   prep, transfer prep, registry reads, validation, feedback, service updates,
   encryption, and 0G Storage.

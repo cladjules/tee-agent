@@ -1,10 +1,31 @@
-import { createPublicClient, http, type Address } from "viem";
+import {
+  createPublicClient,
+  http,
+  PublicClient,
+  type Address,
+  type Hex,
+} from "viem";
 import { REPUTATION_REGISTRY_ABI } from "../abis.js";
 import { DEFAULT_NETWORK, getNetworkConfigByChainId } from "../network.js";
 
+type NewFeedbackLog = {
+  args: {
+    agentId?: bigint;
+    clientAddress?: Address;
+    feedbackIndex?: bigint;
+    value?: bigint;
+    valueDecimals?: number;
+    tag1?: string;
+    tag2?: string;
+    endpoint?: string;
+    feedbackURI?: string;
+    feedbackHash?: Hex;
+  };
+};
+
 export class ReputationRegistry {
   readonly address: Address;
-  private readonly _pc;
+  private readonly _pc: PublicClient;
 
   constructor(params: { chainId: number; rpcUrl?: string }) {
     const network =
@@ -123,5 +144,48 @@ export class ReputationRegistry {
       tag2s,
       revokedStatuses,
     };
+  }
+
+  async getNewFeedbackEvents(
+    agentId: bigint,
+    fromBlock: bigint = 0n,
+  ): Promise<
+    {
+      client: Address;
+      feedbackIndex: bigint;
+      endpoint: string;
+      feedbackURI: string;
+      feedbackHash: Hex;
+    }[]
+  > {
+    const logs = (await this._pc.getContractEvents({
+      address: this.address,
+      abi: REPUTATION_REGISTRY_ABI,
+      eventName: "NewFeedback",
+      args: { agentId },
+      fromBlock,
+      toBlock: "latest",
+    })) as unknown as NewFeedbackLog[];
+
+    return logs.flatMap((log) => {
+      if (
+        !log.args.clientAddress ||
+        log.args.feedbackIndex === undefined ||
+        !log.args.feedbackURI ||
+        !log.args.feedbackHash
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          client: log.args.clientAddress,
+          feedbackIndex: log.args.feedbackIndex,
+          endpoint: log.args.endpoint ?? "",
+          feedbackURI: log.args.feedbackURI,
+          feedbackHash: log.args.feedbackHash,
+        },
+      ];
+    });
   }
 }

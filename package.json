@@ -7,7 +7,7 @@
   "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
   "workspaces": [
     "packages/agent",
-    "packages/server",
+    "packages/oracle",
     "apps/dashboard",
     "apps/oracle",
     "contracts"

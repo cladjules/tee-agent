@@ -65,15 +65,14 @@ export function FeedbackForm({
     setFeedbackJson(
       JSON.stringify(
         {
-          summary: `Validation score ${prefillValidation.score}/100`,
+          summary:
+            typeof prefillValidation.evidence?.reasoning === "string" &&
+            prefillValidation.evidence.reasoning.trim()
+              ? prefillValidation.evidence.reasoning
+              : `Validation score ${prefillValidation.score}/100`,
           validation: {
             requestHash: prefillValidation.requestHash,
             responseHash: prefillValidation.responseHash,
-            score: prefillValidation.score,
-            reasoning:
-              typeof prefillValidation.evidence?.reasoning === "string"
-                ? prefillValidation.evidence.reasoning
-                : undefined,
             txHash: prefillValidation.txHash,
           },
         },
@@ -110,6 +109,12 @@ export function FeedbackForm({
         if (!walletClient) {
           return { error: "Connect your wallet" };
         }
+        const account = walletClient.account;
+        const clientAddress =
+          typeof account === "string" ? account : account?.address;
+        if (!clientAddress) {
+          return { error: "Wallet account is unavailable." };
+        }
 
         run(async () => {
           if (!canSubmitFeedback) {
@@ -132,6 +137,7 @@ export function FeedbackForm({
           const prepared = await prepareFeedback({
             chainId: clientCfg.chain.id,
             agentId: erc8004AgentId,
+            clientAddress,
             value: parseFloat(valueStr),
             tag1,
             tag2,
@@ -143,7 +149,8 @@ export function FeedbackForm({
           if (
             !prepared.value ||
             prepared.valueDecimals === undefined ||
-            !prepared.feedbackURI
+            !prepared.feedbackURI ||
+            !prepared.feedbackHash
           ) {
             return { error: "Feedback preparation failed." };
           }
@@ -162,7 +169,7 @@ export function FeedbackForm({
                 prepared.tag2 ?? "",
                 "",
                 prepared.feedbackURI,
-                "0x0000000000000000000000000000000000000000000000000000000000000000",
+                prepared.feedbackHash,
               ],
               chain: walletClient.chain,
               account: walletClient.account!,
@@ -170,9 +177,14 @@ export function FeedbackForm({
             await walletClient.waitForTransactionReceipt({ hash });
             router.refresh();
             return { txHash: hash };
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error("Error submitting feedback:", error);
-            return { error: error?.message ?? "An unknown error occurred." };
+            return {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "An unknown error occurred.",
+            };
           }
         });
       }}

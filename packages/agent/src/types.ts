@@ -169,6 +169,9 @@ export interface IpfsUploadResult {
 export type AgentConfig = {
   rpcUrl?: string;
   chain: Chain;
+  /* Optional block number to use as the `fromBlock` when querying past events from the registries. */
+  registryFromBlock?: bigint;
+  /* Optional addresses for the registries and verifier. If not provided, will use the defaults for the chain from `network.ts`. */
   registryAddress?: Address;
   /** Our TeeVerifier deployment for attested TEE oracle signatures. */
   teeVerifierAddress?: Address;
@@ -394,6 +397,7 @@ export type ResolvedAgentProofData = {
 
 export type PrepareFeedbackParams = {
   agentId: string;
+  clientAddress: Address;
   value: number;
   tag1: string;
   tag2: string;
@@ -409,6 +413,7 @@ export type PrepareFeedbackResult = {
   tag1: string;
   tag2: string;
   feedbackURI: string;
+  feedbackHash: Hex;
 };
 
 // ─── Validation ───────────────────────────────────────────────────────────────

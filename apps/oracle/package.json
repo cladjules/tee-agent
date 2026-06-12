@@ -1,5 +1,5 @@
 {
-  "name": "@tee-agent/oracle",
+  "name": "@tee-agent/oracle-app",
   "version": "0.1.0",
   "private": true,
   "description": "TEE re-encryption oracle server for ERC-7857 AgentNFT secure transfers, deployed to Phala Cloud (Intel TDX)",
@@ -17,7 +17,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@tee-agent/server": "*",
+    "@tee-agent/oracle": "*",
     "ethers": "6.13.1",
     "zod": "^4.4.3"
   },

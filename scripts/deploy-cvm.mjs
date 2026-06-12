@@ -38,9 +38,9 @@ const sourceHashInputs = [
   "packages/agent/package.json",
   "packages/agent/tsconfig.json",
   "packages/agent/src",
-  "packages/server/package.json",
-  "packages/server/tsconfig.json",
-  "packages/server/src",
+  "packages/oracle/package.json",
+  "packages/oracle/tsconfig.json",
+  "packages/oracle/src",
 ];
 
 function usage() {
@@ -362,7 +362,8 @@ function readImageState() {
           ? parsed.image.trim()
           : undefined,
       deploymentsSha:
-        typeof parsed.deploymentsSha === "string" && parsed.deploymentsSha.trim()
+        typeof parsed.deploymentsSha === "string" &&
+        parsed.deploymentsSha.trim()
           ? parsed.deploymentsSha.trim()
           : undefined,
       sourceSha:
@@ -370,11 +371,13 @@ function readImageState() {
           ? parsed.sourceSha.trim()
           : undefined,
       dockerUsername:
-        typeof parsed.dockerUsername === "string" && parsed.dockerUsername.trim()
+        typeof parsed.dockerUsername === "string" &&
+        parsed.dockerUsername.trim()
           ? parsed.dockerUsername.trim()
           : undefined,
       dockerRegistry:
-        typeof parsed.dockerRegistry === "string" && parsed.dockerRegistry.trim()
+        typeof parsed.dockerRegistry === "string" &&
+        parsed.dockerRegistry.trim()
           ? parsed.dockerRegistry.trim()
           : undefined,
     };
