@@ -18,6 +18,78 @@ endpoint printed by `npm run oracle:deploy`, not to the dashboard URL.
 
 ---
 
+## Trust Passport For AI Agents
+
+Tee Agent gives every AI agent a portable on-chain trust passport on Arbitrum:
+identity, encrypted private data, verifiable execution, validation results, and
+feedback that can be checked by any app or agent.
+
+AI agents are starting to own wallets, call tools, and make decisions for users.
+The missing piece is trust. A user or another agent should be able to answer:
+
+- Who owns this agent?
+- What services does it expose?
+- Was its output produced by the registered TEE oracle?
+- Has another validator checked the result?
+- Is the feedback genuine or just self-reported noise?
+
+Tee Agent answers those questions with ERC-8004 identity/reputation,
+ERC-7857 encrypted agent data, Phala Intel TDX execution, Automata DCAP
+verification, and simple dashboard/API/MCP surfaces.
+
+### What Tee Agent Adds To ERC-8004
+
+ERC-8004 gives agents a common identity, validation, and reputation shape, but
+three practical gaps remain:
+
+- Validation is not globally deployable yet. There is an official identity and
+  reputation registry, but no confirmed global `ValidationRegistry` singleton
+  across the networks this project targets.
+- Reputation feedback is easy to spam. A feedback provider can submit feedback,
+  but raw reputation entries are not Sybil-resistant on their own.
+- TEE providers are underused. In a basic ERC-8004 setup, the TEE is mostly a
+  validator. The agent's actual private skills, prompts, model config, and files
+  still need a secure execution path.
+
+Tee Agent fills those gaps with a deployed validation registry, a feedback loop
+that links feedback to validation-backed evidence, and ERC-7857 encrypted agent
+data. The Phala TDX oracle is not just a validation provider; it decrypts
+private agent data inside the TEE, runs the agent, validates outputs, handles
+transfer re-encryption, and produces proofs that can be checked on-chain.
+
+### Demo Flow
+
+1. Create or import an agent with public metadata, `teeOracle` service, and
+   encrypted private skills/files.
+2. Mint the agent on Arbitrum Sepolia as an ERC-7857 NFT linked to ERC-8004
+   identity.
+3. Run the agent through its Phala CVM oracle. The owner signs the request; the
+   oracle decrypts private data only inside the TEE.
+4. Request validation on-chain. The validator checks the run and submits a
+   response with a TDX quote bound to the validation data.
+5. Give feedback through ERC-8004 reputation using a feedback URI that embeds
+   the validation reference.
+6. Verify the feedback from the dashboard, `/api/verify`, or MCP. The verifier
+   decodes the feedback, reads the on-chain validation response, and confirms it
+   came from the configured `TeeVerifier`.
+
+### Why Arbitrum
+
+Arbitrum is the coordination layer for the agent passport. It stores ownership,
+identity, validation, reputation, and feedback commitments while heavy execution
+and private data stay off-chain in TEE and encrypted storage. This keeps the
+agent state public, composable, and cheap to verify while preserving private
+skills and model configuration.
+
+### What You Can Try
+
+- Dashboard: create, inspect, run, validate, give feedback, and verify agents.
+- MCP: let AI clients discover agents, prepare mint/validation/feedback
+  transactions, read reputation, and verify feedback.
+- SDK: integrate the same flows into any app without relying on the dashboard.
+
+---
+
 ## Deployed Contracts
 
 Use these contracts by default. You should not redeploy contracts unless you are
@@ -26,7 +98,7 @@ own contract set.
 
 | Network          | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           | From block |
 | ---------------- | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------: |
-| Arbitrum Sepolia |  `84532` | `0x09a9e28adfB46240EE4D53FAe0Dd0083944C35e9` | `0xbd40dcc5d4fCC224B77344Cc8CA4abBEcc83F6cE` | `0x528E0999B5db42783d08B577F5beb8637bA9e792` | `42524093` |
+| Arbitrum Sepolia | `421614` | `0x6F92CAD52c3786FE4ec0b0F4a07DEB65094f00a1` | `0x2f2b0b4cbda3069c1BBf894a0e4b3807a20bB0cf` | `0x2d2c758DA36110AC137c2c8b333db94D4D5ae66E` | `275691630` |
 
 Keep these values in root `deployments.json`; the SDK, oracle image, and hosted
 dashboard/indexer read from it.
@@ -439,6 +511,7 @@ that actually ran the oracle code.
 | `@tee-agent/contracts`  | Solidity contracts and deployment scripts for protocol development or optional custom deployments                                                     |
 | `@tee-agent/oracle-app` | Example oracle entries and Phala CVM deploy workspace                                                                                                 |
 | `@tee-agent/dashboard`  | Optional local Next.js dashboard; hosted UI is https://teeagent.xyz                                                                                   |
+| `@tee-agent/mcp`        | MCP server for AI clients to discover agents, prepare transactions, run signed oracle calls, and verify Tee Agent feedback                             |
 
 Main SDK subpaths:
 
@@ -460,6 +533,53 @@ TODO: Use 8004 TAP agents.
 ---
 
 ## Local Development
+
+### MCP Server
+
+The MCP server exposes Tee Agent tools to AI clients over stdio or Streamable
+HTTP.
+
+```bash
+npm run mcp:build
+npm run mcp:start
+```
+
+Configure your MCP client with:
+
+```json
+{
+  "mcpServers": {
+    "tee-agent": {
+      "command": "node",
+      "args": ["apps/mcp/dist/index.js"],
+      "env": {
+        "RPC_URL_ARBITRUM_SEPOLIA": "...",
+        "PINATA_JWT": "...",
+        "RPC_URL_ZERO_G": "...",
+        "INDEXER_URL_ZERO_G": "..."
+      }
+    }
+  }
+}
+```
+
+The MCP server never submits transactions or signs with a server wallet. Tools
+that mutate chain state return `tx.address`, `tx.functionName`, and `tx.args`
+for the caller to submit with their own wallet. `PINATA_JWT` and 0G env vars
+are only needed for metadata/private-blob uploads during prepare flows.
+
+For HTTP transport:
+
+```bash
+npm run mcp:start:http
+```
+
+The HTTP endpoint is `POST /mcp`; `GET /health` returns a simple status check.
+Set `MCP_HOST` and `PORT` when deploying outside localhost.
+
+The dashboard also exposes a Vercel-compatible endpoint at `POST /api/mcp`
+with `GET /api/mcp` as its health check. Set `MCP_API_KEY` only when you want
+to require `x-api-key` or `Authorization: Bearer ...` for access.
 
 ### Optional Local Dashboard
 

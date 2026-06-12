@@ -85,6 +85,17 @@ route decodes the ERC-8004 feedback file, reads the configured
 `ValidationRegistry`, and checks that the validation response came from the
 configured `TeeVerifier`.
 
+### MCP
+
+`apps/mcp` exposes MCP tools over stdio or Streamable HTTP. It provides tools
+for agent metadata, mint preparation/submission, agent lookup/listing, oracle
+health, `/run`, validation requests, oracle validation, feedback calldata
+preparation, feedback listing, feedback verification, service updates, and
+URI JSON reads. The MCP server does not sign with a server wallet or submit
+transactions; write-oriented tools return calldata for the caller to submit
+with their own wallet. Use `npm run mcp:start` for stdio and
+`npm run mcp:start:http` for HTTP (`POST /mcp`, `GET /health`).
+
 ### Oracle
 
 | Variable               | Required | Description                                                                                                                                                                                                                                           |

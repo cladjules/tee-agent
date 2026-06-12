@@ -1,0 +1,31 @@
+{
+  "name": "@tee-agent/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for operating Tee Agent agents, oracle runs, validation, feedback, and verification",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "tee-agent-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx src/index.ts",
+    "dev:http": "MCP_TRANSPORT=http tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tee-agent/agent": "*",
+    "viem": "^2.49.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.19.4",
+    "typescript": "^6.0.3"
+  }
+}

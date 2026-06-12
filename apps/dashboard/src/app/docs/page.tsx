@@ -46,6 +46,38 @@ export default function DocsPage() {
         </pre>
       </section>
       <FeatureStrip />
+      <section className="max-w-3xl space-y-4">
+        <div className="space-y-2">
+          <p className="font-mono text-xs uppercase tracking-wider text-violet-400">
+            MCP
+          </p>
+          <h2 className="text-2xl font-semibold text-slate-100">
+            Operate agents from AI clients
+          </h2>
+          <p className="text-sm leading-6 text-slate-500">
+            `@tee-agent/mcp` exposes stdio and Streamable HTTP tools for
+            creating metadata, minting, running oracles, requesting validation,
+            submitting feedback, and verifying feedback. Write-oriented tools
+            return calldata for the caller to submit with their own wallet.
+          </p>
+        </div>
+        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+          <code>{`{
+  "mcpServers": {
+    "tee-agent": {
+      "command": "node",
+      "args": ["apps/mcp/dist/index.js"]
+    }
+  }
+}`}</code>
+        </pre>
+        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+          <code>{`npm run mcp:start:http
+
+POST /mcp
+GET /health`}</code>
+        </pre>
+      </section>
       <ProcessDiagram />
       <DeveloperQuickstart />
     </div>

@@ -11,9 +11,11 @@
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@tanstack/react-query": "^5.100.14",
     "@tee-agent/agent": "*",
+    "@tee-agent/mcp": "*",
     "@upstash/redis": "^1.38.0",
     "next": "16.2.6",
     "react": "19.2.6",

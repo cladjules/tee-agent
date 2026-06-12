@@ -9,6 +9,7 @@
     "packages/agent",
     "packages/oracle",
     "apps/dashboard",
+    "apps/mcp",
     "apps/oracle",
     "contracts"
   ],
@@ -23,6 +24,11 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,sol,json,md}\"",
     "e2e:local": "node --import tsx __tests__/e2e.ts local",
     "e2e:arbitrumSepolia": "node --import tsx __tests__/e2e.ts arbitrumSepolia",
+    "mcp:build": "npm run build --workspace @tee-agent/mcp",
+    "mcp:dev": "npm run dev --workspace @tee-agent/mcp",
+    "mcp:http": "MCP_TRANSPORT=http npm run dev --workspace @tee-agent/mcp",
+    "mcp:start": "node apps/mcp/dist/index.js",
+    "mcp:start:http": "MCP_TRANSPORT=http node apps/mcp/dist/index.js",
     "oracle:image": "node scripts/push-oracle-image.mjs",
     "oracle:deploy": "node scripts/deploy-cvm.mjs"
   },
