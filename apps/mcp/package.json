@@ -20,12 +20,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tee-agent/agent": "*",
-    "viem": "^2.49.3",
+    "viem": "^2.52.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
-    "tsx": "^4.19.4",
+    "@types/node": "^25.9.3",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }
