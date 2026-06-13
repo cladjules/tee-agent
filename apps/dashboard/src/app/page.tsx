@@ -1,4 +1,3 @@
-import ContractAddresses from "@/components/ContractAddresses";
 import DeployCodeTeaser from "@/components/home/DeployCodeTeaser";
 import FeatureStrip from "@/components/home/FeatureStrip";
 import HomeHero from "@/components/home/HomeHero";
@@ -12,7 +11,6 @@ export default function HomePage() {
     <div className="space-y-16">
       <HomeHero />
       <RegisteredAgentsSection />
-      <ContractAddresses />
       <FeatureStrip />
       <InfrastructurePartners />
       <DeployCodeTeaser />

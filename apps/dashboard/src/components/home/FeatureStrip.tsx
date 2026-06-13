@@ -2,16 +2,16 @@ const FEATURES = [
   {
     badge: "ERC-8004",
     title: "Official agent identity",
-    body: "Deploy an ERC-8004 agent on the official registries, publish the teeOracle service on IPFS, and stay compatible with 8004scan.io.",
+    body: "Mint an ERC-8004 agent on the official registries, publish the teeOracle service on IPFS, and stay compatible with 8004scan.io.",
   },
   {
-    badge: "ValidationRegistry",
-    title: "TEE-backed reputation",
+    badge: "ERC-8004 - Validation Registry",
+    title: "Intel TDX - TEE-backed reputation",
     body: "Use a shared Validation Module with a TEE verifier/oracle to turn DCAP-backed results into Sybil-resistant feedback for the Reputation Module.",
   },
   {
-    badge: "ERC-7857 · TEE",
-    title: "Encrypted private skills",
+    badge: "ERC-7857",
+    title: "Intel TDX - TEE Encrypted private skills",
     body: "Encrypt agent data such as skills, prompts, and models so only your oracle can decode it, uploaded to 0G Storage, with secure re-encryption during ownership transfer.",
   },
 ] as const;

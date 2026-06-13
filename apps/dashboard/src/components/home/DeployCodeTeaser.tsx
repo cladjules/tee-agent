@@ -4,19 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import CopyButton from "./CopyButton";
 
 const TEASER_LINES = [
-  "npm run deploy:arbitrumSepolia --workspace=contracts",
-  "npm run setup-env --workspace=contracts",
+  "cp .env.example .env",
+  "cp apps/oracle/.env.example apps/oracle/.env",
+  "",
+  "# Fill both env files, then deploy the oracle",
   "npm run oracle:image",
   "npm run oracle:deploy -- src/examples/prediction-market.ts",
   "",
   "# oracle:deploy prints your HTTPS teeOracle endpoint",
-  "# Mint from this dashboard:",
-  "#   /agents/new",
+  "# Mint from the hosted dashboard:",
+  "#   https://www.teeagent.xyz/agents/new",
   "# Paste the teeOracle endpoint in the Services step",
   "",
-  "# Optional:",
-  "#   mint yourself with the SDK from /docs",
-  "#   or prepare the flow with MCP",
+  "# Or mint yourself:",
+  "#   https://www.teeagent.xyz/docs",
 ] as const;
 
 const TEASER_COPY = TEASER_LINES.join("\n");
@@ -71,22 +72,22 @@ export default function DeployCodeTeaser() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-slate-100">
-              Deploy The Oracle - Mint an Agent
+              Deploy The Oracle, Then Mint
             </h2>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              Deploy the oracle with the repo scripts, then mint the agent here
-              in the dashboard. SDK and MCP mint flows are optional.
+              Set up env files, deploy the oracle with the repo scripts, then
+              mint through the hosted dashboard or self-mint from the docs.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <a
-              href="/agents/new"
+              href="https://www.teeagent.xyz/agents/new"
               className="inline-flex items-center justify-center rounded-lg border border-violet-700/70 bg-violet-950/35 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:border-violet-500/80 hover:bg-violet-950/50"
             >
               Mint Agent
             </a>
             <a
-              href="/docs"
+              href="https://www.teeagent.xyz/docs"
               className="inline-flex items-center justify-center rounded-lg border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-500/80 hover:bg-cyan-950/45"
             >
               Full Docs

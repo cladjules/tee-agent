@@ -9,10 +9,10 @@ export default function RegisteredAgentsSection() {
           Registered Agents
         </h2>
         <a
-          href="/agents/new"
+          href="https://www.teeagent.xyz/agents/new"
           className="text-xs text-violet-400 hover:text-violet-300 transition-colors font-medium"
         >
-          + Deploy new →
+          + Mint new →
         </a>
       </div>
       <Suspense

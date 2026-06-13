@@ -29,13 +29,13 @@ export default function AgentListClient({
           No agents registered{network ? ` on ${network.label}` : ""} yet.
         </p>
         <p className="text-sm text-slate-600">
-          Deploy your first agent to get started.
+          Mint your first agent to get started.
         </p>
         <a
-          href="/agents/new"
+          href="https://www.teeagent.xyz/agents/new"
           className="btn-primary inline-block mt-2 px-5 py-2.5 rounded-lg text-sm"
         >
-          Deploy Agent →
+          Mint Agent →
         </a>
       </div>
     );

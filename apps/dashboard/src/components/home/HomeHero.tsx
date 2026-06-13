@@ -14,10 +14,10 @@ export default function HomeHero() {
         </p>
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <a
-            href="/agents/new"
+            href="https://www.teeagent.xyz/agents/new"
             className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm"
           >
-            Deploy Agent →
+            Mint Agent →
           </a>
           <a
             href="/docs"

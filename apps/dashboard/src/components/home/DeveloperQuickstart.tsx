@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
 import { CodeBlock, ProcessTag } from "./HomePrimitives";
 
-const DEPLOY_SNIPPET = `# Deploy contracts and write deployments.json
-npm run deploy:arbitrumSepolia --workspace=contracts
-npm run setup-env --workspace=contracts
+const DEPLOY_SNIPPET = `# Copy env examples
+cp .env.example .env
+cp apps/oracle/.env.example apps/oracle/.env
 
 # Copy an example oracle or create your own handler
 cp apps/oracle/src/examples/prediction-market.ts \\
   apps/oracle/src/prod/my-oracle.ts
 
-# Fill root .env and apps/oracle/.env, then deploy it
+# Fill both env files, then deploy the oracle
 npm run oracle:image
 npm run oracle:deploy -- src/prod/my-oracle.ts
 
@@ -216,12 +216,12 @@ export default function DeveloperQuickstart() {
       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
         <QuickstartGroup
           title="Launch An Agent"
-          description="Deploy the contracts and oracle, then mint the agent with ERC-721 metadata, ERC-8004 services, and ERC-7857 private data."
+          description="Deploy the oracle, then mint the agent with ERC-721 metadata, ERC-8004 services, and ERC-7857 private data."
         >
           <QuickstartStep
             step={1}
             title="Deploy"
-            description="Deploy contracts and one Phala CVM oracle through the repo scripts. oracle:deploy prints the HTTPS endpoint to use as teeOracle."
+            description="Deploy one Phala CVM oracle through the repo scripts. oracle:deploy prints the HTTPS endpoint to use as teeOracle."
             tag="Automata DCAP"
             code={DEPLOY_SNIPPET}
           />
