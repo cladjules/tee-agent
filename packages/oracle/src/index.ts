@@ -40,7 +40,7 @@
 
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { TappdClient, TappdInfoResponse } from "@phala/dstack-sdk";
+import { TappdClient, type InfoResponse, type TcbInfo } from "@phala/dstack-sdk";
 import { encrypt } from "eciesjs";
 import crypto from "node:crypto";
 import { ethers } from "ethers";
@@ -594,7 +594,7 @@ export async function startOracle<
    */
   async function tdxAttestation(reportDataCommitment: string): Promise<{
     proof: TdxProof;
-    appInfo: TappdInfoResponse | null;
+    appInfo: InfoResponse<TcbInfo> | null;
   }> {
     const reportData = new Uint8Array(64);
     reportData.set(ethers.getBytes(reportDataCommitment), 0);
@@ -608,7 +608,7 @@ export async function startOracle<
     return {
       proof: {
         type: "dstack-tdx",
-        quote: quoteResult.quote,
+        quote: quoteResult.quote as `0x${string}`,
         event_log: quoteResult.event_log,
         vm_config: (appInfo as any)?.vm_config,
         measurements: !appInfo?.tcb_info
