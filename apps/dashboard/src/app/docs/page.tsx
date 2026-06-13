@@ -20,7 +20,11 @@ export default function DocsPage() {
         </p>
       </section>
 
+      <FeatureStrip />
+      <ProcessDiagram />
+      <DeveloperQuickstart />
       <ContractAddresses />
+
       <section className="max-w-3xl space-y-4">
         <div className="space-y-2">
           <p className="font-mono text-xs uppercase tracking-wider text-cyan-400">
@@ -31,21 +35,20 @@ export default function DocsPage() {
           </h2>
           <p className="text-sm leading-6 text-slate-500">
             Feedback rows can be checked against the on-chain validation
-            registry by sending the `feedbackURI` to the dashboard verifier.
-            The verifier decodes the ERC-8004 feedback JSON, reads the
-            validation response, and confirms it came from the configured TEE
-            verifier.
+            registry by sending the `feedbackURI` to the dashboard verifier. The
+            verifier decodes the ERC-8004 feedback JSON, reads the validation
+            response, and confirms it came from the configured TEE verifier.
           </p>
         </div>
         <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
-          <code>{`await fetch("/api/verify", {
+          <code>{`await fetch("https://teeagent.xyz/api/verify", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({ feedbackURI }),
 });`}</code>
         </pre>
       </section>
-      <FeatureStrip />
+
       <section className="max-w-3xl space-y-4">
         <div className="space-y-2">
           <p className="font-mono text-xs uppercase tracking-wider text-violet-400">
@@ -62,7 +65,12 @@ export default function DocsPage() {
           </p>
         </div>
         <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
-          <code>{`{
+          <code>{`Hosted Streamable HTTP:
+POST https://teeagent.xyz/api/mcp`}</code>
+        </pre>
+        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
+          <code>{`Local stdio:
+{
   "mcpServers": {
     "tee-agent": {
       "command": "node",
@@ -71,15 +79,7 @@ export default function DocsPage() {
   }
 }`}</code>
         </pre>
-        <pre className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950 p-4 text-xs leading-5 text-slate-300">
-          <code>{`npm run mcp:start:http
-
-POST /mcp
-GET /health`}</code>
-        </pre>
       </section>
-      <ProcessDiagram />
-      <DeveloperQuickstart />
     </div>
   );
 }

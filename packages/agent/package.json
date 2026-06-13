@@ -31,7 +31,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@0gfoundation/0g-ts-sdk": "^1.2.8",
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.10",
     "eciesjs": "^0.5.0",
     "ethers": "6.13.1",
     "viem": "^2.52.2"

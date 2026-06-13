@@ -40,7 +40,11 @@
 
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { TappdClient, type InfoResponse, type TcbInfo } from "@phala/dstack-sdk";
+import {
+  DstackClient,
+  type InfoResponse,
+  type TcbInfo,
+} from "@phala/dstack-sdk";
 import { encrypt } from "eciesjs";
 import crypto from "node:crypto";
 import { ethers } from "ethers";
@@ -166,6 +170,96 @@ type TdxProof = {
     rtmr3: string;
   };
 };
+
+type QuoteResult = {
+  quote: string;
+  event_log: string;
+  vm_config?: string;
+};
+
+async function postLegacyTappdRpc<T>(
+  endpoint: string,
+  path: string,
+  payload: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(new URL(path, endpoint), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `${path} returned non-JSON HTTP ${response.status}: ${text.slice(0, 160)}`,
+    );
+  }
+  if (!response.ok) {
+    const message =
+      data !== null &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof data.error === "string"
+        ? data.error
+        : `HTTP ${response.status}`;
+    throw new Error(`${path} failed: ${message}`);
+  }
+  return data as T;
+}
+
+async function deriveLegacyTappdKey(
+  endpoint: string,
+  path: string,
+): Promise<string> {
+  const result = await postLegacyTappdRpc<{ key?: unknown }>(
+    endpoint,
+    "/prpc/Tappd.DeriveKey",
+    { path, subject: path },
+  );
+  if (typeof result.key !== "string" || !result.key) {
+    throw new Error("/prpc/Tappd.DeriveKey returned no key.");
+  }
+  return result.key;
+}
+
+async function getLegacyTappdQuote(
+  endpoint: string,
+  reportData: Uint8Array,
+): Promise<QuoteResult> {
+  let reportDataHex = Buffer.from(reportData).toString("hex");
+  if (reportDataHex.length > 128) {
+    throw new Error("Report data is too large; expected at most 64 bytes.");
+  }
+  reportDataHex = reportDataHex.padStart(128, "0");
+
+  const result = await postLegacyTappdRpc<{
+    quote?: unknown;
+    event_log?: unknown;
+    vm_config?: unknown;
+    error?: unknown;
+  }>(endpoint, "/prpc/Tappd.TdxQuote", {
+    report_data: reportDataHex,
+    hash_algorithm: "raw",
+  });
+  if (typeof result.error === "string") {
+    throw new Error(result.error);
+  }
+  if (typeof result.quote !== "string" || !result.quote) {
+    throw new Error("/prpc/Tappd.TdxQuote returned no quote.");
+  }
+  if (typeof result.event_log !== "string") {
+    throw new Error("/prpc/Tappd.TdxQuote returned no event_log.");
+  }
+  return {
+    quote: result.quote,
+    event_log: result.event_log,
+    ...(typeof result.vm_config === "string"
+      ? { vm_config: result.vm_config }
+      : {}),
+  };
+}
 
 function compareMeasurements(
   a: NonNullable<TdxProof["measurements"]>,
@@ -475,16 +569,39 @@ export async function startOracle<
   );
 
   // TEE key initialisation
-  // IS_SIMULATOR=true when running against the local tappd simulator (DSTACK_SIMULATOR_ENDPOINT set).
-  // The simulator supports deriveKey + tdxQuote but NOT info() — skip those calls in dev.
-  const IS_SIMULATOR = !!process.env.DSTACK_SIMULATOR_ENDPOINT;
-  const tappd = new TappdClient();
-  const keyResponse = await tappd.deriveKey(APP_NAME);
-  const wallet = new ethers.Wallet(
-    ethers.keccak256(ethers.toUtf8Bytes(keyResponse.key)),
-  );
+  // IS_SIMULATOR=true when running against a local simulator (DSTACK_SIMULATOR_ENDPOINT set).
+  // New dstack simulators support getKey + getQuote. The repo dev compose still
+  // uses phalanetwork/tappd-simulator, so we fall back to its /prpc/Tappd.* API.
+  const SIMULATOR_ENDPOINT = process.env.DSTACK_SIMULATOR_ENDPOINT?.trim();
+  const IS_SIMULATOR = !!SIMULATOR_ENDPOINT;
+  const dstack = new DstackClient();
+  let keyMode: "dstack" | "legacy-tappd-simulator" = "dstack";
+  let wallet: ethers.Wallet;
+  try {
+    const keyResponse = await dstack.getKey(
+      APP_NAME,
+      "tee-agent-oracle",
+      "secp256k1",
+    );
+    if (keyResponse.key.length !== 32) {
+      throw new Error(
+        `dstack getKey returned ${keyResponse.key.length} bytes; expected 32.`,
+      );
+    }
+    wallet = new ethers.Wallet(ethers.hexlify(keyResponse.key));
+  } catch (err) {
+    if (!SIMULATOR_ENDPOINT) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[oracle] dstack getKey unavailable on simulator, falling back to legacy tappd simulator API: ${message}`,
+    );
+    keyMode = "legacy-tappd-simulator";
+    const legacyKey = await deriveLegacyTappdKey(SIMULATOR_ENDPOINT, APP_NAME);
+    wallet = new ethers.Wallet(ethers.keccak256(ethers.toUtf8Bytes(legacyKey)));
+  }
   const signingKey = new ethers.SigningKey(wallet.privateKey);
   console.log(`[oracle] dstack app/key path: ${APP_NAME}`);
+  console.log(`[oracle] TEE key mode: ${keyMode}`);
   console.log(`[oracle] TEE signing address: ${wallet.address}`);
   console.log(`[oracle] transaction signer address: ${txSignerAddress}`);
 
@@ -598,8 +715,11 @@ export async function startOracle<
   }> {
     const reportData = new Uint8Array(64);
     reportData.set(ethers.getBytes(reportDataCommitment), 0);
-    const quoteResult = await tappd.tdxQuote(reportData, "raw");
-    const appInfo = IS_SIMULATOR ? null : await tappd.info();
+    const quoteResult =
+      keyMode === "legacy-tappd-simulator" && SIMULATOR_ENDPOINT
+        ? await getLegacyTappdQuote(SIMULATOR_ENDPOINT, reportData)
+        : await dstack.getQuote(reportData);
+    const appInfo = IS_SIMULATOR ? null : await dstack.info();
 
     if (appInfo) {
       delete (appInfo.tcb_info as any).app_compose; // redundant
@@ -610,7 +730,7 @@ export async function startOracle<
         type: "dstack-tdx",
         quote: quoteResult.quote as `0x${string}`,
         event_log: quoteResult.event_log,
-        vm_config: (appInfo as any)?.vm_config,
+        vm_config: quoteResult.vm_config ?? appInfo?.vm_config ?? "",
         measurements: !appInfo?.tcb_info
           ? undefined
           : {

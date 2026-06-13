@@ -1,7 +1,7 @@
 /**
  * 0G Storage upload / download helper.
  *
- * Uses @0gfoundation/0g-ts-sdk to store data on the 0G decentralised
+ * Uses @0gfoundation/0g-storage-ts-sdk to store data on the 0G decentralised
  * storage network. The Merkle root hash acts as the content identifier;
  * retrieval requires the 0G SDK or a compatible gateway.
  *
@@ -14,7 +14,7 @@
  *   INDEXER_URL_ZERO_G — Storage indexer URL
  */
 
-import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";
+import { Indexer, MemData } from "@0gfoundation/0g-storage-ts-sdk";
 import { ethers } from "ethers";
 import { RegistryError } from "../types.js";
 import type { AgentNFTEncryptedData } from "../types.js";

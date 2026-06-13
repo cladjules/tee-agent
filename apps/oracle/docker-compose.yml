@@ -46,7 +46,7 @@ services:
       - DSTACK_DOCKER_PASSWORD
       - DSTACK_DOCKER_REGISTRY
     volumes:
-      - /var/run/tappd.sock:/var/run/tappd.sock
+      - /var/run/dstack.sock:/var/run/dstack.sock
     restart: unless-stopped
 
   # dstack-verifier — trustless TDX attestation verifier (no Phala Cloud dependency)
