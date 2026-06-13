@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "build:deps": "npm run build --workspace @tee-agent/agent -- --force && npm run build --workspace @tee-agent/mcp -- --force",
+    "build": "npm run build:deps && next build --webpack",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

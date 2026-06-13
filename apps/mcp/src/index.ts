@@ -14,6 +14,7 @@ import {
   getNetworkConfigByChainId,
   NETWORK_CONFIG,
 } from "@tee-agent/agent/network";
+import type { NetworkConfig } from "@tee-agent/agent/network";
 import {
   decodeFeedbackURI,
   fetchFeedbackOverview,
@@ -60,6 +61,7 @@ const hexSchema = z.string().trim().regex(/^0x[0-9a-fA-F]+$/);
 const bytes32Schema = z.string().trim().regex(/^0x[0-9a-fA-F]{64}$/);
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 const chainSchema = z.number().int().positive().optional();
+const supportedNetworks = Object.values(NETWORK_CONFIG) as NetworkConfig[];
 const serviceSchema = z
   .object({
     name: z.string().trim().min(1),
@@ -198,7 +200,7 @@ server.registerTool(
   },
   async () =>
     result(
-      Object.values(NETWORK_CONFIG).map((network) => ({
+      supportedNetworks.map((network) => ({
         chainId: network.chain.id,
         name: network.label,
         isTestnet: network.isTestnet,
