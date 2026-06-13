@@ -9,17 +9,14 @@ const TEASER_LINES = [
   "npm run oracle:image",
   "npm run oracle:deploy -- src/examples/prediction-market.ts",
   "",
-  "const prepared = await prepareMint(config, {",
-  '    name: "Prediction Agent",',
-  '    services: [{ name: "teeOracle", endpoint: oracleUrl }],',
-  '    privateEntries: [{ name: "skill", data: systemPrompt }],',
-  "});",
-  "await walletClient.writeContract({",
-  "    address: prepared.contractAddress,",
-  '    functionName: "mint",',
-  "    args: [ownerAddress, prepared.publicMetadataUri,",
-  "      prepared.agentMetadataUri, prepared.intelligentData],",
-  "});",
+  "# oracle:deploy prints your HTTPS teeOracle endpoint",
+  "# Mint from this dashboard:",
+  "#   /agents/new",
+  "# Paste the teeOracle endpoint in the Services step",
+  "",
+  "# Optional:",
+  "#   mint yourself with the SDK from /docs",
+  "#   or prepare the flow with MCP",
 ] as const;
 
 const TEASER_COPY = TEASER_LINES.join("\n");
@@ -72,15 +69,29 @@ export default function DeployCodeTeaser() {
     <section ref={rootRef} className="min-w-0">
       <div className="glass-card min-w-0 overflow-hidden rounded-xl p-4 md:p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-slate-100">
-            Deploy The Oracle - Mint an Agent
-          </h2>
-          <a
-            href="/docs"
-            className="inline-flex items-center justify-center rounded-lg border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-500/80 hover:bg-cyan-950/45"
-          >
-            Full Docs
-          </a>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-slate-100">
+              Deploy The Oracle - Mint an Agent
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Deploy the oracle with the repo scripts, then mint the agent here
+              in the dashboard. SDK and MCP mint flows are optional.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/agents/new"
+              className="inline-flex items-center justify-center rounded-lg border border-violet-700/70 bg-violet-950/35 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:border-violet-500/80 hover:bg-violet-950/50"
+            >
+              Mint Agent
+            </a>
+            <a
+              href="/docs"
+              className="inline-flex items-center justify-center rounded-lg border border-cyan-800/70 bg-cyan-950/30 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-cyan-500/80 hover:bg-cyan-950/45"
+            >
+              Full Docs
+            </a>
+          </div>
         </div>
 
         <div className="rounded-lg border border-slate-800 bg-[#050712] shadow-[inset_0_1px_0_rgba(148,163,184,0.08)]">
@@ -120,7 +131,7 @@ export default function DeployCodeTeaser() {
                   <span className="min-w-0">
                     <code
                       aria-label={line || "blank line"}
-                      className={`whitespace-pre ${index > 4 ? "text-slate-400" : ""}`}
+                      className={`whitespace-pre ${index > 5 ? "text-slate-400" : ""}`}
                     >
                       {visibleText}
                     </code>

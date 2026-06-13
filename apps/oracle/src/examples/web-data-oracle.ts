@@ -11,7 +11,7 @@
  * Payload (caller-supplied at run time):
  *   { url: string, selector?: string }
  *
- * Base Sepolia dev:
+ * Arbitrum Sepolia dev:
  *   npm run dev:web-fetcher            # from apps/oracle/
  *
  * Deploy to Phala Cloud:

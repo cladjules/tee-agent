@@ -20,22 +20,6 @@ export default defineConfig({
     },
   },
   chainDescriptors: {
-    84532: {
-      name: "Base Sepolia",
-      blockExplorers: {
-        etherscan: {
-          url: "https://sepolia.basescan.org",
-        },
-      },
-    },
-    8453: {
-      name: "Base",
-      blockExplorers: {
-        etherscan: {
-          url: "https://basescan.org",
-        },
-      },
-    },
     421614: {
       name: "Arbitrum Sepolia",
       blockExplorers: {
@@ -84,20 +68,6 @@ export default defineConfig({
       chainId: 31337,
       url: configVariable("LOCAL_RPC_URL"),
       accounts: [configVariable("TESTNET_PRIVATE_KEY")],
-    },
-    baseSepolia: {
-      type: "http",
-      chainType: "op",
-      chainId: 84532,
-      url: configVariable("RPC_URL_BASE_SEPOLIA"),
-      accounts: [configVariable("TESTNET_PRIVATE_KEY")],
-    },
-    base: {
-      type: "http",
-      chainType: "op",
-      chainId: 8453,
-      url: configVariable("RPC_URL_BASE"),
-      accounts: [configVariable("MAINNET_PRIVATE_KEY")],
     },
     arbitrumSepolia: {
       type: "http",

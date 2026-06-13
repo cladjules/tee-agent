@@ -606,7 +606,7 @@ export async function startOracle<
   console.log(`[oracle] transaction signer address: ${txSignerAddress}`);
 
   // ─── Network configuration ────────────────────────────────────────────────────
-  // Set NETWORK=arbitrumSepolia, baseSepolia, or base.
+  // Set NETWORK=arbitrumSepolia.
   // chainId and Identity Registry address are derived statically — no RPC call needed.
   const { chainId, isTestnet } = networkConfig;
   const identityRegistryAddress = networkConfig.identityRegistryAddress;

@@ -47,8 +47,6 @@ if (
 const chainNames = {
   31337: "local",
   421614: "arbitrumSepolia",
-  8453: "base",
-  84532: "arbitrumSepolia",
 };
 
 // Map Ignition module keys → shared deployment contract keys
@@ -193,7 +191,7 @@ function selectDeployments(entries) {
 
   if (!hasChainArbitrumSepolia && arbitrumSepoliaNamed.length > 1) {
     throw new Error(
-      "ARBITRUM_SEPOLIA_ORACLE must be local or remote when both Base Sepolia deployment modes exist.",
+      "ARBITRUM_SEPOLIA_ORACLE must be local or remote when both Arbitrum Sepolia deployment modes exist.",
     );
   }
 

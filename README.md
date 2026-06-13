@@ -96,8 +96,8 @@ Use these contracts by default. You should not redeploy contracts unless you are
 changing the protocol, testing a local simulator, or intentionally running your
 own contract set.
 
-| Network          | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           | From block |
-| ---------------- | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------: |
+| Network          | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           |  From block |
+| ---------------- | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ----------: |
 | Arbitrum Sepolia | `421614` | `0x83eF896Fc482EdDf5ff812bd6b20f552e352BDF7` | `0xa46fD4879c3bD188d9dd7E9d61bc801731cBdc9f` | `0xc57fA5321F7fc2bD60bb889527AF0a26D9d2Af93` | `276646275` |
 
 Keep these values in root `deployments.json`; the SDK, oracle image, and hosted
@@ -186,9 +186,9 @@ cp apps/oracle/.env.example apps/oracle/.env
 
 Fill the required oracle values:
 
-| Scope  | Required                                                                                                                                                                                                                                                                               |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Oracle | `NETWORK`, `PRIVATE_KEY`, matching network RPC (`RPC_URL_BASE_SEPOLIA`, `RPC_URL_ARBITRUM_SEPOLIA`, or `RPC_URL_BASE`), `RPC_URL_ZERO_G`, `INDEXER_URL_ZERO_G`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_VALIDATION_MODEL`, `DSTACK_VERIFIER_URL`; `TAVILY_API_KEY` when using web research |
+| Scope  | Required                                                                                                                                                                                                             |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Oracle | `NETWORK`, `PRIVATE_KEY`, `RPC_URL_ARBITRUM_SEPOLIA`, `RPC_URL_ZERO_G`, `INDEXER_URL_ZERO_G`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_VALIDATION_MODEL`, `DSTACK_VERIFIER_URL`; `TAVILY_API_KEY` when using web research |
 
 `PRIVATE_KEY` on the oracle is the gas / validation signer for the oracle
 process. It is not the wallet that owns every agent. Agent owners still sign
@@ -511,7 +511,7 @@ that actually ran the oracle code.
 | `@tee-agent/contracts`  | Solidity contracts and deployment scripts for protocol development or optional custom deployments                                                     |
 | `@tee-agent/oracle-app` | Example oracle entries and Phala CVM deploy workspace                                                                                                 |
 | `@tee-agent/dashboard`  | Optional local Next.js dashboard; hosted UI is https://teeagent.xyz                                                                                   |
-| `@tee-agent/mcp`        | MCP server for AI clients to discover agents, prepare transactions, run signed oracle calls, and verify Tee Agent feedback                             |
+| `@tee-agent/mcp`        | MCP server for AI clients to discover agents, prepare transactions, run signed oracle calls, and verify Tee Agent feedback                            |
 
 Main SDK subpaths:
 
@@ -653,30 +653,26 @@ manually.
 
 ### `apps/oracle/.env.example`
 
-| Name                       | Required                     | Description                                             |
-| -------------------------- | ---------------------------- | ------------------------------------------------------- |
-| `NETWORK`                  | Yes                          | `arbitrumSepolia`, `baseSepolia`, or `base`             |
-| `RPC_URL_BASE`             | If `NETWORK=base`            | Base mainnet RPC                                        |
-| `RPC_URL_BASE_SEPOLIA`     | If `NETWORK=baseSepolia`     | Base Sepolia RPC                                        |
-| `RPC_URL_ARBITRUM_SEPOLIA` | If `NETWORK=arbitrumSepolia` | Arbitrum Sepolia RPC                                    |
-| `PRIVATE_KEY`              | Yes                          | Oracle gas / validation signer; not the agent owner key |
-| `LLM_API_KEY`              | Yes                          | LLM provider key for example handlers and `/validate`   |
-| `LLM_API_BASE`             | Yes                          | OpenAI-compatible API base                              |
-| `LLM_VALIDATION_MODEL`     | Yes                          | Model used by `/validate`                               |
-| `TAVILY_API_KEY`           | Web research                 | Tavily key for prediction questions without url         |
-| `RPC_URL_ZERO_G`           | Yes                          | 0G Storage EVM RPC                                      |
-| `INDEXER_URL_ZERO_G`       | Yes                          | 0G Storage indexer                                      |
-| `PORT`                     | Yes                          | Oracle HTTP port; Phala compose uses `3001`             |
-| `DSTACK_VERIFIER_URL`      | Yes                          | dstack verifier sidecar URL used by `/verify`           |
+| Name                       | Required     | Description                                             |
+| -------------------------- | ------------ | ------------------------------------------------------- |
+| `NETWORK`                  | Yes          | `arbitrumSepolia`                                       |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Yes          | Arbitrum Sepolia RPC                                    |
+| `PRIVATE_KEY`              | Yes          | Oracle gas / validation signer; not the agent owner key |
+| `LLM_API_KEY`              | Yes          | LLM provider key for example handlers and `/validate`   |
+| `LLM_API_BASE`             | Yes          | OpenAI-compatible API base                              |
+| `LLM_VALIDATION_MODEL`     | Yes          | Model used by `/validate`                               |
+| `TAVILY_API_KEY`           | Web research | Tavily key for prediction questions without url         |
+| `RPC_URL_ZERO_G`           | Yes          | 0G Storage EVM RPC                                      |
+| `INDEXER_URL_ZERO_G`       | Yes          | 0G Storage indexer                                      |
+| `PORT`                     | Yes          | Oracle HTTP port; Phala compose uses `3001`             |
+| `DSTACK_VERIFIER_URL`      | Yes          | dstack verifier sidecar URL used by `/verify`           |
 
 ### `apps/dashboard/.env.example` (optional local dashboard)
 
 | Name                                   | Required      | Description                                               |
 | -------------------------------------- | ------------- | --------------------------------------------------------- |
 | `PORT`                                 | Yes           | Local dashboard port                                      |
-| `RPC_URL_BASE`                         | Network       | Server-side Base RPC for actions, indexing, cron          |
-| `RPC_URL_BASE_SEPOLIA`                 | Network       | Server-side Base Sepolia RPC for actions, indexing, cron  |
-| `RPC_URL_ARBITRUM_SEPOLIA`             | Network       | Server-side Arbitrum Sepolia RPC for actions and indexing |
+| `RPC_URL_ARBITRUM_SEPOLIA`             | Yes           | Server-side Arbitrum Sepolia RPC for actions and indexing |
 | `PRIVATE_KEY`                          | Yes           | Backend signer for uploads and validation automation      |
 | `VALIDATION_ORACLE_URLS`               | Validation    | Comma-separated `teeOracle` URLs this worker owns         |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect | WalletConnect project id                                  |
@@ -693,10 +689,8 @@ manually.
 | -------------------------- | -------- | ------------------------------- |
 | `TESTNET_PRIVATE_KEY`      | Yes      | Deployer key on Testnet         |
 | `MAINNET_PRIVATE_KEY`      | Yes      | Deployer key on Mainnet         |
-| `RPC_URL_BASE_SEPOLIA`     | Network  | Base Sepolia deployment RPC     |
-| `RPC_URL_ARBITRUM_SEPOLIA` | Network  | Arbitrum Sepolia deployment RPC |
-| `RPC_URL_BASE`             | Network  | Base mainnet deployment RPC     |
-| `EXPLORER_API_KEY`         | No       | Basescan verification API key   |
+| `RPC_URL_ARBITRUM_SEPOLIA` | Yes      | Arbitrum Sepolia deployment RPC |
+| `EXPLORER_API_KEY`         | No       | Arbiscan verification API key   |
 
 ---
 

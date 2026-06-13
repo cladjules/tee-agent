@@ -97,7 +97,7 @@ function Footer() {
         <span className="font-mono">
           Tee Agent <span className="text-violet-800 mx-1">·</span> ERC-7857{" "}
           <span className="text-violet-800 mx-1">·</span> ERC-8004{" "}
-          <span className="text-violet-800 mx-1">·</span> Base
+          <span className="text-violet-800 mx-1">·</span> Arbitrum
         </span>
         <div className="flex items-center gap-4">
           <a
@@ -109,12 +109,12 @@ function Footer() {
             GitHub ↗
           </a>
           <a
-            href="https://base.org"
+            href="https://arbitrum.io"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-400 transition-colors"
           >
-            Base
+            Arbitrum
           </a>
           <a
             href="https://phala.network"

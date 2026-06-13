@@ -27,32 +27,6 @@ export const NETWORK_CONFIG = {
     openseaUrl: "https://testnets.opensea.io/assets/arbitrum-sepolia",
     rpcEnvVar: "RPC_URL_ARBITRUM_SEPOLIA",
   },
-  // base: {
-  //   chain: base,
-  //   chainId: 8453n,
-  //   isTestnet: false,
-  //   label: "Base",
-  //   identityRegistryAddress: IDENTITY_REGISTRY.mainnet,
-  //   reputationRegistryAddress: REPUTATION_REGISTRY.mainnet,
-  //   explorerUrl: "https://basescan.org",
-  //   erc8004ScanUrl: "https://8004scan.io",
-  //   erc8004ChainSlug: "base",
-  //   openseaUrl: "https://opensea.io/assets/base",
-  //   rpcEnvVar: "RPC_URL_BASE",
-  // },
-  // baseSepolia: {
-  //   chain: baseSepolia,
-  //   chainId: 84532n,
-  //   isTestnet: true,
-  //   label: "Base Sepolia",
-  //   identityRegistryAddress: IDENTITY_REGISTRY.testnet,
-  //   reputationRegistryAddress: REPUTATION_REGISTRY.testnet,
-  //   explorerUrl: "https://sepolia.basescan.org",
-  //   erc8004ScanUrl: "https://testnet.8004scan.io",
-  //   erc8004ChainSlug: "base-sepolia",
-  //   openseaUrl: "https://testnets.opensea.io/assets/base-sepolia",
-  //   rpcEnvVar: "RPC_URL_BASE_SEPOLIA",
-  // },
 } as const;
 
 export const LOCAL_NETWORK_CONFIG = {

@@ -12,7 +12,7 @@
  * Payload (caller-supplied at run time):
  *   { question: string, url?: string }
  *
- * Base Sepolia dev:
+ * Arbitrum Sepolia dev:
  *   npm run dev:prediction-market     # from apps/oracle/
  *
  * Deploy to Phala Cloud:

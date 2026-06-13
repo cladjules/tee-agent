@@ -21,8 +21,6 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  *
  * Run:
  *   npm run deploy:arbitrumSepolia
- *   npm run deploy:baseSepolia
- *   npm run deploy:base
  */
 export default buildModule("TeeAgent", (m) => {
   const deployer = m.getAccount(0);

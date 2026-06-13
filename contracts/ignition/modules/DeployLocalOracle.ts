@@ -1,7 +1,7 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
- * Deploys Base Sepolia development contracts for a locally running oracle.
+ * Deploys Arbitrum Sepolia development contracts for a locally running oracle.
  *
  * This path intentionally deploys a separate AgentRegistry/TeeVerifier pair
  * wired to MockDcapAttestation so the local tappd simulator can exercise the

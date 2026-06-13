@@ -14,8 +14,6 @@
     "deploy:arbitrumSepolia": "npm run deploy:arbitrumSepolia:remoteOracle",
     "deploy:arbitrumSepolia:remoteOracle": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network arbitrumSepolia --verify --reset --deployment-id arbitrum-sepolia-remote-oracle --parameters ignition/parameters.testnet.json && ARBITRUM_SEPOLIA_ORACLE=remote npm run setup-env",
     "deploy:arbitrumSepolia:localOracle": "yes | hardhat ignition deploy ignition/modules/DeployLocalOracle.ts --network arbitrumSepolia --verify --reset --deployment-id arbitrum-sepolia-local-oracle --parameters ignition/parameters.localOracle.json && ARBITRUM_SEPOLIA_ORACLE=local npm run setup-env",
-    "deploy:base": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network base --verify --reset --parameters ignition/parameters.mainnet.json && npm run setup-env",
-    "deploy:baseSepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network baseSepolia --verify --reset --deployment-id arbitrum-sepolia-remote-oracle --parameters ignition/parameters.testnet.json && npm run setup-env",
     "setup-env": "node scripts/setup-env.mjs",
     "setup-env:arbitrumSepolia:remoteOracle": "ARBITRUM_SEPOLIA_ORACLE=remote npm run setup-env",
     "setup-env:arbitrumSepolia:localOracle": "ARBITRUM_SEPOLIA_ORACLE=local npm run setup-env"

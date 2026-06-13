@@ -28,8 +28,6 @@ services:
       - APP_NAME
       # Required
       - NETWORK
-      - RPC_URL_BASE
-      - RPC_URL_BASE_SEPOLIA
       - RPC_URL_ARBITRUM_SEPOLIA
       - PRIVATE_KEY
       - LLM_API_KEY
