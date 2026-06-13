@@ -154,10 +154,30 @@ package-lock.json
 .env
 .env.*
 !.env.example
+
+# Local provider/deploy state and credentials
 phala.toml
-apps/oracle/.phala/
+.phala/
+**/.phala/
+*.generated.yml
+*.generated.yaml
 .docker-ghcr/
+**/.docker*/config.json
 .oracle-image-state.json
+.vercel/
+
+# Private key / wallet material
+*.pem
+*.key
+*.p8
+*.p12
+*.crt
+*.csr
+keystore/
+wallet*.json
+*mnemonic*
+*private-key*
+*private-keys*
 
 # Hardhat
 /contracts/ignition/deployments

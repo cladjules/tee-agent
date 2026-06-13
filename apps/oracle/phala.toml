@@ -1,3 +1,0 @@
-name = "oracle"
-profile = "cladjuless-projects"
-compose_file = "docker-compose.yml"

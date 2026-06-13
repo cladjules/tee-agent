@@ -2,7 +2,7 @@
   "name": "@tee-agent/agent",
   "version": "0.1.0",
   "type": "module",
-  "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
+  "description": "Tee Agent Packages: Core libraries and utilities for building and running TEE-based agents, including ERC-7857 AgentNFT interactions, TDX re-encryption, and secure off-chain computation",
   "exports": {
     "./types": "./dist/types.js",
     "./network": "./dist/network.js",
@@ -33,7 +33,7 @@
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "^1.2.8",
     "eciesjs": "^0.5.0",
-    "ethers": "6.16.0",
+    "ethers": "6.13.1",
     "viem": "^2.49.3"
   }
 }
