@@ -98,7 +98,7 @@ own contract set.
 
 | Network          | Chain ID | AgentRegistry                                | TeeVerifier                                  | ValidationRegistry                           | From block |
 | ---------------- | -------: | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- | ---------: |
-| Arbitrum Sepolia | `421614` | `0x6F92CAD52c3786FE4ec0b0F4a07DEB65094f00a1` | `0x2f2b0b4cbda3069c1BBf894a0e4b3807a20bB0cf` | `0x2d2c758DA36110AC137c2c8b333db94D4D5ae66E` | `275691630` |
+| Arbitrum Sepolia | `421614` | `0x83eF896Fc482EdDf5ff812bd6b20f552e352BDF7` | `0xa46fD4879c3bD188d9dd7E9d61bc801731cBdc9f` | `0xc57fA5321F7fc2bD60bb889527AF0a26D9d2Af93` | `276646275` |
 
 Keep these values in root `deployments.json`; the SDK, oracle image, and hosted
 dashboard/indexer read from it.
