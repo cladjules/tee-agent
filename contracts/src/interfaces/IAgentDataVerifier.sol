@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.35;
 
 /// @notice Oracle type: TEE (trusted execution environment) or ZKP (zero-knowledge proof).

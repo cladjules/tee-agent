@@ -37,5 +37,6 @@
   },
   "overrides": {
     "@react-native-async-storage/async-storage": "npm:empty-module@0.0.2"
-  }
+  },
+  "license": "Apache-2.0"
 }

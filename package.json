@@ -41,11 +41,15 @@
     "turbo": "^2.9.18"
   },
   "overrides": {
+    "open-jsonrpc-provider": {
+      "axios": "1.16.0"
+    },
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.8.0",
     "viem": "^2.49.3"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "license": "Apache-2.0"
 }

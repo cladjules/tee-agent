@@ -11,13 +11,13 @@ Full-stack framework for deploying AI agents as sovereign on-chain entities. Eac
 - **Chains**: Arbitrum Sepolia (421614)
 - **SDK packages**: TypeScript 6.x, NodeNext module resolution (`.js` extensions in imports)
 - **Dashboard**: Next.js 16 App Router, React 19, Tailwind CSS 4, viem 2.x
-- **Oracle server**: Express 4.x, Phala `@phala/dstack-sdk`, Intel TDX enclave
+- **Oracle server**: Express 5.x, Phala `@phala/dstack-sdk`, Intel TDX enclave
 - **Oracle deployment**: Phala Cloud CVM via root `scripts/deploy-cvm.mjs`
 - **Blob storage**: Data URIs (`data:application/json;base64,…`) — no external storage dependency
-- **File storage**: `@0gfoundation/0g-ts-sdk` (0G Storage testnet) — for **encrypted ERC-7857 blobs only**
+- **File storage**: `@0gfoundation/0g-storage-ts-sdk` (0G Storage testnet) — for **encrypted ERC-7857 blobs only**
 - **Metadata storage**: Pinata IPFS — for `agentMetadataUri` (ERC-8004 registration JSON, `ipfs://` URIs)
 - **Encryption**: AES-256-GCM (content) + ECIES via `eciesjs` (key wrapping)
-- **Ethers**: 6.x — used in `apps/oracle` and `packages/agent/zero-g.ts` for 0G Storage signing
+- **Ethers**: 6.x — used in `apps/oracle` and `packages/agent/src/storage/zero-g.ts` for 0G Storage signing
 
 ## AI Model
 
@@ -28,7 +28,7 @@ this repository.
 
 ```
 packages/agent   — Types, encryption/decryption, ABIs, ZeroGStorageClient, AgentRegistry
-apps/dashboard       — Next.js 16 dashboard (Server Actions only, no API routes)
+apps/dashboard       — Next.js 16 dashboard (Server Actions plus public API routes for verify, MCP, and cron)
 apps/oracle          — Phala Cloud TDX re-encryption oracle server
 contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 ```
@@ -45,10 +45,10 @@ contracts/           — Solidity contracts, Hardhat Ignition modules, tests
 | Single data verifier interface                            | `TeeVerifier` implements `IAgentDataVerifier`. `AgentRegistry` stores the verifier address, calls it for ERC-7857 transfers, and passes oracle registration through it. Keep future verifier implementations behind the same interface.                                                                                                                                                                                                                                                   | May 2026 |
 | Remote TEE trust is verified on-chain                     | Remote oracle deployments use Automata DCAP from `TeeVerifier` to verify Intel TDX quotes on-chain. `initValidator` quotes bind `reportData` to the TEE-derived oracle key; validation quotes bind the agent id, request hash, and score. Arbitrum Sepolia remote params use Automata DCAP v1.0 (`0x95175096a9B74165BE0ac84260cc14Fc1c0EF5FF`) because a real Phala Cloud TDX quote that fails with `TCBR` on v1.1 succeeds on v1.0. Dashboard/oracle URLs are not trusted by themselves. | Jun 2026 |
 | ABI exports as JSON                                       | `packages/agent/src/abis/*.json` are the source of truth; `abis.ts` is a thin re-exporter. `gen-abis.mjs` writes the JSON files; `ReputationRegistry.json` is maintained manually from upstream.                                                                                                                                                                                                                                                                                          | May 2026 |
-| Server Actions only, no API routes                        | Next.js best practice for internal mutations/fetches                                                                                                                                                                                                                                                                                                                                                                                                                                      | May 2026 |
+| Server Actions for internal dashboard flows               | Internal mutations and app-triggered fetches use Server Actions. Public API routes are reserved for external surfaces: `/api/verify`, `/api/mcp`, and `/api/cron/sync-events`.                                                                                                                                                                                                                                                                                                            | May 2026 |
 | Browser wallet RPC for client flows                       | Client-side reads, gas estimates, receipt polling, and writes should use the connected wallet provider. Do not add `NEXT_PUBLIC_RPC_URL_*` or route browser wallet operations through Alchemy/app RPC. Server Actions/indexers still use server-side `RPC_URL_*` env because there is no wallet provider on the server.                                                                                                                                                                   | Jun 2026 |
 | Separate Arbitrum Sepolia local/remote oracle deployments | `remoteOracle` uses real Automata/DCAP for Phala CVMs. `localOracle` deploys a separate `MockDcapAttestation` contract for tappd simulator development. Root `deployments.json` has one active Arbitrum Sepolia contract set; switch manually with `ARBITRUM_SEPOLIA_ORACLE=remote` or `ARBITRUM_SEPOLIA_ORACLE=local`. No runtime profiles.                                                                                                                                              | Jun 2026 |
-| Homepage is explorer-first                                | Homepage order is hero, contract addresses, three feature boxes, registered agents, and a compact animated deploy teaser. Put full documentation components on `/docs`, not on the homepage. Agent cards stay compact: image, name, and `AgentRegistry #<tokenId>` only; do not show IPFS/metadata URIs, owner address, tags, or ERC-8004 ids on the homepage card.                                                                                                                       | Jun 2026 |
+| Homepage is explorer-first                                | Homepage order is hero, registered agents, feature boxes, infrastructure partners, and a compact animated oracle deploy teaser. Put full documentation components and contract addresses on `/docs`, not on the homepage. Agent cards stay compact: image, name, and `AgentRegistry #<tokenId>` only; do not show IPFS/metadata URIs, owner address, tags, or ERC-8004 ids on the homepage card.                                                                                          | Jun 2026 |
 | Raw `fetch` to oracle, no `PhalaOracleClient` wrapper     | Wrapper package (`packages/compute`) deleted — dashboard calls oracle directly                                                                                                                                                                                                                                                                                                                                                                                                            | May 2026 |
 | `packages/core` deleted                                   | Types moved into `packages/agent/src/types.ts`; network utils unused and removed                                                                                                                                                                                                                                                                                                                                                                                                          | May 2026 |
 | `AgentNFTClient` deleted                                  | Never called from any app; registry reads go through `AgentRegistry`                                                                                                                                                                                                                                                                                                                                                                                                                      | May 2026 |
@@ -192,29 +192,32 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 - [x] Phala Cloud TDX oracle for secure NFT transfers (key re-wrapping inside TEE)
 - [x] Dashboard: create, list, view, update agents
 - [x] Dashboard: decrypt intelligent data (owner-only, signature-gated)
+- [x] Dashboard/API feedback verification via `/api/verify` and per-feedback verify UI
+- [x] MCP server over stdio, HTTP, and dashboard `/api/mcp` for agent discovery and transaction preparation
 - [x] SDK two-party transfer helpers (`createTransferOffer`, `getTransferAccessPayloadsToSign`, `buildTransferAcceptance`, `buildTransferTxArgs`)
 - [x] Post-transfer private-data re-encryption flow for the new owner
 - [x] E2E coverage for mint, ERC-7857 transfer, ERC-8004 identity transfer, reputation, validation, and `teeOracle` service metadata
 - [x] Generic Phala CVM deploy script for any oracle entry under `apps/oracle/src`
+- [x] Arbitrum Sepolia contract set deployed and published in root `deployments.json`
 
 ### Pending / In Progress
 
 - [ ] Deploy production oracle CVMs and point agent `teeOracle` services at them
-- [ ] Deploy Arbitrum Sepolia contract set and publish addresses in root `deployments.json`
 - [ ] Dedicated oracle key rotation flow for changing an agent's `teeOracle`
 - [ ] Add `forge test` step to CI — `contracts` already has `npm run test:foundry`, but `.github/workflows/pr-checks.yml` does not run it yet
 - [ ] Validate explorer source verification for deployed Arbitrum Sepolia addresses — deploy scripts pass `--verify`, but deployed-address verification still needs confirmation
-- [ ] Support [`zaryab2000/create-8004-TAP-agent`](https://github.com/zaryab2000/create-8004-TAP-agent)
+- [ ] Use ERC-8004 TAP agents; evaluate [`zaryab2000/create-8004-TAP-agent`](https://github.com/zaryab2000/create-8004-TAP-agent)
+- [ ] Move remaining dashboard `writeContract` helpers into package registry/action clients
 - [ ] Support additional networks beyond Arbitrum
 - [ ] Add standalone approval flow — transfer/e2e covers the ERC-8004 approval needed for combined transfer, but dashboard allowance approval/revoke UI is still placeholder-only
 
 ## Known Issues & Follow-ups
 
-- [ ] `axios` (transitive via `open-jsonrpc-provider`) has high-severity CVEs — no fix available upstream
+- [x] `axios` from `open-jsonrpc-provider` is forced to 1.16.0 via root `overrides`; `npm ls` may still report it as an out-of-range override because upstream declares `^0.27.2`
 - [ ] `elliptic` (transitive via `@ethersproject/signing-key`) has a CVE — no fix available upstream
-- [ ] `@phala/dstack-sdk` is in the 0.1.x line; newer 0.x releases need manual review before upgrading
+- [ ] Phala CLI still brings `@phala/dstack-sdk` 0.5.7 transitively while the oracle runtime uses 0.5.8; keep both under review during Phala upgrades
 - [ ] Direct workspace dependencies use `eciesjs` 0.5.x; keep an eye on transitive older copies during dependency audits
-- [ ] `express` 4.x is pinned; 5.2.1 (major) available — needs approval before upgrade
+- [ ] `express` 4.x remains transitively via `@modelcontextprotocol/sdk` / `express-rate-limit`; direct oracle runtime uses `express` 5.2.1
 
 ## Conventions
 
@@ -228,7 +231,7 @@ Ignition deployment under `contracts/ignition/deployments/chain-31337`.
 - In React components, prefer `useMemo` for derived values with branching,
   parsing, filtering, or formatting. Do not use inline IIFE constants like
   `const value = (() => { ... })()` for render-time derivations.
-- All mutations and client-triggered data fetches use **Server Actions** in `apps/dashboard/src/lib/actions/` — no API routes for internal use
+- All internal mutations and client-triggered dashboard fetches use **Server Actions** in `apps/dashboard/src/lib/actions/`. API routes are allowed only for external/public surfaces such as `/api/verify`, `/api/mcp`, and Vercel cron.
 - Keep exactly one project README: root `README.md`. Do not add package READMEs
   or duplicate deploy/setup instructions elsewhere.
 - Client wallet flows must use `useWallet().getViemClients()`. That helper

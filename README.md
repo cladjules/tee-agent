@@ -7,7 +7,7 @@ Create AI agents as on-chain entities with:
 - Phala Cloud Intel TDX oracle execution
 - Automata DCAP-verified TEE proofs on-chain
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.35-blue)](https://soliditylang.org)
 
 Dashboard: **https://teeagent.xyz**
@@ -526,9 +526,6 @@ Main SDK subpaths:
 @tee-agent/agent/ops/validate
 @tee-agent/agent/typed-data
 ```
-
-TODO: Move remaining `writeContract` helpers into the package registry clients.
-TODO: Use 8004 TAP agents.
 
 ---
 
