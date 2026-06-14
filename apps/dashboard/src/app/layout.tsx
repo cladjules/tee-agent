@@ -7,10 +7,57 @@ import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
+const siteUrl = "https://www.teeagent.xyz";
+const siteTitle = "Tee Agent";
+const siteDescription =
+  "Mint, browse, run, validate, and verify ERC-8004 AI agents with ERC-7857 private skills secured by a Phala Cloud TDX oracle on Arbitrum.";
+
 export const metadata: Metadata = {
-  title: "Tee Agent — Dashboard",
-  description:
-    "Deploy, browse, and manage on-chain AI agents (ERC-7857 · ERC-8004).",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: siteTitle,
+    template: `%s | ${siteTitle}`,
+  },
+  description: siteDescription,
+  applicationName: siteTitle,
+  authors: [{ name: "Tee Agent" }],
+  creator: "Tee Agent",
+  publisher: "Tee Agent",
+  keywords: [
+    "Tee Agent",
+    "ERC-8004",
+    "ERC-7857",
+    "Arbitrum",
+    "Phala",
+    "TDX",
+    "TEE",
+    "AI agents",
+    "on-chain agents",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: siteTitle,
+    title: siteTitle,
+    description: siteDescription,
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Tee Agent dashboard for ERC-8004 agents secured by Phala TDX on Arbitrum.",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: siteTitle,
+    description: siteDescription,
+    images: ["/opengraph-image"],
+  },
   icons: {
     icon: [
       { url: "/favicon.svg", type: "image/svg+xml" },
